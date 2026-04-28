@@ -1,7 +1,6 @@
-"""
-Datenmodell für ComfyUI-Workflow-JSONs.
+"""Data model for ComfyUI workflow JSON files.
 
-Nur Datenstrukturen — keine Logik, keine I/O.
+Pure data structures — no logic, no I/O.
 """
 
 from __future__ import annotations
@@ -10,22 +9,22 @@ import re
 from dataclasses import dataclass, field
 from typing import Optional
 
-# Node-Typen die keine Datenfluss-Kanten haben (nur Kommentare/Dekoration).
-# Werden vom Layout-Algorithmus separat behandelt.
+# Node types that carry no dataflow edges (comments/decoration only).
+# Handled separately by the layout algorithm.
 DECORATIVE_TYPES: frozenset[str] = frozenset({
     "Note",
     "MarkdownNote",
     "Label (rgthree)",
 })
 
-# SetNode/GetNode (comfyui-kjnodes): virtuelle Verbindungen via widgets_values[0].
+# SetNode/GetNode (comfyui-kjnodes): virtual connections keyed by widgets_values[0].
 SET_NODE_TYPE = "SetNode"
 GET_NODE_TYPE = "GetNode"
 
-# Reroute: normaler Graph-Knoten (1 Input, 1 Output), kein Sonderfall im Algorithmus.
+# Reroute: ordinary graph node (1 input, 1 output), no special-casing needed.
 REROUTE_TYPE = "Reroute"
 
-# Sub-Graphen haben eine UUID als type-String.
+# Sub-graph nodes use a UUID string as their type.
 _UUID_PATTERN = re.compile(
     r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
 )
@@ -35,29 +34,29 @@ _UUID_PATTERN = re.compile(
 class NodeInput:
     name: str
     type: str
-    link: Optional[int]  # Link-ID oder None wenn nicht verbunden
+    link: Optional[int]  # link ID, or None when unconnected
 
 
 @dataclass
 class NodeOutput:
     name: str
     type: str
-    links: list[int] = field(default_factory=list)  # kann leer oder mehrfach sein
+    links: list[int] = field(default_factory=list)  # empty or fan-out to multiple
 
 
 @dataclass
 class Node:
     id: int
     type: str
-    pos: list[float]          # [x, y] — wird vom Layout überschrieben
-    size: list[float]         # [width, height] — normalisiert aus beiden JSON-Varianten
-    mode: int                 # 0 = aktiv, 4 = bypassed
-    order: int                # Ausführungsreihenfolge (wird nicht verändert)
+    pos: list[float]          # [x, y] — overwritten by the layout algorithm
+    size: list[float]         # [width, height] — normalised from both JSON variants
+    mode: int                 # 0 = active, 4 = bypassed
+    order: int                # execution order (never modified)
     inputs: list[NodeInput] = field(default_factory=list)
     outputs: list[NodeOutput] = field(default_factory=list)
-    title: Optional[str] = None  # gesetzter Titel überschreibt den type-Namen
+    title: Optional[str] = None  # user-set title; overrides the type name when present
 
-    # --- Geometrie-Shortcuts ---
+    # --- geometry shortcuts ---
 
     @property
     def x(self) -> float:
@@ -85,14 +84,14 @@ class Node:
 
     @property
     def label(self) -> str:
-        """Angezeigter Name: gesetzter Titel, sonst type."""
+        """Display name: user title if set, otherwise the type string."""
         return self.title if self.title else self.type
 
-    # --- Klassifizierung ---
+    # --- classification ---
 
     @property
     def is_decorative(self) -> bool:
-        """Dekorativer Node ohne Datenfluss (Note, MarkdownNote, Label)."""
+        """True for comment/decoration nodes that carry no dataflow (Note, MarkdownNote, Label)."""
         return self.type in DECORATIVE_TYPES
 
     @property
@@ -113,30 +112,30 @@ class Node:
 
     @property
     def is_subgraph(self) -> bool:
-        """Sub-Graph-Nodes haben eine UUID als type."""
+        """True when the type string is a UUID (inline sub-graph node)."""
         return bool(_UUID_PATTERN.match(self.type))
 
     @property
     def is_layout_node(self) -> bool:
-        """True für alle Nodes die im Sugiyama-Algorithmus positioniert werden."""
+        """True for all nodes positioned by the Sugiyama algorithm."""
         return not self.is_decorative
 
 
 @dataclass
 class Link:
     id: int
-    source_node: int   # Node-ID
-    source_slot: int   # Output-Slot-Index
-    target_node: int   # Node-ID
-    target_slot: int   # Input-Slot-Index
-    link_type: str     # z.B. "LATENT", "IMAGE", "MODEL"
+    source_node: int   # node ID
+    source_slot: int   # output slot index
+    target_node: int   # node ID
+    target_slot: int   # input slot index
+    link_type: str     # e.g. "LATENT", "IMAGE", "MODEL"
 
 
 @dataclass
 class Group:
     id: int
     title: str
-    bounding: list[float]   # [x, y, width, height] — wird nach dem Layout neu berechnet
+    bounding: list[float]   # [x, y, width, height] — recalculated after layout
     color: str = "#3f789e"
     font_size: int = 24
 
@@ -157,7 +156,7 @@ class Group:
         return self.bounding[3]
 
     def contains(self, node: Node) -> bool:
-        """Prüft ob ein Node innerhalb der Bounding-Box liegt."""
+        """Returns True if the node's origin point lies within this bounding box."""
         return (
             self.x <= node.x < self.x + self.width
             and self.y <= node.y < self.y + self.height
@@ -169,4 +168,4 @@ class Workflow:
     nodes: list[Node]
     links: list[Link]
     groups: list[Group]
-    raw: dict   # Original-JSON-Dict; wird für den Writer direkt modifiziert
+    raw: dict   # original JSON dict; mutated in place by the writer
