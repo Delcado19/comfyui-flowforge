@@ -1,6 +1,7 @@
 """Command-line interface for flowforge.
 
 Usage:
+    python flowforge.py                          # opens file picker
     python flowforge.py workflow.json
     python flowforge.py workflow.json -o arranged.json
     python flowforge.py workflow.json --inplace
@@ -20,7 +21,13 @@ from flowforge.model import Workflow
 def main() -> None:
     args = _parse_args()
 
-    input_path = Path(args.input)
+    if args.input is None:
+        input_path = _pick_file()
+        if input_path is None:
+            sys.exit(0)  # user cancelled the dialog
+    else:
+        input_path = Path(args.input)
+
     if not input_path.exists():
         sys.exit(f"Error: file not found: {input_path}")
 
@@ -40,9 +47,17 @@ def main() -> None:
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="flowforge",
-        description="Rearrange ComfyUI workflow nodes to minimise spaghetti connections.",
+        description=(
+            "Rearrange ComfyUI workflow nodes to minimise spaghetti connections. "
+            "Opens a file picker when called without arguments."
+        ),
     )
-    p.add_argument("input", help="Path to the input workflow JSON file.")
+    p.add_argument(
+        "input",
+        nargs="?",
+        default=None,
+        help="Path to the input workflow JSON file. Omit to open a file picker.",
+    )
     p.add_argument(
         "-o", "--output",
         metavar="PATH",
@@ -62,6 +77,39 @@ def _resolve_output(input_path: Path, args: argparse.Namespace) -> Path:
     if args.output:
         return Path(args.output)
     return input_path.with_stem(input_path.stem + "_layouted")
+
+
+# ---------------------------------------------------------------------------
+# File picker (tkinter — stdlib, native dialog on every OS)
+# ---------------------------------------------------------------------------
+
+def _pick_file() -> Path | None:
+    """Open a native file-picker dialog and return the chosen path, or None."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+    except ImportError:
+        sys.exit(
+            "Error: tkinter is not available on this system.\n"
+            "Install python3-tk (Linux) or pass the file path as an argument."
+        )
+
+    root = tk.Tk()
+    root.withdraw()          # hide the blank root window
+    root.attributes("-topmost", True)   # bring the dialog to the front
+    root.update()
+
+    path_str = filedialog.askopenfilename(
+        parent=root,
+        title="Select ComfyUI workflow",
+        filetypes=[
+            ("ComfyUI workflow", "*.json"),
+            ("All files", "*.*"),
+        ],
+    )
+    root.destroy()
+
+    return Path(path_str) if path_str else None
 
 
 # ---------------------------------------------------------------------------

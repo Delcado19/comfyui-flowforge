@@ -36,18 +36,21 @@ uv sync
 ## Usage
 
 ```
-python flowforge.py <input.json> [options]
+python flowforge.py [input] [options]
 ```
 
 | Option | Description |
 |---|---|
-| `input` | Path to the ComfyUI workflow JSON file. |
+| `input` | Path to the ComfyUI workflow JSON file. **Optional** — if omitted, a native file picker opens. |
 | `-o PATH`, `--output PATH` | Write result to this path. Default: `<input>_layouted.json` in the same directory. |
 | `--inplace` | Overwrite the input file directly. |
 
 ### Examples
 
 ```bash
+# Open the file picker (no argument needed)
+python flowforge.py
+
 # Produce a new file next to the original
 python flowforge.py my_workflow.json
 # → writes my_workflow_layouted.json
@@ -58,6 +61,8 @@ python flowforge.py my_workflow.json -o clean/my_workflow.json
 # Overwrite in place (make a backup first if you care about the original layout)
 python flowforge.py my_workflow.json --inplace
 ```
+
+The file picker uses Python's built-in `tkinter.filedialog` — no extra dependencies. It opens the native dialog on Windows and macOS, and a Tk-based dialog on Linux. On minimal Linux installs without Tk, install `python3-tk` via the system package manager.
 
 ---
 
