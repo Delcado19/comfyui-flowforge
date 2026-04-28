@@ -1,4 +1,4 @@
-![ComfyUI-Flow Forge](assets/social-preview.png)
+![ComfyUI FlowForge](assets/social-preview.png)
 
 # ComfyUI FlowForge
 
@@ -10,14 +10,14 @@ Automatically rearranges nodes in a [ComfyUI](https://github.com/comfyanonymous/
 
 ComfyUI workflows grow organically. Nodes get added wherever there is space, moved around during iteration, and groups get reorganised. The result is a canvas where connection lines criss-cross in every direction — hard to read and hard to debug.
 
-flowforge reads a workflow JSON, computes a clean left-to-right layout using a graph algorithm, and writes the result back. **Only node positions and group bounding boxes are changed.** Every connection, setting, model reference, and widget value is preserved exactly.
+FlowForge reads a workflow JSON, computes a clean left-to-right layout using a graph algorithm, and writes the result back. **Only node positions and group bounding boxes are changed.** Every connection, setting, model reference, and widget value is preserved exactly.
 
 ---
 
 ## Requirements
 
-- Python ≥ 3.10
-- [uv](https://docs.astral.sh/uv/) (recommended) or any Python environment manager
+- [uv](https://docs.astral.sh/uv/) — handles Python and all dependencies automatically
+- Python ≥ 3.10 (installed automatically by uv if not present)
 
 No external runtime dependencies — the layout algorithm uses the Python standard library only.
 
@@ -25,7 +25,19 @@ No external runtime dependencies — the layout algorithm uses the Python standa
 
 ## Installation
 
-Clone the repo and let uv create the virtual environment:
+### 1 — Install uv (once per machine)
+
+**Windows** (PowerShell):
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+```
+
+**macOS / Linux**:
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+### 2 — Clone and set up
 
 ```bash
 git clone https://github.com/Delcado19/comfyui-flowforge.git
@@ -33,61 +45,88 @@ cd comfyui-flowforge
 uv sync
 ```
 
+`uv sync` creates a `.venv` folder and installs everything. This takes about 10 seconds on first run.
+
+### 3 — Make the launcher executable (macOS / Linux only)
+
+```bash
+chmod +x flowforge.sh
+```
+
+---
+
+## Quick Start
+
+| Platform | How to launch |
+|---|---|
+| **Windows** | Double-click `flowforge.bat` |
+| **macOS** | `./flowforge.sh` in Terminal |
+| **Linux** | `./flowforge.sh` in Terminal |
+
+When launched without a file argument, a native file picker opens. Select any ComfyUI workflow `.json` file — FlowForge writes a `_layouted.json` file next to it and exits.
+
 ---
 
 ## Usage
 
 ```
-python flowforge.py [input] [options]
+flowforge.bat [input] [options]        # Windows
+./flowforge.sh [input] [options]       # macOS / Linux
 ```
 
-| Option                     | Description                                                                                    |
-| -------------------------- | ---------------------------------------------------------------------------------------------- |
-| `input`                    | Path to the ComfyUI workflow JSON file. **Optional** — if omitted, a native file picker opens. |
-| `-o PATH`, `--output PATH` | Write result to this path. Default: `<input>_layouted.json` in the same directory.             |
-| `--inplace`                | Overwrite the input file directly.                                                             |
+Or directly via uv on any platform:
+
+```bash
+uv run python flowforge.py [input] [options]
+```
+
+| Option | Description |
+|---|---|
+| `input` | Path to the ComfyUI workflow JSON file. **Optional** — if omitted, a native file picker opens. |
+| `-o PATH`, `--output PATH` | Write result to this path. Default: `<input>_layouted.json` in the same directory. |
+| `--inplace` | Overwrite the input file directly. |
 
 ### Examples
 
 ```bash
-# Open the file picker (no argument needed)
-python flowforge.py
+# Open the file picker
+./flowforge.sh
 
 # Produce a new file next to the original
-python flowforge.py my_workflow.json
+./flowforge.sh my_workflow.json
 # → writes my_workflow_layouted.json
 
 # Specify output path
-python flowforge.py my_workflow.json -o clean/my_workflow.json
+./flowforge.sh my_workflow.json -o clean/my_workflow.json
 
-# Overwrite in place (make a backup first if you care about the original layout)
-python flowforge.py my_workflow.json --inplace
+# Overwrite in place
+./flowforge.sh my_workflow.json --inplace
 ```
 
-The file picker uses Python's built-in `tkinter.filedialog` — no extra dependencies. It opens the native dialog on Windows and macOS, and a Tk-based dialog on Linux. On minimal Linux installs without Tk, install `python3-tk` via the system package manager.
+The file picker uses Python's built-in `tkinter.filedialog` — no extra dependencies. It opens the native dialog on Windows and macOS, and a Tk-based dialog on Linux. On minimal Linux installs without Tk, install `python3-tk` via your system package manager (`sudo apt install python3-tk` on Debian/Ubuntu).
 
 ---
 
 ## What Gets Changed
 
-| Field                    | Changed? | Details                                                |
-| ------------------------ | -------- | ------------------------------------------------------ |
-| `nodes[].pos`            | **Yes**  | Recomputed by the layout algorithm.                    |
-| `groups[].bounding`      | **Yes**  | Recalculated from the final node positions.            |
-| `extra.ds.offset`        | **Yes**  | Reset to `[0, 0]` so ComfyUI opens the result in view. |
-| `extra.ds.scale`         | **Yes**  | Reset to `1.0`.                                        |
-| `nodes[].size`           | No       | Node dimensions are read but never written back.       |
-| `links`                  | No       | All connections preserved exactly.                     |
-| `nodes[].widgets_values` | No       | All settings, prompts, model references preserved.     |
-| `nodes[].mode`           | No       | Active / bypassed state preserved.                     |
-| `nodes[].order`          | No       | Execution order preserved.                             |
-| All other fields         | No       | Colors, types, titles, properties — untouched.         |
+| Field | Changed? | Details |
+|---|---|---|
+| `nodes[].pos` | **Yes** | Recomputed by the layout algorithm. |
+| `groups[].bounding` | **Yes** | Recalculated from the final node positions. |
+| `extra.ds.offset` | **Yes** | Reset to `[0, 0]` so ComfyUI opens the result in view. |
+| `extra.ds.scale` | **Yes** | Reset to `1.0`. |
+| `nodes[].size` | No | Node dimensions are read but never written back. |
+| `links` | No | All connections preserved exactly. |
+| `nodes[].widgets_values` | No | All settings, prompts, model references preserved. |
+| `nodes[].mode` | No | Active / bypassed state preserved. |
+| `nodes[].order` | No | Execution order preserved. |
+| All other fields | No | Colors, types, titles, properties — untouched. |
 
 ---
 
 ## How It Works
 
-flowforge implements a six-phase pipeline:
+FlowForge implements a six-phase pipeline:
 
 ### Phase 1 — Group Membership
 
@@ -121,19 +160,19 @@ Each group's `bounding` rectangle is recalculated from the final positions of it
 
 All spacing is defined as module-level constants in `flowforge/layout.py` and can be adjusted:
 
-| Constant        | Default | Description                                             |
-| --------------- | ------- | ------------------------------------------------------- |
-| `NODE_H_GAP`    | 80 px   | Horizontal gap between node columns within a group.     |
-| `NODE_V_GAP`    | 40 px   | Vertical gap between nodes in the same column.          |
-| `GROUP_H_GAP`   | 200 px  | Horizontal gap between group columns.                   |
-| `GROUP_V_GAP`   | 100 px  | Vertical gap between groups stacked in the same column. |
-| `GROUP_PADDING` | 50 px   | Padding inside a group's bounding box.                  |
+| Constant | Default | Description |
+|---|---|---|
+| `NODE_H_GAP` | 80 px | Horizontal gap between node columns within a group. |
+| `NODE_V_GAP` | 40 px | Vertical gap between nodes in the same column. |
+| `GROUP_H_GAP` | 200 px | Horizontal gap between group columns. |
+| `GROUP_V_GAP` | 100 px | Vertical gap between groups stacked in the same column. |
+| `GROUP_PADDING` | 50 px | Padding inside a group's bounding box. |
 
 ---
 
 ## Known Limitations
 
-**Bidirectional inter-group dependencies.** Some workflows contain groups that both produce data for and consume data from the same other group or the ungrouped set (e.g. a "Reference input" group that preprocesses images but also receives conditioning from the main pipeline). This creates a cycle in the inter-group dependency graph. flowforge breaks cycles by appending the involved groups to the last column, which means a small number of cross-group links will point backwards. In practice this affects fewer than 20 % of links in such workflows and the overall layout is still significantly cleaner than the original.
+**Bidirectional inter-group dependencies.** Some workflows contain groups that both produce data for and consume data from the same other group or the ungrouped set (e.g. a "Reference input" group that preprocesses images but also receives conditioning from the main pipeline). This creates a cycle in the inter-group dependency graph. FlowForge breaks cycles by appending the involved groups to the last column, which means a small number of cross-group links will point backwards. In practice this affects fewer than 20 % of links in such workflows and the overall layout is still significantly cleaner than the original.
 
 **Group overlap in the original workflow.** If a node's original position lies inside multiple overlapping group bounding boxes, it is assigned to the first group in workflow order. This is the same behaviour as ComfyUI itself.
 
@@ -146,8 +185,9 @@ All spacing is defined as module-level constants in `flowforge/layout.py` and ca
 ```
 comfyui-flowforge/
 │
-├── flowforge.py              Entry point for direct invocation
-│                             (python flowforge.py <file>)
+├── flowforge.bat             Windows launcher (double-click or run from cmd)
+├── flowforge.sh              macOS / Linux launcher
+├── flowforge.py              Python entry point shim
 │
 ├── flowforge/
 │   ├── __init__.py
@@ -155,7 +195,10 @@ comfyui-flowforge/
 │   ├── parser.py             JSON → Workflow; normalises size formats,
 │   │                         builds synthetic SetNode→GetNode links
 │   ├── layout.py             6-phase Sugiyama layout algorithm
-│   └── cli.py                Argument parsing + JSON writer
+│   └── cli.py                Argument parsing, file picker, JSON writer
+│
+├── assets/
+│   └── social-preview.png
 │
 ├── tests/
 │   ├── test_parser.py        Parser invariants across all example workflows
@@ -182,24 +225,18 @@ Run the test suite:
 uv run pytest
 ```
 
-Run against a specific workflow:
-
-```bash
-uv run python flowforge.py path/to/workflow.json
-```
-
 ### Adding Test Workflows
 
 Place ComfyUI workflow JSON files in `example-workflows/`. The test suite picks them up automatically via glob. The directory is listed in `.gitignore` and is not committed to the repository.
 
 ### Module Overview
 
-| Module      | Responsibility                                                                |
-| ----------- | ----------------------------------------------------------------------------- |
-| `model.py`  | Pure data structures. No I/O, no logic.                                       |
+| Module | Responsibility |
+|---|---|
+| `model.py` | Pure data structures. No I/O, no logic. |
 | `parser.py` | Reads JSON, normalises fields, produces `Workflow`. Public API: `load(path)`. |
-| `layout.py` | Mutates `node.pos` and `group.bounding`. Public API: `apply(workflow)`.       |
-| `cli.py`    | Calls parser → layout → writer. Public API: `main()`.                         |
+| `layout.py` | Mutates `node.pos` and `group.bounding`. Public API: `apply(workflow)`. |
+| `cli.py` | File picker, argument parsing, writer. Public API: `main()`. |
 
 ---
 
