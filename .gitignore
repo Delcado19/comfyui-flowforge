@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# UV / virtual environments
+.venv/
+venv/
+env/
+
+# Build & distribution
+dist/
+build/
+*.egg-info/
+
+# UV cache (global, but ignore if it ever appears locally)
+.uv/
+
+# Claude Code — local settings are machine-specific
+.claude/settings.local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo

@@ -124,11 +124,12 @@ class Node:
 @dataclass
 class Link:
     id: int
-    source_node: int   # node ID
-    source_slot: int   # output slot index
-    target_node: int   # node ID
-    target_slot: int   # input slot index
-    link_type: str     # e.g. "LATENT", "IMAGE", "MODEL"
+    source_node: int        # node ID
+    source_slot: int        # output slot index
+    target_node: int        # node ID
+    target_slot: int        # input slot index
+    link_type: str          # e.g. "LATENT", "IMAGE", "MODEL", or "*"
+    synthetic: bool = False # True for SetNode→GetNode virtual links (never written to JSON)
 
 
 @dataclass
