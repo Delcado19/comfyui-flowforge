@@ -42,49 +42,56 @@ Scan-Daten liegen in: `H:\ComfyUI-Easy-Install\comfyui_scan\`
 ### Nodes mit Sonderbehandlung im Layout-Algorithmus
 
 #### Dekorative Nodes — keine Datenfluss-Kanten, werden separat platziert
-| Node-Typ | Package |
-|---|---|
-| `Note` | comfy-core |
-| `MarkdownNote` | comfyui-itools |
-| `Label (rgthree)` | rgthree-comfy |
+
+| Node-Typ          | Package        |
+| ----------------- | -------------- |
+| `Note`            | comfy-core     |
+| `MarkdownNote`    | comfyui-itools |
+| `Label (rgthree)` | rgthree-comfy  |
 
 #### Virtuelle Verbindungen — nicht im `links`-Array, müssen synthetisch erzeugt werden
-| Node-Typ | Package | Mechanismus |
-|---|---|---|
+
+| Node-Typ  | Package         | Mechanismus                                       |
+| --------- | --------------- | ------------------------------------------------- |
 | `SetNode` | comfyui-kjnodes | Speichert Wert unter `widgets_values[0]` als Name |
-| `GetNode` | comfyui-kjnodes | Liest Wert nach `widgets_values[0]` als Name |
+| `GetNode` | comfyui-kjnodes | Liest Wert nach `widgets_values[0]` als Name      |
 
 Ein `SetNode` mit Name `"VAE"` und ein `GetNode` mit Name `"VAE"` sind virtuell verbunden.
 Der Parser muss diese Paare erkennen und synthetische Kanten erzeugen.
 
 #### Reroute — Durchgangspunkt, zählt als echter Graph-Knoten
-| Node-Typ | Package |
-|---|---|
+
+| Node-Typ  | Package    |
+| --------- | ---------- |
 | `Reroute` | comfy-core |
 
 Hat genau einen Input und einen Output, wird wie ein normaler Node behandelt.
 
 #### Sub-Graphen — UUID als `type`, erscheinen als einzelner Node im Hauptgraphen
+
 In neueren Workflows gibt es Nodes deren `type` eine UUID ist (z.B. `"ce575129-b994-4bea-81b7-07c2b68948a9"`).
 Die interne Struktur steht unter `extra.definitions.subgraphs[]`. Für den Layout-Algorithmus
 werden diese als normaler Node (Black Box) behandelt — die internen Nodes werden nicht neu angeordnet.
 
 #### Bypasser — steuert Gruppen, hat `OPT_CONNECTION`-Output der zu nichts führt
-| Node-Typ | Package |
-|---|---|
+
+| Node-Typ                         | Package       |
+| -------------------------------- | ------------- |
 | `Fast Groups Bypasser (rgthree)` | rgthree-comfy |
 
 #### Switch-Nodes — wählen zwischen zwei Inputs, normale Datenfluss-Behandlung
-| Node-Typ | Package |
-|---|---|
+
+| Node-Typ                    | Package           |
+| --------------------------- | ----------------- |
 | `Switch latent [Crystools]` | ComfyUI-Crystools |
-| `ComfySwitchNode` | comfy-core |
+| `ComfySwitchNode`           | comfy-core        |
 
 ---
 
 ### Alle installierten Packages und ihre in Workflows verwendeten Node-Typen
 
 #### comfy-core (Standard)
+
 `VAELoader` · `VAEDecode` · `VAEEncode` · `VAEDecodeTiled` · `VAEEncodeTiled`
 `CLIPTextEncode` · `ConditioningZeroOut` · `FluxGuidance` · `ReferenceLatent`
 `KSampler` · `KSamplerSelect` · `SamplerCustomAdvanced` · `CFGGuider` · `RandomNoise`
@@ -97,52 +104,75 @@ werden diese als normaler Node (Black Box) behandelt — die internen Nodes werd
 `Note` · `Reroute`
 
 #### ComfyUI-GGUF (city96)
+
 `UnetLoaderGGUF` · `CLIPLoaderGGUF` · `VaeGGUF`
 
 #### rgthree-comfy
+
 `Power Lora Loader (rgthree)` · `Fast Groups Bypasser (rgthree)`
 `Image Comparer (rgthree)` · `Label (rgthree)` · `Seed (rgthree)`
 
 #### comfyui-kjnodes (kijai)
+
 `SetNode` · `GetNode` · `VRAM_Debug`
 
 #### ComfyUI-Easy-Use (yolain)
+
 `easy loraStack` · `easy loraStackApply` · `easy seed`
 `easy cleanGpuUsed` · `easy clearCacheAll`
 
 #### ComfyUI-Crystools
+
 `Switch latent [Crystools]` · `List of strings [Crystools]` · `Show any [Crystools]`
 
 #### comfyui-easy-sam3 (yolain)
+
 `easy sam3ImageSegmentation` · `easy sam3ModelLoader` · `easy framesEditor`
 
 #### ComfyUI-Qwen3.5-Uncensored / comfyui-rmbg (1038lab)
+
 `AILab_QwenVL_GGUF_Advanced` · `AILab_ImageResize`
 
 #### ComfyUI_essentials (cubiq)
+
 `MaskPreview+`
 
 #### RES4LYF (ClownsharkBatwing)
+
 `ClownsharKSampler_Beta` · `SharkOptions_Beta` · `ClownOptions_DetailBoost_Beta`
 `EmptyLatentImageCustom`
 
 #### comfyui-vrgamedevgirl
+
 `FastFilmGrain` · `FastLaplacianSharpen`
 
 #### comfyui-vton-mask-tools
+
 `VTONMaskCleanup`
 
 #### seedvr2_videoupscaler (numz)
+
 `SeedVR2VideoUpscaler` · `SeedVR2LoadDiTModel` · `SeedVR2LoadVAEModel`
 
 #### seedvarianceenhancer
+
 `SeedVarianceEnhancer`
 
 #### wlsh_nodes (wallish77)
+
 `Upscale by Factor with Model (WLSH)`
 
 #### comfyui-itools (MohammadAboulEla)
+
 `MarkdownNote`
 
 #### comfyui-save-image-organized (Delcado19)
+
 `SaveImageClean`
+
+## Kommunikation
+
+- Antworte immer auf Deutsch
+- Sämtlicher Code, Kommentare, Docstrings, Variablennamen: Englisch
+- README und alle anderen Dokumentationsdateien: Englisch
+- Commit-Messages: Englisch
