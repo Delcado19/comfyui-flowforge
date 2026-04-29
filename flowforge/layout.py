@@ -5,7 +5,8 @@ Does not touch any other field — links, widgets_values, mode, etc. are preserv
 
 Algorithm overview:
   1. Assign nodes to groups (geometric containment in original positions).
-  2. Build a directed graph between groups from cross-group links, then
+  2. Build a directed graph between groups from cross-group links.  Remove
+     back-edges (cycle breaking via iterative DFS) to produce a DAG, then
      topologically sort groups into left-to-right columns.
   3. Within each group, apply the Sugiyama algorithm:
        a. Assign layers (longest-path, topological order).
@@ -71,6 +72,7 @@ def apply(workflow: Workflow) -> None:
     # --- Phase 2: inter-group topology ---
     group_ids = list(group_to_nodes.keys())
     group_succs = _build_group_graph(node_to_group, links)
+    group_succs = _break_group_cycles(group_ids, group_succs)
     group_columns = _topo_sort_groups(group_ids, group_succs)
 
     # Within each column, preserve the original top-to-bottom order of groups.
@@ -146,6 +148,46 @@ def _build_group_graph(
         if src_g is not None and dst_g is not None and src_g != dst_g:
             succs[src_g].add(dst_g)
     return dict(succs)
+
+
+def _break_group_cycles(
+    group_ids: list[int],
+    group_succs: dict[int, set[int]],
+) -> dict[int, set[int]]:
+    """Return an acyclic copy of group_succs with back-edges removed.
+
+    Uses an iterative DFS with white/grey/black colouring.  Back-edges
+    (pointing to a node already on the current DFS stack) are discarded so
+    that _topo_sort_groups receives a DAG and can assign a valid left-to-right
+    column to every group — including workflows where two groups exchange data
+    bidirectionally (which would otherwise produce a large number of
+    right-to-left connections after layout).
+    """
+    acyclic: dict[int, set[int]] = {gid: set(s) for gid, s in group_succs.items()}
+
+    WHITE, GREY, BLACK = 0, 1, 2
+    color: dict[int, int] = {gid: WHITE for gid in group_ids}
+
+    for start in group_ids:
+        if color.get(start) != WHITE:
+            continue
+        # Each stack entry: (node, iterator over a snapshot of its outgoing edges)
+        stack = [(start, iter(sorted(acyclic.get(start, set()))))]
+        color[start] = GREY
+        while stack:
+            u, it = stack[-1]
+            v = next(it, None)
+            if v is None:                              # all neighbours explored
+                color[u] = BLACK
+                stack.pop()
+            elif color.get(v) == GREY:                 # back-edge → remove
+                acyclic[u].discard(v)
+            elif color.get(v, WHITE) == WHITE:         # tree edge → recurse
+                color[v] = GREY
+                stack.append((v, iter(sorted(acyclic.get(v, set())))))
+            # BLACK: cross/forward edge → keep as-is
+
+    return acyclic
 
 
 def _topo_sort_groups(

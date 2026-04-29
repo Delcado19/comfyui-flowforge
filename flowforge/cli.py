@@ -14,7 +14,7 @@ import json
 import sys
 from pathlib import Path
 
-from flowforge import layout, parser
+from flowforge import layout, optimizer, parser
 from flowforge.model import Workflow
 
 
@@ -34,6 +34,8 @@ def main() -> None:
     output_path = _resolve_output(input_path, args)
 
     wf = parser.load(input_path)
+    if args.optimize:
+        optimizer.optimize(wf)
     layout.apply(wf)
     _write(wf, output_path)
 
@@ -67,6 +69,15 @@ def _parse_args() -> argparse.Namespace:
         "--inplace",
         action="store_true",
         help="Overwrite the input file instead of creating a new one.",
+    )
+    p.add_argument(
+        "--optimize",
+        action="store_true",
+        help=(
+            "Before layout: replace high-fanout MODEL/CLIP/VAE connections with "
+            "Set/Get node pairs (comfyui-kjnodes). Reduces crossing lines and "
+            "breaks inter-group cycles. Adds new nodes to the output workflow."
+        ),
     )
     return p.parse_args()
 

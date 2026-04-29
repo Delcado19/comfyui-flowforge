@@ -11,6 +11,7 @@ from flowforge.layout import (
     NODE_H_GAP,
     _assign_groups,
     _assign_layers,
+    _break_group_cycles,
     _build_group_graph,
     _topo_sort_groups,
     apply,
@@ -81,6 +82,73 @@ def test_assign_layers_cycle_does_not_crash():
     links = [_make_link(1, 1, 2), _make_link(2, 2, 1)]
     layer = _assign_layers([a, b], links)
     assert set(layer.keys()) == {1, 2}
+
+
+# ---------------------------------------------------------------------------
+# Unit tests – _break_group_cycles
+# ---------------------------------------------------------------------------
+
+def test_break_group_cycles_preserves_dag():
+    """An already acyclic graph must keep all its edges."""
+    dag = _break_group_cycles([1, 2, 3], {1: {2}, 2: {3}})
+    assert 2 in dag.get(1, set())
+    assert 3 in dag.get(2, set())
+
+
+def test_break_group_cycles_bidirectional():
+    """A↔B: after cycle breaking exactly one direction must survive."""
+    dag = _break_group_cycles([1, 2], {1: {2}, 2: {1}})
+    forward  = 2 in dag.get(1, set())
+    backward = 1 in dag.get(2, set())
+    assert forward != backward, "Exactly one direction must survive cycle breaking"
+
+
+def test_break_group_cycles_self_loop():
+    """A self-loop (A→A) is a trivial cycle and must be removed."""
+    dag = _break_group_cycles([1], {1: {1}})
+    assert 1 not in dag.get(1, set())
+
+
+def test_break_group_cycles_longer_cycle():
+    """A 3-node cycle A→B→C→A must be broken to a DAG."""
+    dag = _break_group_cycles([1, 2, 3], {1: {2}, 2: {3}, 3: {1}})
+    # Check there is no cycle: topological sort of the result must succeed
+    all_nodes = [1, 2, 3]
+    in_deg = {n: 0 for n in all_nodes}
+    for src, dsts in dag.items():
+        for dst in dsts:
+            if dst in in_deg:
+                in_deg[dst] += 1
+    from collections import deque
+    queue = deque(n for n in all_nodes if in_deg[n] == 0)
+    visited = 0
+    while queue:
+        u = queue.popleft()
+        visited += 1
+        for v in dag.get(u, set()):
+            if v in in_deg:
+                in_deg[v] -= 1
+                if in_deg[v] == 0:
+                    queue.append(v)
+    assert visited == len(all_nodes), "Result still contains a cycle"
+
+
+def test_apply_cyclic_groups_produce_valid_layout():
+    """Groups with bidirectional links must still get a valid left-to-right layout."""
+    g1 = Group(id=1, title="G1", bounding=[0.0, 0.0, 300.0, 300.0])
+    g2 = Group(id=2, title="G2", bounding=[400.0, 0.0, 300.0, 300.0])
+    n1 = _make_node(1, x=10.0,  y=10.0)
+    n2 = _make_node(2, x=10.0,  y=150.0)
+    n3 = _make_node(3, x=410.0, y=10.0)
+    n4 = _make_node(4, x=410.0, y=150.0)
+    # Bidirectional: g1→g2 AND g2→g1
+    links = [_make_link(1, 1, 3), _make_link(2, 3, 2)]
+    wf = _make_workflow([n1, n2, n3, n4], links, [g1, g2])
+    apply(wf)   # must not raise
+    import math
+    for node in [n1, n2, n3, n4]:
+        assert math.isfinite(node.x)
+        assert math.isfinite(node.y)
 
 
 # ---------------------------------------------------------------------------

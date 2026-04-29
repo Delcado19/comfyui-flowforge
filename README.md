@@ -85,6 +85,7 @@ uv run python flowforge.py [input] [options]
 | `input` | Path to the ComfyUI workflow JSON file. **Optional** — if omitted, a native file picker opens. |
 | `-o PATH`, `--output PATH` | Write result to this path. Default: `<input>_layouted.json` in the same directory. |
 | `--inplace` | Overwrite the input file directly. |
+| `--optimize` | Before layout: replace high-fanout MODEL/CLIP/VAE connections with Set/Get node pairs. See [Optimizer](#optimizer-optional) below. |
 
 ### Examples
 
@@ -101,6 +102,9 @@ uv run python flowforge.py [input] [options]
 
 # Overwrite in place
 ./flowforge.sh my_workflow.json --inplace
+
+# Optimize first (insert Set/Get pairs), then lay out
+./flowforge.sh my_workflow.json --optimize
 ```
 
 The file picker uses Python's built-in `tkinter.filedialog` — no extra dependencies. It opens the native dialog on Windows and macOS, and a Tk-based dialog on Linux. On minimal Linux installs without Tk, install `python3-tk` via your system package manager (`sudo apt install python3-tk` on Debian/Ubuntu).
@@ -122,6 +126,8 @@ The file picker uses Python's built-in `tkinter.filedialog` — no extra depende
 | `nodes[].order` | No | Execution order preserved. |
 | All other fields | No | Colors, types, titles, properties — untouched. |
 
+**With `--optimize`:** new SetNode and GetNode entries are added to `nodes` and `links`. The replaced direct connections are removed. The workflow is semantically equivalent — execution results do not change.
+
 ---
 
 ## How It Works
@@ -134,7 +140,7 @@ Every node is assigned to the group whose bounding box contains it (using the no
 
 ### Phase 2 — Inter-Group Topology
 
-A directed graph is built between groups: a group A gets an edge to group B whenever a link crosses from a node in A to a node in B. This graph is topologically sorted using the longest-path algorithm (Kahn's BFS + depth tracking). Groups are assigned to columns from left to right in dependency order. Groups with no ordering relationship share the same column and are stacked vertically, sorted by their original vertical centroid to preserve the author's intended arrangement.
+A directed graph is built between groups: a group A gets an edge to group B whenever a link crosses from a node in A to a node in B. Before sorting, back-edges are removed by an iterative DFS with white/grey/black colouring — this turns any cyclic group graph into a DAG so the topological sort always produces a valid left-to-right column assignment (see [Known Limitations](#known-limitations) for why cycles arise). The DAG is then sorted using the longest-path algorithm (Kahn's BFS + depth tracking). Groups are assigned to columns from left to right in dependency order. Groups with no ordering relationship share the same column and are stacked vertically, sorted by their original vertical centroid to preserve the author's intended arrangement.
 
 ### Phase 3 — Internal Layout (Sugiyama)
 
@@ -170,9 +176,24 @@ All spacing is defined as module-level constants in `flowforge/layout.py` and ca
 
 ---
 
+## Optimizer (optional)
+
+Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `CLIP`, and `VAE` connections into [Set/Get node pairs](https://github.com/kijai/ComfyUI-KJNodes) (comfyui-kjnodes must be installed in ComfyUI).
+
+**When to use it:** workflows where a single loader node (e.g. `VAELoader`, `UNETLoader`, `CLIPLoader`) fans out to three or more downstream consumers typically have many crossing long-distance wires. Replacing these with Set/Get pairs:
+
+- Eliminates the long wires entirely, which reduces crossing counts after layout.
+- Breaks inter-group cycles that loader fan-out would otherwise create, allowing the layout algorithm to produce a strictly left-to-right result.
+
+**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, one `SetNode` is inserted immediately after the source and one `GetNode` is inserted before each target. The original direct links are removed. The workflow runs identically in ComfyUI.
+
+**Requirement:** comfyui-kjnodes must be installed in your ComfyUI instance, otherwise ComfyUI will show missing-node warnings on load.
+
+---
+
 ## Known Limitations
 
-**Bidirectional inter-group dependencies.** Some workflows contain groups that both produce data for and consume data from the same other group or the ungrouped set (e.g. a "Reference input" group that preprocesses images but also receives conditioning from the main pipeline). This creates a cycle in the inter-group dependency graph. FlowForge breaks cycles by appending the involved groups to the last column, which means a small number of cross-group links will point backwards. In practice this affects fewer than 20 % of links in such workflows and the overall layout is still significantly cleaner than the original.
+**Residual back-edges after cycle breaking.** When two groups genuinely exchange data bidirectionally (rare in well-structured workflows), the DFS cycle-breaker removes the minimum number of back-edges to produce a DAG. The removed edges become right-to-left wires in the output — typically fewer than 20 % of links in affected workflows. Using `--optimize` often eliminates the root cause by converting loader fan-outs to Set/Get pairs before layout runs.
 
 **Group overlap in the original workflow.** If a node's original position lies inside multiple overlapping group bounding boxes, it is assigned to the first group in workflow order. This is the same behaviour as ComfyUI itself.
 
@@ -195,6 +216,8 @@ comfyui-flowforge/
 │   ├── parser.py             JSON → Workflow; normalises size formats,
 │   │                         builds synthetic SetNode→GetNode links
 │   ├── layout.py             6-phase Sugiyama layout algorithm
+│   ├── optimizer.py          Optional pre-pass: insert Set/Get pairs for
+│   │                         high-fanout MODEL/CLIP/VAE connections
 │   └── cli.py                Argument parsing, file picker, JSON writer
 │
 ├── assets/
@@ -236,6 +259,7 @@ Place ComfyUI workflow JSON files in `example-workflows/`. The test suite picks 
 | `model.py` | Pure data structures. No I/O, no logic. |
 | `parser.py` | Reads JSON, normalises fields, produces `Workflow`. Public API: `load(path)`. |
 | `layout.py` | Mutates `node.pos` and `group.bounding`. Public API: `apply(workflow)`. |
+| `optimizer.py` | Inserts Set/Get node pairs for high-fanout MODEL/CLIP/VAE outputs. Public API: `optimize(workflow)`. |
 | `cli.py` | File picker, argument parsing, writer. Public API: `main()`. |
 
 ---
