@@ -16,7 +16,14 @@ FlowForge reads a workflow JSON, computes a clean left-to-right layout using a g
 
 ## Requirements
 
+- [uv](https://docs.astral.sh/uv/) — Python package manager (already installed)
+- Python ≥ 3.10 (installed automatically by uv when needed)
+
 ## Installation
+
+### 1 — Prerequisites
+
+Ensure **uv** is installed (it is already present on this system).
 
 ### 2 — Clone and set up
 
