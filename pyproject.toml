@@ -1,0 +1,51 @@
+[project]
+name = "comfyui-flowforge"
+version = "0.1.0"
+description = "Automatically rearranges nodes in ComfyUI workflow JSON files to minimize connection crossings"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Delcado19", email = "delcado@example.com"}
+]
+keywords = ["comfyui", "workflow", "layout", "graph", "algorithm"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/Delcado19/comfyui-flowforge"
+"Documentation" = "https://github.com/Delcado19/comfyui-flowforge#readme"
+"Issue Tracker" = "https://github.com/Delcado19/comfyui-flowforge/issues"
+
+[project.scripts]
+flowforge = "flowforge.cli:main"
+flowforge-gui = "flowforge.gui:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "black>=22.0",
+    "ruff>=0.1",
+    "mypy>=0.9",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = ["-v"]
