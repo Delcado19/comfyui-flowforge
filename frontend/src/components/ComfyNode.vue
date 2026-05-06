@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useWorkflowStore, type ComfyNode, type ComfyPort } from '../stores/useWorkflowStore'
+import { TITLE_HEIGHT, ROW_HEIGHT, SLOT_ROW_OFFSET, WIDGET_GAP, NODE_BOTTOM_PADDING, getNodeDisplayHeight, getNodeSize } from '../utils/nodeGeometry'
 
 interface Props {
   node: ComfyNode
@@ -9,13 +10,6 @@ interface Props {
 const props = defineProps<Props>()
 const store = useWorkflowStore()
 const titleRef = ref<HTMLElement | null>(null)
-
-const TITLE_HEIGHT = 26
-const ROW_HEIGHT = 20
-const SLOT_ROW_OFFSET = 8
-const WIDGET_GAP = 4
-const PORT_CENTER_OFFSET = 12
-const NODE_BOTTOM_PADDING = 12
 
 const typeColors: Record<string, string> = {
   default: '#353535',
@@ -32,8 +26,7 @@ const typeColors: Record<string, string> = {
 }
 
 const nodeSize = computed<[number, number]>(() => {
-  if (Array.isArray(props.node.size)) return props.node.size
-  return [props.node.size?.width ?? 200, props.node.size?.height ?? 100]
+  return getNodeSize(props.node)
 })
 
 const title = computed(() => props.node.title || props.node.type)
@@ -91,14 +84,7 @@ const minimumContentHeight = computed(() => {
 })
 
 const nodeHeight = computed(() => {
-  const baseHeight = nodeSize.value[1] + NODE_BOTTOM_PADDING
-  if (isReroute.value) {
-    return Math.max(TITLE_HEIGHT + minimumContentHeight.value, TITLE_HEIGHT + ROW_HEIGHT + 10)
-  }
-  if (isCollapsed.value) {
-    return Math.max(TITLE_HEIGHT + minimumContentHeight.value, TITLE_HEIGHT + ROW_HEIGHT + 8)
-  }
-  return Math.max(baseHeight, TITLE_HEIGHT + minimumContentHeight.value)
+  return getNodeDisplayHeight(props.node)
 })
 
 const contentHeight = computed(() => Math.max(0, nodeHeight.value - TITLE_HEIGHT))

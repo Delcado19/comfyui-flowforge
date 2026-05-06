@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useWorkflowStore, type ComfyNode as WorkflowNode, type ComfyGroup, type Connection } from '../stores/useWorkflowStore'
+import { getNodeDisplaySize } from '../utils/nodeGeometry'
 import ComfyNode from './ComfyNode.vue'
 import ComfyConnection from './ComfyConnection.vue'
 
@@ -40,7 +41,7 @@ const minimapContent = computed(() => {
   let maxY = Number.NEGATIVE_INFINITY
 
   for (const node of nodes) {
-    const [width, height] = getNodeSize(node)
+    const [width, height] = getNodeDisplaySize(node)
     minX = Math.min(minX, node.pos[0])
     minY = Math.min(minY, node.pos[1])
     maxX = Math.max(maxX, node.pos[0] + width)
@@ -48,9 +49,7 @@ const minimapContent = computed(() => {
   }
 
   for (const group of groups.value) {
-    const bounds = group.bounding
-    if (!bounds) continue
-    const [x, y, width, height] = bounds
+    const [x, y, width, height] = getGroupVisualBounds(group)
     minX = Math.min(minX, x)
     minY = Math.min(minY, y)
     maxX = Math.max(maxX, x + width)
@@ -107,7 +106,7 @@ const viewportStyle = computed(() => {
   }
 })
 const minimapNodeStyle = computed(() => (node: WorkflowNode) => {
-  const [width, height] = getNodeSize(node)
+  const [width, height] = getNodeDisplaySize(node)
   const content = minimapContent.value
   const scale = minimapScale.value
   const offset = minimapOffset.value
@@ -173,7 +172,7 @@ function getNodeSize(node: WorkflowNode): [number, number] {
 }
 
 function getNodeBounds(node: WorkflowNode): [number, number, number, number] {
-  const [width, height] = getNodeSize(node)
+  const [width, height] = getNodeDisplaySize(node)
   return [node.pos[0], node.pos[1], width, height]
 }
 
@@ -186,7 +185,7 @@ function isNodeInsideGroup(node: WorkflowNode, group: ComfyGroup): boolean {
 }
 
 function getGroupStyle(group: ComfyGroup) {
-  const [x, y, width, height] = group.bounding ?? [0, 0, 0, 0]
+  const [x, y, width, height] = getGroupVisualBounds(group)
   return {
     left: `${x}px`,
     top: `${y}px`,
@@ -201,6 +200,23 @@ function getGroupTitleStyle(group: ComfyGroup) {
     color: group.color ?? '#3f789e',
     fontSize: `${group.font_size ?? 24}px`,
   }
+}
+
+function getGroupVisualBounds(group: ComfyGroup): [number, number, number, number] {
+  const bounds = group.bounding ?? [0, 0, 0, 0]
+  let [minX, minY, width, height] = bounds
+  let maxX = minX + width
+  let maxY = minY + height
+
+  for (const node of getNodesInGroup(group)) {
+    const [x, y, nodeWidth, nodeHeight] = getNodeBounds(node)
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x + nodeWidth)
+    maxY = Math.max(maxY, y + nodeHeight)
+  }
+
+  return [minX, minY, maxX - minX, maxY - minY]
 }
 
 function getNodesInGroup(group: ComfyGroup) {
@@ -376,9 +392,7 @@ function fitWorkflowToCanvas() {
   }
 
   for (const group of groups.value) {
-    const bounds = group.bounding
-    if (!bounds) continue
-    const [x, y, width, height] = bounds
+    const [x, y, width, height] = getGroupVisualBounds(group)
     minX = Math.min(minX, x)
     minY = Math.min(minY, y)
     maxX = Math.max(maxX, x + width)
@@ -691,18 +705,17 @@ function addSampleWorkflow() {
 .workflow-group {
   position: absolute;
   box-sizing: border-box;
-  border: 1px solid rgb(63 120 158 / 70%);
-  border-radius: 4px;
-  background: rgb(63 120 158 / 14%);
+  border: 1px solid rgb(63 120 158 / 45%);
+  border-radius: 2px;
+  background: rgb(63 120 158 / 10%);
 }
 .workflow-group-title {
   position: absolute;
-  top: 6px;
+  top: 4px;
   left: 8px;
-  padding: 2px 8px;
-  background: rgb(26 26 26 / 88%);
-  border: 1px solid rgb(63 120 158 / 55%);
-  border-radius: 4px;
+  padding: 0;
+  background: transparent;
+  border: 0;
   font-weight: 700;
   line-height: 1;
   text-shadow: 0 1px 1px rgb(0 0 0 / 85%);
