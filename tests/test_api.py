@@ -2,12 +2,11 @@
 API endpoint tests using aiohttp test client.
 """
 
+from copy import deepcopy
+
 import pytest
-import json
-from aiohttp import web
-from flowforge.api import create_app, layout_handler, optimize_handler, _workflow_to_comfyui_json
-from flowforge.parser import parse_comfyui_workflow
-from flowforge.layout import apply as apply_layout
+
+from flowforge.api import create_app
 from flowforge.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -127,6 +126,66 @@ async def test_layout_preserves_links(client):
     assert link[4] == 0   # target port
     assert link[5] == "IMAGE"
     logger.info("Link preservation test passed")
+
+
+@pytest.mark.asyncio
+async def test_layout_preserves_comfyui_metadata(client):
+    logger.info("Testing that layout preserves ComfyUI workflow metadata")
+    workflow = deepcopy(SIMPLE_WORKFLOW)
+    workflow.update(
+        {
+            "version": 0.4,
+            "config": {"links_ontop": True},
+            "extra": {"ds": {"scale": 0.75, "offset": [12, 34]}},
+            "models": [{"name": "example.safetensors"}],
+            "revision": 42,
+            "x_custom_top_level": {"keep": True},
+            "groups": [
+                {
+                    "id": 7,
+                    "title": "Preserved Group",
+                    "bounding": [0, 0, 1000, 1000],
+                    "color": "#334455",
+                    "locked": True,
+                }
+            ],
+        }
+    )
+    workflow["nodes"][0].update(
+        {
+            "widgets_values": ["image.png"],
+            "properties": {"Node name for S&R": "LoadImage"},
+            "flags": {"collapsed": False},
+            "color": "#112233",
+            "bgcolor": "#445566",
+            "x_custom_node_field": "preserve-me",
+        }
+    )
+
+    resp = await client.post("/layout", json=workflow)
+    assert resp.status == 200
+    data = await resp.json()
+
+    assert data["config"] == workflow["config"]
+    assert data["extra"] == workflow["extra"]
+    assert data["models"] == workflow["models"]
+    assert data["revision"] == 42
+    assert data["x_custom_top_level"] == {"keep": True}
+
+    node = next(n for n in data["nodes"] if n["id"] == 1)
+    assert node["widgets_values"] == ["image.png"]
+    assert node["properties"] == {"Node name for S&R": "LoadImage"}
+    assert node["flags"] == {"collapsed": False}
+    assert node["color"] == "#112233"
+    assert node["bgcolor"] == "#445566"
+    assert node["x_custom_node_field"] == "preserve-me"
+    assert node["outputs"][0]["name"] == "IMAGE"
+
+    group = data["groups"][0]
+    assert group["title"] == "Preserved Group"
+    assert group["color"] == "#334455"
+    assert group["locked"] is True
+    assert group["bounding"] != [0, 0, 1000, 1000]
 
 
 if __name__ == "__main__":

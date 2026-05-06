@@ -1,45 +1,39 @@
-# Projekte 🤔
+# Project Notes
 
-## Geld 📍
-- Budget: 1000€
-- Aufteilung:
-  - Entwicklung: 60%
+## Budget
+
+- Total budget: EUR 1000
+- Allocation:
+  - Development: 60%
   - Tests: 20%
-  - Dokumentation: 20%
+  - Documentation: 20%
 
-## Überblick
+## Current Status
 
-### Nicht-entwickelt
-- Frontend-Bereich (Vue 3)
-- Optimizer-Feature
-- Zusammenfassung für README.md
+- Python package, CLI, API server, layout algorithm, optimizer, tests, and Vue frontend exist.
+- Workflow layout is designed to preserve ComfyUI workflow metadata and update only layout-relevant fields.
+- The frontend stores and sends full ComfyUI workflow JSON instead of a separate custom connection format.
+- Documentation maintenance is now governed by `AGENTS.md` and `docs/DOCUMENTATION_MAINTENANCE.md`.
 
-### Vorherige Implementierungen
-- successfully implemented layout algorithm for index 0-3
-- initialized git repository with initial commit
-- created project structure with flowforge/docs/tests
+## Completed Work
 
-### Ank.Alter
-- Derzeitige Schwierigkeiten: 
-  - Nicht alle Nodes}", "mode": "SET
-}"]}
+- Implemented the initial layout algorithm for indexed workflow nodes.
+- Initialized the Git repository and project structure.
+- Added Python package modules under `flowforge/`.
+- Added tests under `tests/`.
+- Added Vue frontend under `frontend/`.
+- Added roundtrip-safe workflow serialization.
+- Added metadata-preservation and group-idempotency tests.
 
-```json
-{ "id": "SETNode", "type": "SETNode", "pos": [100, 200], ... }```
+## Open Work
 
+- Validate layout behavior against more real ComfyUI workflows.
+- Improve visual comparison in the frontend.
+- Define the deployment and release path.
+- Expand documentation when behavior stabilizes.
 
+## Notes
 
- aktuelle Treffen
-
-- [ ] Test mit Beispiel-Workflow
-- [ ] Frontend-UI-Implementierung
-- [ ] Deployment-Pfad definieren
-
-
-
-**Anmerkung (2026-05-05 16:00):**
-- Von [Nutzername] angepasst
-- Problem: Einige Nodes sidern im Layout
-- Lösung: 
-  - Layout-Verfìcachung optimieren
-  - Visual Comparison verbessern
+- Local ComfyUI can be used for read-only workflow evidence under `H:\ComfyUI-Easy-Install\ComfyUI`.
+- Keep chat communication mostly German.
+- Keep code and documentation artifacts in English.

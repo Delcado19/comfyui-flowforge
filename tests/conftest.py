@@ -3,8 +3,8 @@ Pytest configuration and shared fixtures.
 """
 
 import pytest
-import logging
 from pathlib import Path
+
 from flowforge.logger import setup_logger
 
 # Global test logger

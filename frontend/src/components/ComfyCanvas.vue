@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
-import { useWorkflowStore, type Node, type Connection } from '../stores/useWorkflowStore'
+import { useWorkflowStore, type ComfyNode as WorkflowNode, type Connection } from '../stores/useWorkflowStore'
 import ComfyNode from './ComfyNode.vue'
 import ComfyConnection from './ComfyConnection.vue'
 
@@ -16,17 +16,21 @@ const canvasStyle = computed(() => ({
   transformOrigin: '0 0',
 }))
 
-function getPortPosition(node: Node, portId: string, isOutput: boolean): [number, number] {
+function getNodeSize(node: WorkflowNode): [number, number] {
+  if (Array.isArray(node.size)) return node.size
+  return [node.size?.width ?? 200, node.size?.height ?? 100]
+}
+
+function getPortPosition(node: WorkflowNode, portIndex: number, isOutput: boolean): [number, number] {
   const nodeLeft = node.pos[0]
   const nodeTop = node.pos[1] + 30
   const portYOffset = nodeTop + 20
+  const nodeSize = getNodeSize(node)
   
   if (isOutput) {
-    const outputIndex = node.outputs.findIndex(p => p.id === portId)
-    return [nodeLeft + node.size[0], portYOffset + outputIndex * 18]
+    return [nodeLeft + nodeSize[0], portYOffset + portIndex * 18]
   } else {
-    const inputIndex = node.inputs.findIndex(p => p.id === portId)
-    return [nodeLeft, portYOffset + inputIndex * 18]
+    return [nodeLeft, portYOffset + portIndex * 18]
   }
 }
 
@@ -82,41 +86,43 @@ onUnmounted(() => {
 
 function addSampleWorkflow() {
   store.loadWorkflow({
+    version: 0.4,
+    last_node_id: 3,
+    last_link_id: 1,
     nodes: [
       {
-        id: 'node1',
+        id: 1,
         type: 'LoadImage',
         pos: [100, 100],
         size: [200, 100],
         title: 'Load Image',
         inputs: [],
-        outputs: [{ id: 'image', name: 'IMAGE', type: 'IMAGE' }]
+        outputs: [{ name: 'IMAGE', type: 'IMAGE', links: [1] }]
       },
       {
-        id: 'node2',
+        id: 2,
         type: 'KSampler',
         pos: [400, 100],
         size: [200, 120],
         title: 'KSampler',
         inputs: [
-          { id: 'latent', name: 'LATENT', type: 'LATENT' },
-          { id: 'model', name: 'MODEL', type: 'MODEL' }
+          { name: 'LATENT', type: 'LATENT' },
+          { name: 'MODEL', type: 'MODEL' }
         ],
-        outputs: [{ id: 'latent', name: 'LATENT', type: 'LATENT' }]
+        outputs: [{ name: 'LATENT', type: 'LATENT', links: [] }]
       },
       {
-        id: 'node3',
+        id: 3,
         type: 'SaveImage',
         pos: [700, 100],
         size: [200, 80],
         title: 'Save Image',
-        inputs: [{ id: 'images', name: 'IMAGE', type: 'IMAGE' }],
+        inputs: [{ name: 'images', type: 'IMAGE', link: 1 }],
         outputs: []
       }
     ],
-    connections: [
-      { id: 'conn1', source: 'node1', sourcePort: 'image', target: 'node3', targetPort: 'images', type: 'IMAGE' }
-    ]
+    links: [[1, 1, 0, 3, 0, 'IMAGE']],
+    groups: [],
   })
 }
 </script>

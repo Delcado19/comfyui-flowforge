@@ -6,7 +6,7 @@ Provides commands to run the API server and process workflow files.
 import argparse
 import json
 import sys
-from pathlib import Path
+
 from .parser import parse_comfyui_workflow
 from .layout import apply as apply_layout
 from .optimizer import optimize as optimize_workflow
@@ -49,7 +49,6 @@ def main():
 
 def run_server(port: int):
     """Start the aiohttp API server."""
-    import logging
     from .logger import setup_logger
     logger = setup_logger(__name__)
     logger.info(f"Starting FlowForge API server on port {port}")
@@ -60,9 +59,6 @@ def run_server(port: int):
 
 def process_layout(input_path: str, output_path: str, optimize_first: bool):
     """Apply layout to a workflow file."""
-    from .logger import setup_logger
-    logger = setup_logger(__name__)
-
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
             data = json.load(f)
@@ -90,9 +86,6 @@ def process_layout(input_path: str, output_path: str, optimize_first: bool):
 
 def process_optimize(input_path: str, output_path: str):
     """Optimize a workflow file."""
-    from .logger import setup_logger
-    logger = setup_logger(__name__)
-
     try:
         with open(input_path, 'r', encoding='utf-8') as f:
             data = json.load(f)

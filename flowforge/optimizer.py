@@ -3,8 +3,9 @@ Optimizer for ComfyUI FlowForge.
 Inserts SetNode/GetNode pairs for high-fanout MODEL/CLIP/VAE connections.
 """
 
-import logging
+from copy import deepcopy
 from typing import Dict, List
+
 from .model import Node, Link, Workflow
 from .logger import setup_logger
 
@@ -21,15 +22,11 @@ def optimize(workflow: Workflow) -> Workflow:
     """
     logger.info("Starting optimizer")
     
-    # Create a copy to avoid modifying during iteration
-    new_workflow = Workflow()
-    new_workflow.nodes = workflow.nodes.copy()
-    new_workflow.links = workflow.links.copy()
-    new_workflow.groups = workflow.groups.copy()
+    new_workflow = deepcopy(workflow)
     
     # Build a map: (source_node_id, source_port) -> list of Link objects
     port_links: Dict[tuple, List[Link]] = {}
-    for link in workflow.links.values():
+    for link in new_workflow.links.values():
         key = (link.source, link.source_port)
         port_links.setdefault(key, []).append(link)
     
@@ -39,8 +36,8 @@ def optimize(workflow: Workflow) -> Workflow:
         if len(links) < 2:
             continue
         # Check that at least one link has an optimizable type
-        if any(l.type in OPTIMIZE_TYPES for l in links):
-            src_node = workflow.nodes.get(src_id)
+        if any(link.type in OPTIMIZE_TYPES for link in links):
+            src_node = new_workflow.nodes.get(src_id)
             if src_node:
                 optimization_targets.append((src_node, src_port, links))
     

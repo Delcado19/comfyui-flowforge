@@ -4,7 +4,7 @@ Tests for the optimizer module.
 
 import pytest
 from flowforge.model import Node, Link, Workflow
-from flowforge.optimizer import optimize, OPTIMIZE_TYPES
+from flowforge.optimizer import optimize
 from flowforge.logger import setup_logger
 
 logger = setup_logger(__name__)

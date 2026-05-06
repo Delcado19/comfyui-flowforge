@@ -62,10 +62,26 @@ uv run flowforge-gui
 
 The GUI opens in your browser at `http://localhost:5173` (or the URL shown in the terminal).
 
+### One-Click Launchers
+
+Windows:
+
+```text
+start-flowforge.bat
+```
+
+Linux:
+
+```bash
+sh start-flowforge.sh
+```
+
+Both launchers run from the repository root and start `uv run flowforge-gui`.
+
 ### Features
 
-- **Before/After View**: Side-by-side node editors showing original and layouted workflows
-- **Visual Comparison**: See exactly how nodes are repositioned
+- **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions
+- **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
 - **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks
 - **Color-Coded Nodes**: Different node types are visually distinguished
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
@@ -141,10 +157,18 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 
 ---
 
+## Maintainer Notes
+
+Repository-local agent rules live in [AGENTS.md](AGENTS.md). Documentation synchronization is handled by the Documentation Maintenance Agent policy in [docs/DOCUMENTATION_MAINTENANCE.md](docs/DOCUMENTATION_MAINTENANCE.md).
+
+---
+
 ## Project Structure
 
 ```
 comfyui-flowforge/
+├── AGENTS.md             # Repository-local agent rules
+├── docs/                 # Focused project documentation
 ├── flowforge/              # Python package
 │   ├── __init__.py        # Package exports
 │   ├── api.py             # aiohttp API server
@@ -166,7 +190,10 @@ comfyui-flowforge/
 │   ├── test_layout.py
 │   ├── test_optimizer.py
 │   └── test_parser.py
+├── LICENSE               # MIT license
 ├── pyproject.toml        # Project configuration
+├── start-flowforge.bat   # Windows launcher
+├── start-flowforge.sh    # Linux launcher
 └── README.md
 ```
 

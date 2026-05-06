@@ -1,4 +1,12 @@
+# Private/local ComfyUI workflows and scans
 example-workflows/
+example-workflows/**
+local-workflows/
+private-workflows/
+comfyui_scan/
+*.private.json
+*.local.json
+*_layouted.json
 
 # Python
 __pycache__/
@@ -19,14 +27,24 @@ sdist/
 var/
 wheels/
 *.egg-info/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+.pyre/
+.hypothesis/
 .installed.cfg
 *.egg
+*.py,cover
 
 # Virtual environments
 .venv/
 venv/
 ENV/
 env/
+.env
+.env.*
+!.env.example
 
 # IDEs
 .vscode/
@@ -34,13 +52,17 @@ env/
 *.swp
 *.swo
 *~
+*.bak
+*.backup
 
 # Testing
 .pytest_cache/
 logs/
+*.log
 .coverage
 htmlcov/
 *.cover
+coverage.xml
 
 # Kilo
 .kilo/
@@ -48,8 +70,15 @@ htmlcov/
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/.vite/
+frontend/.cache/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # OS
 Thumbs.db
 Desktop.ini
 .DS_Store
+ehthumbs.db

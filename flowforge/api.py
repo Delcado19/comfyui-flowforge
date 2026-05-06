@@ -3,14 +3,16 @@ aiohttp API server for ComfyUI FlowForge.
 Provides endpoints for layout and optimization.
 """
 
-import logging
-import json
+from copy import deepcopy
+from typing import Any, Dict, List
+
 from aiohttp import web
-from typing import Dict, Any
+
+from .logger import setup_logger
 from .parser import parse_comfyui_workflow
 from .layout import apply as apply_layout
+from .model import Link, Node, Workflow
 from .optimizer import optimize
-from .logger import setup_logger
 
 logger = setup_logger(__name__)
 
@@ -71,70 +73,182 @@ async def health_handler(request):
     return web.json_response({"status": "ok"})
 
 
-def _workflow_to_comfyui_json(workflow) -> Dict[str, Any]:
+def _workflow_to_comfyui_json(workflow: Workflow) -> Dict[str, Any]:
     """
     Convert a Workflow model back to ComfyUI JSON format.
+
+    When the workflow came from a ComfyUI export, keep that export as the
+    authoritative structure and patch only the fields FlowForge changes. This
+    preserves custom node metadata, widget values, colors, flags, properties,
+    extra data, and unknown future ComfyUI fields.
     """
+    if workflow.source_json is None:
+        return _workflow_to_minimal_json(workflow)
+
+    result = deepcopy(workflow.source_json)
+    result["nodes"] = _merge_nodes(result.get("nodes", []), workflow)
+    result["links"] = _merge_links(result.get("links", []), workflow)
+    result["groups"] = _merge_groups(result.get("groups", []), workflow)
+
+    if workflow.nodes:
+        result["last_node_id"] = max(int(result.get("last_node_id", 0)), max(workflow.nodes))
+    if workflow.links:
+        result["last_link_id"] = max(int(result.get("last_link_id", 0)), max(workflow.links))
+
+    return result
+
+
+def _workflow_to_minimal_json(workflow: Workflow) -> Dict[str, Any]:
     nodes = []
     for node in workflow.nodes.values():
-        node_dict = {
-            "id": node.id,
-            "type": node.type,
-            "pos": [node.x, node.y],
-            "size": node.size,
-            "mode": node.mode,
-            "order": node.order,
-            "inputs": [],  # We'll need to reconstruct inputs from links
-            "outputs": []
-        }
-        # Reconstruct inputs and outputs from link data
-        # For each input link on this node, find the link object
-        for link_id in node.input_links:
-            link = workflow.links.get(link_id)
-            if link:
-                node_dict["inputs"].append({
-                    "name": f"input_{link.source_port}",  # Simplified; real ComfyUI has names
-                    "type": link.type,
-                    "link": link_id
-                })
-        for link_id in node.output_links:
-            link = workflow.links.get(link_id)
-            if link:
-                node_dict["outputs"].append({
-                    "name": f"output_{link.source_port}",
-                    "type": link.type,
-                    "links": [link_id]
-                })
-        nodes.append(node_dict)
-    
-    links = []
-    for link in workflow.links.values():
-        # ComfyUI link format: [link_id, source_node, source_port, target_node, target_port, "TYPE"]
-        links.append([
-            link.id,
-            link.source,
-            link.source_port,
-            link.target,
-            link.target_port,
-            link.type if link.type else ""
-        ])
-    
-    groups = []
-    for group in workflow.groups:
-        groups.append({
-            "id": group.id,
-            "name": group.name,
-            "bounding": group.bounding
-        })
+        nodes.append(_new_node_json(node, workflow))
     
     return {
         "nodes": nodes,
-        "links": links,
-        "groups": groups,
+        "links": [_link_to_json(link) for link in workflow.links.values()],
+        "groups": [
+            {
+                "id": group.id,
+                "name": group.name,
+                "bounding": group.bounding,
+            }
+            for group in workflow.groups
+        ],
         "last_node_id": max(workflow.nodes.keys()) if workflow.nodes else 0,
         "last_link_id": max(workflow.links.keys()) if workflow.links else 0,
-        "revision": 0
+        "revision": 0,
     }
+
+
+def _merge_nodes(source_nodes: List[Dict[str, Any]], workflow: Workflow) -> List[Dict[str, Any]]:
+    nodes_by_id = {
+        node_data.get("id"): deepcopy(node_data)
+        for node_data in source_nodes
+        if isinstance(node_data, dict)
+    }
+    merged_nodes = []
+
+    for node in workflow.nodes.values():
+        node_data = nodes_by_id.pop(node.id, None)
+        if node_data is None:
+            node_data = _new_node_json(node, workflow)
+        else:
+            node_data["pos"] = [node.x, node.y]
+            if node.widgets_values or "widgets_values" in node_data:
+                node_data["widgets_values"] = deepcopy(node.widgets_values)
+            _sync_node_link_refs(node_data, node, workflow)
+        merged_nodes.append(node_data)
+
+    return merged_nodes
+
+
+def _merge_links(source_links: List[List[Any]], workflow: Workflow) -> List[List[Any]]:
+    original_order = [
+        link_data[0]
+        for link_data in source_links
+        if isinstance(link_data, list) and link_data and link_data[0] in workflow.links
+    ]
+    remaining = sorted(link_id for link_id in workflow.links if link_id not in original_order)
+    return [_link_to_json(workflow.links[link_id]) for link_id in original_order + remaining]
+
+
+def _merge_groups(source_groups: List[Dict[str, Any]], workflow: Workflow) -> List[Dict[str, Any]]:
+    groups_by_id = {
+        group_data.get("id"): deepcopy(group_data)
+        for group_data in source_groups
+        if isinstance(group_data, dict)
+    }
+    merged_groups = []
+
+    for group in workflow.groups:
+        group_data = groups_by_id.get(group.id, {"id": group.id, "name": group.name})
+        group_data["bounding"] = group.bounding
+        merged_groups.append(group_data)
+
+    return merged_groups
+
+
+def _sync_node_link_refs(node_data: Dict[str, Any], node: Node, workflow: Workflow) -> None:
+    links_by_input = {
+        link.target_port: link.id
+        for link in workflow.links.values()
+        if link.target == node.id
+    }
+    links_by_output: Dict[int, List[int]] = {}
+    for link in workflow.links.values():
+        if link.source == node.id:
+            links_by_output.setdefault(link.source_port, []).append(link.id)
+
+    inputs = node_data.get("inputs")
+    if isinstance(inputs, list):
+        for port_index, input_data in enumerate(inputs):
+            if isinstance(input_data, dict) and port_index in links_by_input:
+                input_data["link"] = links_by_input[port_index]
+
+    outputs = node_data.get("outputs")
+    if isinstance(outputs, list):
+        for port_index, output_data in enumerate(outputs):
+            if isinstance(output_data, dict):
+                output_data["links"] = sorted(links_by_output.get(port_index, []))
+
+
+def _new_node_json(node: Node, workflow: Workflow) -> Dict[str, Any]:
+    node_data: Dict[str, Any] = {
+        "id": node.id,
+        "type": node.type,
+        "pos": [node.x, node.y],
+        "size": node.size,
+        "mode": node.mode,
+        "order": node.order,
+        "inputs": _new_inputs_json(node, workflow),
+        "outputs": _new_outputs_json(node, workflow),
+    }
+    if node.widgets_values:
+        node_data["widgets_values"] = deepcopy(node.widgets_values)
+    return node_data
+
+
+def _new_inputs_json(node: Node, workflow: Workflow) -> List[Dict[str, Any]]:
+    inputs = []
+    for link_id in node.input_links:
+        link = workflow.links.get(link_id)
+        if link:
+            inputs.append(
+                {
+                    "name": f"input_{link.target_port}",
+                    "type": link.type,
+                    "link": link_id,
+                }
+            )
+    return inputs
+
+
+def _new_outputs_json(node: Node, workflow: Workflow) -> List[Dict[str, Any]]:
+    output_links: Dict[int, List[Link]] = {}
+    for link_id in node.output_links:
+        link = workflow.links.get(link_id)
+        if link:
+            output_links.setdefault(link.source_port, []).append(link)
+
+    return [
+        {
+            "name": f"output_{port_index}",
+            "type": links[0].type,
+            "links": [link.id for link in links],
+        }
+        for port_index, links in sorted(output_links.items())
+    ]
+
+
+def _link_to_json(link: Link) -> List[Any]:
+    return [
+        link.id,
+        link.source,
+        link.source_port,
+        link.target,
+        link.target_port,
+        link.type if link.type else "",
+    ]
 
 
 def create_app() -> web.Application:

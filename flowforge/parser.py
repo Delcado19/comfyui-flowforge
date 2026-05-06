@@ -3,9 +3,8 @@ Parser for ComfyUI workflow JSON files.
 Converts the JSON into the FlowForge Workflow model.
 """
 
-import json
-import logging
-from typing import Dict, List, Any
+from copy import deepcopy
+
 from .model import Node, Link, Group, Workflow
 from .logger import setup_logger
 
@@ -23,7 +22,7 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
     """
     logger.info("Parsing ComfyUI workflow JSON")
     
-    workflow = Workflow()
+    workflow = Workflow(source_json=deepcopy(json_data))
     
     # Parse nodes
     nodes_data = json_data.get('nodes', [])
@@ -44,6 +43,7 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
             size = [size.get('width', 0.0), size.get('height', 0.0)]
         mode = node_data.get('mode', 0)
         order = node_data.get('order', 0)
+        widgets_values = deepcopy(node_data.get('widgets_values', []))
         
         node = Node(
             id=node_id,
@@ -52,7 +52,8 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
             y=float(pos[1]),
             size=[float(size[0]), float(size[1])],
             mode=mode,
-            order=order
+            order=order,
+            widgets_values=widgets_values,
         )
         workflow.nodes[node_id] = node
         logger.debug(f"Parsed node {node_id}: {node_type} at ({node.x}, {node.y})")

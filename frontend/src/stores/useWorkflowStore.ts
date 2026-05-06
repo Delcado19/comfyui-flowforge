@@ -1,66 +1,78 @@
 import { defineStore } from 'pinia'
 
-export interface Port {
-  id: string
-  name: string
+export type NodeId = number | string
+export type NodeSize = [number, number] | { width?: number; height?: number }
+export type ComfyLink = [number, NodeId, number, NodeId, number, string?]
+
+export interface ComfyPort {
+  name?: string
   type?: string
+  link?: number | null
+  links?: number[] | null
+  [key: string]: unknown
 }
 
-export interface Node {
-  id: string
+export interface ComfyNode {
+  id: NodeId
   type: string
   pos: [number, number]
-  size: [number, number]
+  size?: NodeSize
   title?: string
-  inputs: Port[]
-  outputs: Port[]
+  inputs?: ComfyPort[]
+  outputs?: ComfyPort[]
+  [key: string]: unknown
 }
 
 export interface Connection {
-  id: string
-  source: string
-  sourcePort: string
-  target: string
-  targetPort: string
+  id: number
+  source: NodeId
+  sourcePort: number
+  target: NodeId
+  targetPort: number
   type?: string
+}
+
+export interface ComfyWorkflow {
+  nodes: ComfyNode[]
+  links?: ComfyLink[]
+  groups?: unknown[]
+  [key: string]: unknown
 }
 
 export const useWorkflowStore = defineStore('workflow', {
   state: () => ({
-    nodes: [] as Node[],
-    connections: [] as Connection[],
+    workflow: null as ComfyWorkflow | null,
     scale: 1,
     offsetX: 0,
     offsetY: 0
   }),
+  getters: {
+    nodes: (state): ComfyNode[] => state.workflow?.nodes ?? [],
+    connections: (state): Connection[] => {
+      return (state.workflow?.links ?? []).map((link) => ({
+        id: link[0],
+        source: link[1],
+        sourcePort: link[2],
+        target: link[3],
+        targetPort: link[4],
+        type: link[5],
+      }))
+    },
+  },
   actions: {
-    addNode(node: Node) {
-      this.nodes.push(node)
-    },
-    removeNode(id: string) {
-      this.nodes = this.nodes.filter(n => n.id !== id)
-      this.connections = this.connections.filter(c => c.source !== id && c.target !== id)
-    },
-    addConnection(connection: Connection) {
-      this.connections.push(connection)
-    },
-    removeConnection(id: string) {
-      this.connections = this.connections.filter(c => c.id !== id)
-    },
-    setNodes(nodes: Node[]) {
-      this.nodes = nodes
-    },
-    setConnections(connections: Connection[]) {
-      this.connections = connections
+    setWorkflow(workflow: ComfyWorkflow) {
+      this.workflow = workflow
     },
     setView(scale: number, offsetX: number, offsetY: number) {
       this.scale = scale
       this.offsetX = offsetX
       this.offsetY = offsetY
     },
-    loadWorkflow(data: { nodes: Node[]; connections: Connection[] }) {
-      this.nodes = data.nodes || []
-      this.connections = data.connections || []
+    loadWorkflow(data: ComfyWorkflow) {
+      if (!Array.isArray(data.nodes)) {
+        throw new Error('ComfyUI workflow is missing a nodes array')
+      }
+      this.workflow = data
     }
   }
 })

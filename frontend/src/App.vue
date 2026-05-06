@@ -28,21 +28,28 @@ function onFileSelected(e: Event) {
 }
 
 async function layout() {
+  if (!store.workflow) return
+
   try {
     const response = await fetch('http://localhost:8000/layout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ nodes: store.nodes, connections: store.connections })
+      body: JSON.stringify(store.workflow)
     })
     const data = await response.json()
-    if (data.nodes) store.setNodes(data.nodes)
+    if (!response.ok) {
+      throw new Error(data.error || 'Layout request failed')
+    }
+    store.loadWorkflow(data)
   } catch (err) {
     alert('Layout failed: ' + err)
   }
 }
 
 function save() {
-  const data = { nodes: store.nodes, connections: store.connections }
+  if (!store.workflow) return
+
+  const data = store.workflow
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')

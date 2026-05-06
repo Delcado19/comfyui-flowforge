@@ -3,7 +3,7 @@ Data models for ComfyUI FlowForge.
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -45,5 +45,4 @@ class Workflow:
     links: Dict[int, Link] = field(default_factory=dict)
     groups: List[Group] = field(default_factory=list)
     ungrouped_nodes: List[Node] = field(default_factory=list)
-    # Additional metadata if needed
-    # We'll keep a reference to the original JSON if needed, but not necessary for layout.
+    source_json: Optional[Dict[str, Any]] = None

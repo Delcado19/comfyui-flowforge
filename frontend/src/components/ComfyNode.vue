@@ -1,16 +1,12 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Node, Port } from '../stores/useWorkflowStore'
+import type { ComfyNode } from '../stores/useWorkflowStore'
 
 interface Props {
-  node: Node
+  node: ComfyNode
 }
 
 const props = defineProps<Props>()
-
-const emit = defineEmits<{
-  (e: 'update:pos', pos: [number, number]): void
-}>()
 
 const nodeColors: Record<string, string> = {
   default: '#5a5a5a',
@@ -24,11 +20,16 @@ const headerColor = computed(() => {
   return nodeColors[props.node.type.toLowerCase()] || nodeColors.default
 })
 
+const nodeSize = computed<[number, number]>(() => {
+  if (Array.isArray(props.node.size)) return props.node.size
+  return [props.node.size?.width ?? 200, props.node.size?.height ?? 100]
+})
+
 const bodyStyle = computed(() => ({
   position: 'absolute' as const,
   left: props.node.pos[0] + 'px',
   top: props.node.pos[1] + 'px',
-  width: props.node.size[0] + 'px',
+  width: nodeSize.value[0] + 'px',
   minHeight: '80px',
   backgroundColor: '#2a2a2a',
   border: '1px solid #444',
@@ -55,7 +56,7 @@ const portSize = 8
     </div>
     <div class="node-body" style="padding: 8px;">
       <div class="inputs" style="margin-bottom: 4px;">
-        <div v-for="input in node.inputs" :key="input.id" class="input-port" 
+        <div v-for="(input, index) in node.inputs ?? []" :key="index" class="input-port"
           style="display: flex; align-items: center; margin: 2px 0; font-size: 12px;">
           <div :style="{
             width: portSize + 'px',
@@ -69,7 +70,7 @@ const portSize = 8
         </div>
       </div>
       <div class="outputs">
-        <div v-for="output in node.outputs" :key="output.id" class="output-port"
+        <div v-for="(output, index) in node.outputs ?? []" :key="index" class="output-port"
           style="display: flex; align-items: center; margin: 2px 0; font-size: 12px; justify-content: flex-end;">
           <span style="color: #ccc;">{{ output.name }}</span>
           <div :style="{

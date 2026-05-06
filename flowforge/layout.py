@@ -3,9 +3,7 @@ Layout algorithm for ComfyUI FlowForge.
 Implements the six-phase pipeline as described in the README.
 """
 
-import logging
-from typing import Dict, List, Tuple, Optional
-from .model import Node, Link, Group, Workflow
+from .model import Node, Group, Workflow
 from .logger import setup_logger
 
 # Set up logger for this module
@@ -81,8 +79,11 @@ def _assign_groups(workflow: Workflow) -> None:
     """
     logger.debug("Assigning nodes to groups")
     
-    # Clear ungrouped list (just in case)
+    # Clear previous assignment state so parser-time and layout-time grouping
+    # cannot duplicate group membership when layout is called repeatedly.
     workflow.ungrouped_nodes.clear()
+    for group in workflow.groups:
+        group.nodes.clear()
     
     # For each node, find the first group that contains it (by original position)
     for node in workflow.nodes.values():
@@ -131,10 +132,10 @@ def _order_groups(workflow: Workflow) -> None:
     
     # Build a dependency graph using group indices
     n_groups = len(workflow.groups)
-    group_deps = [set() for _ in range(n_groups)]
+    group_deps: list[set[int]] = [set() for _ in range(n_groups)]
     
     # Create a mapping from node id to group index
-    node_to_group_idx = {}
+    node_to_group_idx: dict[int, int] = {}
     for gi, group in enumerate(workflow.groups):
         for node in group.nodes:
             node_to_group_idx[node.id] = gi
@@ -155,7 +156,7 @@ def _order_groups(workflow: Workflow) -> None:
             group_deps[target_gi].add(source_gi)
     
     # Topological sort using Kahn's algorithm
-    ordered_indices = []
+    ordered_indices: list[int] = []
     remaining = set(range(n_groups))
     deps = [set(d) for d in group_deps]
     
@@ -203,8 +204,8 @@ def _layout_groups_internal(workflow: Workflow) -> None:
         # Build adjacency within this group only
         node_ids = {n.id for n in group.nodes}
         # Build directed edges (source -> target) where both nodes in this group
-        adj = {nid: [] for nid in node_ids}
-        rev_adj = {nid: [] for nid in node_ids}
+        adj: dict[int, list[int]] = {nid: [] for nid in node_ids}
+        rev_adj: dict[int, list[int]] = {nid: [] for nid in node_ids}
         for link in workflow.links.values():
             if link.source in node_ids and link.target in node_ids:
                 adj[link.source].append(link.target)
@@ -212,11 +213,11 @@ def _layout_groups_internal(workflow: Workflow) -> None:
         
         # --- 1. Layer assignment (longest path from sources) ---
         # Sources: nodes with no incoming edges within the group
-        layers = {}  # node id -> layer number
+        layers: dict[int, int] = {}
         # Start with sources at layer 0
         sources = [nid for nid in node_ids if not rev_adj[nid]]
-        queue = [(nid, 0) for nid in sources]
-        visited = set()
+        queue: list[tuple[int, int]] = [(nid, 0) for nid in sources]
+        visited: set[int] = set()
         while queue:
             nid, layer = queue.pop(0)
             if nid in visited:
@@ -235,7 +236,7 @@ def _layout_groups_internal(workflow: Workflow) -> None:
         # --- 2. Crossing minimisation (Barycenter heuristic) ---
         # Order nodes in each layer by barycenter of neighbours in adjacent layer
         # Build layer -> nodes mapping
-        layer_to_nodes = {}
+        layer_to_nodes: dict[int, list[int]] = {}
         for nid, layer in layers.items():
             layer_to_nodes.setdefault(layer, []).append(nid)
         max_layer = max(layers.values()) if layers else 0
@@ -312,8 +313,8 @@ def _position_groups_globally(workflow: Workflow) -> None:
     if not workflow.groups:
         return
     
-    start_x = 50
-    start_y = 50
+    start_x = 50.0
+    start_y = 50.0
     
     for i, group in enumerate(workflow.groups):
         if not group.nodes:
@@ -348,7 +349,7 @@ def _position_groups_globally(workflow: Workflow) -> None:
         start_x += g_width + GROUP_H_GAP
         
         if (i + 1) % 3 == 0:
-            start_x = 50
+            start_x = 50.0
             start_y += g_height + GROUP_V_GAP
 
 
@@ -366,8 +367,8 @@ def _position_ungrouped_nodes(workflow: Workflow) -> None:
     sorted_nodes = sorted(workflow.ungrouped_nodes, key=lambda n: (n.y, n.x))
     
     # Determine start position: if groups exist, start after the rightmost group extent
-    max_right = 0
-    max_bottom = 0
+    max_right = 0.0
+    max_bottom = 0.0
     for group in workflow.groups:
         if group.nodes:
             group_max_x = max(n.x + n.size[0] for n in group.nodes)
@@ -376,7 +377,7 @@ def _position_ungrouped_nodes(workflow: Workflow) -> None:
             max_bottom = max(max_bottom, group_max_y)
     
     start_x = max_right + GROUP_H_GAP if max_right > 0 else 50
-    start_y = 50
+    start_y = 50.0
     
     # Determine column count based on screen width or constant
     cols = 3

@@ -3,11 +3,8 @@ Tests for the parser module.
 """
 
 import pytest
-import json
-import tempfile
-from pathlib import Path
+
 from flowforge.parser import parse_comfyui_workflow
-from flowforge.model import Node, Link, Group, Workflow
 from flowforge.logger import setup_logger
 
 logger = setup_logger(__name__)

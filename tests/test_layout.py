@@ -2,9 +2,15 @@
 Tests for the layout algorithm.
 """
 
-import pytest
 from flowforge.model import Node, Link, Group, Workflow
-from flowforge.layout import apply, _assign_groups, _order_groups, _layout_groups_internal, _position_groups_globally, _update_bounding_boxes
+import pytest
+from flowforge.layout import (
+    apply,
+    _assign_groups,
+    _layout_groups_internal,
+    _position_groups_globally,
+    _update_bounding_boxes,
+)
 from flowforge.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -60,6 +66,22 @@ def test_group_assignment():
     assert n1 in group.nodes
     assert n2 in group.nodes
     logger.info("Group assignment test passed")
+
+
+def test_group_assignment_is_idempotent():
+    logger.info("Testing group assignment idempotency")
+    wf = Workflow()
+    node = Node(id=1, type="TestNode", x=100, y=100, size=[100, 100])
+    group = Group(id=1, name="test", bounding=[0, 0, 500, 500], nodes=[node])
+    wf.nodes[1] = node
+    wf.groups = [group]
+
+    _assign_groups(wf)
+    _assign_groups(wf)
+
+    assert group.nodes == [node]
+    assert wf.ungrouped_nodes == []
+    logger.info("Group assignment idempotency test passed")
 
 
 def test_internal_layout_stages():
