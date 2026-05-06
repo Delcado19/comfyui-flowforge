@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Automatically rearranges nodes in ComfyUI workflow JSON files to minimize connection crossings"
 readme = "README.md"
 requires-python = ">=3.10"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Delcado19", email = "delcado@example.com"}
 ]
@@ -12,13 +12,17 @@ keywords = ["comfyui", "workflow", "layout", "graph", "algorithm"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: End Users/Desktop",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "aiohttp>=3.9.0",
+    "pydantic>=2.0",
 ]
 
 [project.urls]
@@ -34,7 +38,16 @@ flowforge-gui = "flowforge.gui:main"
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["flowforge*"]
+exclude = ["frontend*", "tests*", "logs*", "assets*", "example-workflows*", "docs*"]
+
+[tool.setuptools.package-data]
+flowforge = ["py.typed"]
+
 [tool.uv]
+# Dev dependencies for development (use: uv sync --dev)
 dev-dependencies = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
@@ -49,3 +62,4 @@ python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = ["-v"]
+asyncio_mode = "auto"
