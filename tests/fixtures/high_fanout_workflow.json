@@ -1,0 +1,27 @@
+{
+  "nodes": [
+    {"id": 1, "type": "CheckpointLoaderSimple", "pos": [100, 100], "size": [200, 100], "mode": 0, "order": 0, "inputs": [], "outputs": [{"name": "MODEL", "links": [10]}, {"name": "CLIP", "links": [20]}, {"name": "VAE", "links": [30]}]},
+    {"id": 2, "type": "KSampler", "pos": [350, 100], "size": [200, 100], "mode": 0, "order": 1, "inputs": [{"name": "model", "link": 10}], "outputs": [{"name": "LATENT", "links": [40]}]},
+    {"id": 3, "type": "KSampler", "pos": [350, 250], "size": [200, 100], "mode": 0, "order": 2, "inputs": [{"name": "model", "link": 10}], "outputs": [{"name": "LATENT", "links": [50]}]},
+    {"id": 4, "type": "KSampler", "pos": [350, 400], "size": [200, 100], "mode": 0, "order": 3, "inputs": [{"name": "model", "link": 10}], "outputs": [{"name": "LATENT", "links": [60]}]},
+    {"id": 5, "type": "CLIPTextEncode", "pos": [600, 100], "size": [200, 100], "mode": 0, "order": 4, "inputs": [{"name": "clip", "link": 20}], "outputs": [{"name": "CONDITIONING", "links": [70]}]},
+    {"id": 6, "type": "CLIPTextEncode", "pos": [600, 250], "size": [200, 100], "mode": 0, "order": 5, "inputs": [{"name": "clip", "link": 20}], "outputs": [{"name": "CONDITIONING", "links": [80]}]},
+    {"id": 7, "type": "VAEDecode", "pos": [600, 400], "size": [200, 100], "mode": 0, "order": 6, "inputs": [{"name": "vae", "link": 30}], "outputs": [{"name": "IMAGE", "links": [90]}]},
+    {"id": 8, "type": "PreviewImage", "pos": [850, 250], "size": [200, 100], "mode": 0, "order": 7, "inputs": [{"name": "images", "link": 90}], "outputs": []}
+  ],
+  "links": [
+    [10, 1, 0, 2, 0, "MODEL"],
+    [10, 1, 0, 3, 0, "MODEL"],
+    [10, 1, 0, 4, 0, "MODEL"],
+    [20, 1, 1, 5, 0, "CLIP"],
+    [20, 1, 1, 6, 0, "CLIP"],
+    [30, 1, 2, 7, 0, "VAE"],
+    [40, 2, 0, 8, 0, "LATENT"],
+    [50, 3, 0, 8, 0, "LATENT"],
+    [60, 4, 0, 8, 0, "LATENT"],
+    [70, 5, 0, 2, 1, "CONDITIONING"],
+    [80, 6, 0, 3, 1, "CONDITIONING"],
+    [90, 7, 0, 8, 0, "IMAGE"]
+  ],
+  "groups": []
+}
