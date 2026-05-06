@@ -5,11 +5,15 @@ import ComfyNode from './ComfyNode.vue'
 import ComfyConnection from './ComfyConnection.vue'
 
 const store = useWorkflowStore()
+const TITLE_HEIGHT = 26
+const SLOT_ROW_HEIGHT = 20
+const SLOT_ROW_OFFSET = 8
 
 const canvasRef = ref<HTMLElement | null>(null)
 const isDraggingCanvas = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const panStart = ref({ x: 0, y: 0 })
+const activePointerId = ref<number | null>(null)
 
 const canvasStyle = computed(() => ({
   transform: `translate(${store.offsetX}px, ${store.offsetY}px) scale(${store.scale})`,
@@ -23,14 +27,13 @@ function getNodeSize(node: WorkflowNode): [number, number] {
 
 function getPortPosition(node: WorkflowNode, portIndex: number, isOutput: boolean): [number, number] {
   const nodeLeft = node.pos[0]
-  const nodeTop = node.pos[1] + 30
-  const portYOffset = nodeTop + 20
+  const portY = node.pos[1] + TITLE_HEIGHT + SLOT_ROW_OFFSET + SLOT_ROW_HEIGHT / 2 + portIndex * SLOT_ROW_HEIGHT
   const nodeSize = getNodeSize(node)
   
   if (isOutput) {
-    return [nodeLeft + nodeSize[0], portYOffset + portIndex * 18]
+    return [nodeLeft + nodeSize[0], portY]
   } else {
-    return [nodeLeft, portYOffset + portIndex * 18]
+    return [nodeLeft, portY]
   }
 }
 
@@ -48,40 +51,65 @@ function getConnectionTargetPos(conn: Connection): [number, number] {
 
 function onWheel(e: WheelEvent) {
   e.preventDefault()
-  const delta = -e.deltaY * 0.001
-  const newScale = Math.max(0.1, Math.min(3, store.scale + delta))
-  store.setView(newScale, store.offsetX, store.offsetY)
+  const canvas = canvasRef.value
+  if (!canvas) return
+
+  const rect = canvas.getBoundingClientRect()
+  const cursorX = e.clientX - rect.left
+  const cursorY = e.clientY - rect.top
+  const previousScale = store.scale
+  const zoomFactor = Math.exp(-e.deltaY * 0.0015)
+  const newScale = Math.max(0.1, Math.min(3, previousScale * zoomFactor))
+
+  if (newScale === previousScale) return
+
+  const worldX = (cursorX - store.offsetX) / previousScale
+  const worldY = (cursorY - store.offsetY) / previousScale
+  const nextOffsetX = cursorX - worldX * newScale
+  const nextOffsetY = cursorY - worldY * newScale
+
+  store.setView(newScale, nextOffsetX, nextOffsetY)
 }
 
-function onCanvasMouseDown(e: MouseEvent) {
-  if (e.button !== 0) return
-  if (e.target !== canvasRef.value && !(e.target as HTMLElement).classList?.contains('canvas-bg')) return
-  
+function onCanvasPointerDown(e: PointerEvent) {
+  if (e.button !== 0 && e.button !== 1) return
+  const target = e.target as HTMLElement
+  if (target.closest('.comfy-node') || target.closest('.empty-hint')) return
+
+  e.preventDefault()
   isDraggingCanvas.value = true
+  activePointerId.value = e.pointerId
   dragStart.value = { x: e.clientX, y: e.clientY }
   panStart.value = { x: store.offsetX, y: store.offsetY }
+  canvasRef.value?.setPointerCapture(e.pointerId)
 }
 
-function onMouseMove(e: MouseEvent) {
+function onPointerMove(e: PointerEvent) {
   if (!isDraggingCanvas.value) return
+  if (activePointerId.value !== e.pointerId) return
   
   const dx = e.clientX - dragStart.value.x
   const dy = e.clientY - dragStart.value.y
   store.setView(store.scale, panStart.value.x + dx, panStart.value.y + dy)
 }
 
-function onMouseUp() {
+function onPointerUp(e: PointerEvent) {
+  if (activePointerId.value !== e.pointerId) return
+  canvasRef.value?.releasePointerCapture(e.pointerId)
   isDraggingCanvas.value = false
+  activePointerId.value = null
 }
 
 onMounted(() => {
-  window.addEventListener('mousemove', onMouseMove)
-  window.addEventListener('mouseup', onMouseUp)
+  window.addEventListener('pointermove', onPointerMove)
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onPointerUp)
 })
 
 onUnmounted(() => {
-  window.removeEventListener('mousemove', onMouseMove)
-  window.removeEventListener('mouseup', onMouseUp)
+  window.removeEventListener('pointermove', onPointerMove)
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onPointerUp)
 })
 
 function addSampleWorkflow() {
@@ -128,7 +156,14 @@ function addSampleWorkflow() {
 </script>
 
 <template>
-  <div ref="canvasRef" class="canvas-container" @wheel="onWheel" @mousedown="onCanvasMouseDown">
+  <div
+    ref="canvasRef"
+    class="canvas-container"
+    :class="{ 'is-panning': isDraggingCanvas }"
+    @wheel="onWheel"
+    @pointerdown="onCanvasPointerDown"
+  >
+    <div class="canvas-bg"></div>
     <svg class="connections-svg" :style="{ width: '100%', height: '100%' }">
       <g :style="canvasStyle">
         <ComfyConnection
@@ -161,8 +196,9 @@ function addSampleWorkflow() {
   overflow: hidden;
   background: #1a1a1a;
   cursor: grab;
+  touch-action: none;
 }
-.canvas-container:active {
+.canvas-container.is-panning {
   cursor: grabbing;
 }
 .canvas-bg {
@@ -174,6 +210,7 @@ function addSampleWorkflow() {
 .connections-svg {
   position: absolute;
   inset: 0;
+  pointer-events: none;
 }
 .nodes-container {
   position: absolute;

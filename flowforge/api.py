@@ -16,6 +16,21 @@ from .optimizer import optimize
 
 logger = setup_logger(__name__)
 
+
+@web.middleware
+async def cors_middleware(request, handler):
+    """Allow the local browser frontend to call the API from its own port."""
+    if request.method == "OPTIONS":
+        response = web.Response(status=204)
+    else:
+        response = await handler(request)
+
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    return response
+
+
 async def layout_handler(request):
     """
     POST /layout
@@ -255,7 +270,7 @@ def create_app() -> web.Application:
     """
     Create and configure the aiohttp application.
     """
-    app = web.Application()
+    app = web.Application(middlewares=[cors_middleware])
     app.add_routes([
         web.post('/layout', layout_handler),
         web.post('/optimize', optimize_handler),

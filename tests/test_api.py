@@ -51,9 +51,27 @@ async def test_health_endpoint(client):
     logger.info("Testing /health endpoint")
     resp = await client.get('/health')
     assert resp.status == 200
+    assert resp.headers["Access-Control-Allow-Origin"] == "*"
     data = await resp.json()
     assert data['status'] == 'ok'
     logger.info("Health endpoint OK")
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight(client):
+    resp = await client.options(
+        "/layout",
+        headers={
+            "Origin": "http://127.0.0.1:5176",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Content-Type",
+        },
+    )
+
+    assert resp.status == 204
+    assert resp.headers["Access-Control-Allow-Origin"] == "*"
+    assert "POST" in resp.headers["Access-Control-Allow-Methods"]
+    assert "Content-Type" in resp.headers["Access-Control-Allow-Headers"]
 
 
 @pytest.mark.asyncio

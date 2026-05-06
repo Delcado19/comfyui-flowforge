@@ -60,7 +60,7 @@ uv run flowforge optimize input.json optimized.json
 uv run flowforge-gui
 ```
 
-The GUI opens in your browser at `http://localhost:5173` (or the URL shown in the terminal).
+The GUI opens in your browser at the URL shown in the terminal. It starts at `http://127.0.0.1:5173` and automatically picks the next available frontend port when that port is unavailable.
 
 ### One-Click Launchers
 

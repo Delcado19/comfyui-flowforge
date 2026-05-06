@@ -6,9 +6,14 @@ export type ComfyLink = [number, NodeId, number, NodeId, number, string?]
 
 export interface ComfyPort {
   name?: string
+  localized_name?: string
   type?: string
   link?: number | null
   links?: number[] | null
+  widget?: {
+    name?: string
+    [key: string]: unknown
+  } | null
   [key: string]: unknown
 }
 
