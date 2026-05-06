@@ -46,9 +46,8 @@ exclude = ["frontend*", "tests*", "logs*", "assets*", "example-workflows*", "doc
 [tool.setuptools.package-data]
 flowforge = ["py.typed"]
 
-[tool.uv]
-# Dev dependencies for development (use: uv sync --dev)
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "black>=22.0",

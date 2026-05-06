@@ -21,13 +21,46 @@ FlowForge reads a workflow JSON, computes a clean left-to-right layout using a g
 
 ## Installation
 
-### 1 — Prerequisites
+### Prerequisites
 
-Ensure **uv** is installed (it is already present on this system).
+Ensure **uv** is installed. If not, install it from [astral.sh/uv](https://docs.astral.sh/uv/).
 
-### 2 — Clone and set up
+### Install from source
+
+```bash
+git clone https://github.com/Delcado19/comfyui-flowforge.git
+cd comfyui-flowforge
+uv sync
+```
+
+This installs all dependencies and the `comfyui-flowforge` package in development mode.
 
 ## Quick Start
+
+### CLI Usage
+
+```bash
+# Start the API server
+uv run flowforge serve
+
+# Apply layout to a workflow file
+uv run flowforge layout input.json output.json
+
+# Optimize and layout a workflow
+uv run flowforge layout input.json output.json --optimize
+
+# Optimize only
+uv run flowforge optimize input.json optimized.json
+```
+
+### GUI Usage
+
+```bash
+# Start API server and open the web interface
+uv run flowforge-gui
+```
+
+The GUI opens in your browser at `http://localhost:5173` (or the URL shown in the terminal).
 
 ### Features
 
@@ -36,8 +69,6 @@ Ensure **uv** is installed (it is already present on this system).
 - **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks
 - **Color-Coded Nodes**: Different node types are visually distinguished
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
-
-### Launching the GUI
 
 ## How It Works
 
@@ -112,6 +143,35 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 
 ## Project Structure
 
-```## License
-
 ```
+comfyui-flowforge/
+├── flowforge/              # Python package
+│   ├── __init__.py        # Package exports
+│   ├── api.py             # aiohttp API server
+│   ├── cli.py             # Command-line interface
+│   ├── gui.py             # GUI launcher
+│   ├── layout.py          # Layout algorithm (Sugiyama)
+│   ├── logger.py          # Logging setup
+│   ├── model.py           # Data models (Node, Link, Group, Workflow)
+│   ├── optimizer.py       # High-fanout optimizer
+│   └── parser.py          # ComfyUI JSON parser
+├── frontend/              # Vue 3 frontend
+│   ├── src/
+│   │   ├── App.vue
+│   │   ├── components/    # Vue components
+│   │   └── stores/        # Pinia stores
+│   └── ...
+├── tests/                 # Test suite
+│   ├── test_api.py
+│   ├── test_layout.py
+│   ├── test_optimizer.py
+│   └── test_parser.py
+├── pyproject.toml        # Project configuration
+└── README.md
+```
+
+---
+
+## License
+
+MIT License — see [LICENSE](LICENSE) file for details.
