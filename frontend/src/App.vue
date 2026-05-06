@@ -31,7 +31,7 @@ async function layout() {
   if (!store.workflow) return
 
   try {
-    const response = await fetch('http://localhost:8000/layout', {
+    const response = await fetch('/layout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(store.workflow)

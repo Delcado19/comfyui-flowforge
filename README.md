@@ -61,6 +61,7 @@ uv run flowforge-gui
 ```
 
 The GUI opens in your browser at the URL shown in the terminal. It starts at `http://127.0.0.1:5173` and automatically picks the next available frontend port when that port is unavailable.
+The launcher also auto-selects an available backend API port and passes it through to the frontend so the browser session stays connected even when local ports are already in use.
 
 ### One-Click Launchers
 
@@ -82,8 +83,9 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 
 - **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions
 - **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
+- **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, and group-aware dragging
 - **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks
-- **Color-Coded Nodes**: Different node types are visually distinguished
+- **Color-Coded Nodes**: Different node types are visually distinguished and rendered with ComfyUI-like widgets
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
 
 ## How It Works

@@ -40,7 +40,17 @@ export interface Connection {
 export interface ComfyWorkflow {
   nodes: ComfyNode[]
   links?: ComfyLink[]
-  groups?: unknown[]
+  groups?: ComfyGroup[]
+  [key: string]: unknown
+}
+
+export interface ComfyGroup {
+  id: number | string
+  title?: string
+  bounding?: [number, number, number, number]
+  color?: string
+  font_size?: number
+  flags?: Record<string, unknown>
   [key: string]: unknown
 }
 
@@ -72,6 +82,24 @@ export const useWorkflowStore = defineStore('workflow', {
       this.scale = scale
       this.offsetX = offsetX
       this.offsetY = offsetY
+    },
+    moveNode(nodeId: NodeId, x: number, y: number) {
+      const node = this.workflow?.nodes.find((item) => item.id === nodeId)
+      if (!node) return
+      node.pos = [x, y]
+    },
+    moveGroupByDelta(groupId: number | string, dx: number, dy: number, nodeIds: NodeId[] = []) {
+      const group = this.workflow?.groups?.find((item) => item.id === groupId)
+      if (!group || !Array.isArray(group.bounding)) return
+
+      const [x, y, width, height] = group.bounding
+      group.bounding = [x + dx, y + dy, width, height]
+
+      for (const nodeId of nodeIds) {
+        const node = this.workflow?.nodes.find((item) => item.id === nodeId)
+        if (!node) continue
+        node.pos = [node.pos[0] + dx, node.pos[1] + dy]
+      }
     },
     loadWorkflow(data: ComfyWorkflow) {
       if (!Array.isArray(data.nodes)) {
