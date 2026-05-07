@@ -142,7 +142,7 @@ def _extract_layout_request(data: Any) -> tuple[Any, LayoutSettings]:
         workflow_data = data["workflow"]
         return workflow_data, LayoutSettings.from_payload(data.get("layout"))
 
-    return data, LayoutSettings()
+    return data, LayoutSettings.from_payload(None)
 
 
 def _merge_nodes(source_nodes: List[Dict[str, Any]], workflow: Workflow) -> List[Dict[str, Any]]:

@@ -84,7 +84,7 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 - **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions
 - **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
 - **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, group-aware dragging, and resizable group containers
-- **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus a live minimum-distance control for layout density
+- **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus live X/Y spacing controls for layout density
 - **Color-Coded Nodes**: Different node types are visually distinguished and rendered with ComfyUI-like widgets
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
 
@@ -122,13 +122,14 @@ Each group's `bounding` rectangle is reconciled with the final positions of its 
 
 ### Layout Spacing
 
-Layout spacing is driven by a single minimum node distance value that scales the node gaps, group gaps, and group padding together.
+Layout spacing is driven by two independent values:
 
 | Setting | Default | Range | Description |
 | ------- | ------- | ----- | ----------- |
-| `min_node_distance` | 80 px | 20-200 px | Controls the live layout density in the GUI and the spacing used by the layout algorithm. |
+| `node_x_distance` | 80 px | 20-240 px | Controls horizontal spacing, group width, and the left-to-right packing distance. |
+| `node_y_distance` | 80 px | 20-240 px | Controls vertical spacing, group height, and the top-to-bottom packing distance. |
 
-The API accepts a layout wrapper of the form `{"workflow": ..., "layout": {"min_node_distance": 80}}`. Bare workflow JSON remains supported for backwards compatibility.
+The API accepts a layout wrapper of the form `{"workflow": ..., "layout": {"node_x_distance": 80, "node_y_distance": 80}}`. Bare workflow JSON remains supported for backwards compatibility, and legacy `min_node_distance` input is still accepted as an alias for both axes.
 
 ---
 

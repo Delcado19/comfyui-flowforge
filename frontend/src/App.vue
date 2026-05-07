@@ -5,11 +5,12 @@ import ComfyCanvas from './components/ComfyCanvas.vue'
 
 const store = useWorkflowStore()
 const fileInput = ref<HTMLInputElement | null>(null)
-const MIN_NODE_DISTANCE_DEFAULT = 80
-const MIN_NODE_DISTANCE_MIN = 20
-const MIN_NODE_DISTANCE_MAX = 200
+const NODE_DISTANCE_DEFAULT = 80
+const NODE_DISTANCE_MIN = 20
+const NODE_DISTANCE_MAX = 240
 
-const minNodeDistance = ref(MIN_NODE_DISTANCE_DEFAULT)
+const nodeXDistance = ref(NODE_DISTANCE_DEFAULT)
+const nodeYDistance = ref(NODE_DISTANCE_DEFAULT)
 
 let layoutTimer: ReturnType<typeof window.setTimeout> | undefined
 let layoutRequestId = 0
@@ -55,7 +56,8 @@ function scheduleLayout(immediate = false) {
         body: JSON.stringify({
           workflow: store.workflow,
           layout: {
-            min_node_distance: minNodeDistance.value,
+            node_x_distance: nodeXDistance.value,
+            node_y_distance: nodeYDistance.value,
           },
         }),
       })
@@ -98,8 +100,8 @@ function save() {
   URL.revokeObjectURL(url)
 }
 
-watch(minNodeDistance, () => {
-  if (Number.isFinite(minNodeDistance.value)) {
+watch([nodeXDistance, nodeYDistance], () => {
+  if (Number.isFinite(nodeXDistance.value) && Number.isFinite(nodeYDistance.value)) {
     scheduleLayout()
   }
 })
@@ -111,21 +113,40 @@ watch(minNodeDistance, () => {
       <button @click="openFile">Open</button>
       <button @click="layout">Layout</button>
       <div class="spacing-control">
-        <span>Min distance</span>
-        <input
-          v-model.number="minNodeDistance"
-          type="range"
-          :min="MIN_NODE_DISTANCE_MIN"
-          :max="MIN_NODE_DISTANCE_MAX"
-          step="5"
-        />
-        <input
-          v-model.number="minNodeDistance"
-          type="number"
-          :min="MIN_NODE_DISTANCE_MIN"
-          :max="MIN_NODE_DISTANCE_MAX"
-          step="5"
-        />
+        <label class="spacing-row">
+          <span>X</span>
+          <input
+            v-model.number="nodeXDistance"
+            type="range"
+            :min="NODE_DISTANCE_MIN"
+            :max="NODE_DISTANCE_MAX"
+            step="5"
+          />
+          <input
+            v-model.number="nodeXDistance"
+            type="number"
+            :min="NODE_DISTANCE_MIN"
+            :max="NODE_DISTANCE_MAX"
+            step="5"
+          />
+        </label>
+        <label class="spacing-row">
+          <span>Y</span>
+          <input
+            v-model.number="nodeYDistance"
+            type="range"
+            :min="NODE_DISTANCE_MIN"
+            :max="NODE_DISTANCE_MAX"
+            step="5"
+          />
+          <input
+            v-model.number="nodeYDistance"
+            type="number"
+            :min="NODE_DISTANCE_MIN"
+            :max="NODE_DISTANCE_MAX"
+            step="5"
+          />
+        </label>
       </div>
       <button @click="save">Save</button>
       <span class="zoom-info">Zoom: {{ Math.round(store.scale * 100) }}%</span>
@@ -172,16 +193,25 @@ body {
 }
 .spacing-control {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   padding: 0 8px;
   color: #bbb;
   font-size: 12px;
 }
-.spacing-control input[type='range'] {
+.spacing-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.spacing-row > span {
+  width: 14px;
+  text-align: center;
+}
+.spacing-row input[type='range'] {
   width: 220px;
 }
-.spacing-control input[type='number'] {
+.spacing-row input[type='number'] {
   width: 72px;
   padding: 6px 8px;
   background: #111;

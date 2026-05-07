@@ -12,9 +12,10 @@ from .logger import setup_logger
 # Set up logger for this module
 logger = setup_logger(__name__)
 
-DEFAULT_MIN_NODE_DISTANCE = 80.0
-MIN_NODE_DISTANCE_MIN = 20.0
-MIN_NODE_DISTANCE_MAX = 200.0
+DEFAULT_NODE_X_DISTANCE = 80.0
+DEFAULT_NODE_Y_DISTANCE = 80.0
+LAYOUT_DISTANCE_MIN = 20.0
+LAYOUT_DISTANCE_MAX = 240.0
 DECORATIVE_START_X = 20.0
 DECORATIVE_START_Y = 50.0
 
@@ -23,48 +24,62 @@ DECORATIVE_START_Y = 50.0
 class LayoutSettings:
     """Spacing controls for layout operations."""
 
-    min_node_distance: float = DEFAULT_MIN_NODE_DISTANCE
+    node_x_distance: float = DEFAULT_NODE_X_DISTANCE
+    node_y_distance: float = DEFAULT_NODE_Y_DISTANCE
 
     def __post_init__(self) -> None:
-        self.min_node_distance = _clamp_layout_distance(self.min_node_distance)
+        self.node_x_distance = _clamp_layout_distance(self.node_x_distance)
+        self.node_y_distance = _clamp_layout_distance(self.node_y_distance)
 
     @property
     def node_h_gap(self) -> float:
-        return self.min_node_distance
+        return self.node_x_distance
 
     @property
     def node_v_gap(self) -> float:
-        return self.min_node_distance
+        return self.node_y_distance
 
     @property
     def group_h_gap(self) -> float:
-        return self.min_node_distance * 2.5
+        return self.node_x_distance * 2.5
 
     @property
     def group_v_gap(self) -> float:
-        return self.min_node_distance * 1.25
+        return self.node_y_distance * 1.25
 
     @property
     def group_padding(self) -> float:
-        return self.min_node_distance * 0.625
+        return max(self.node_x_distance, self.node_y_distance) * 0.625
 
     @classmethod
     def from_payload(cls, payload) -> "LayoutSettings":
         if payload is None:
             return cls()
         if isinstance(payload, (int, float)):
-            return cls(float(payload))
+            value = float(payload)
+            return cls(value, value)
         if isinstance(payload, dict):
-            value = payload.get("min_node_distance")
-            if value is None:
-                value = payload.get("node_spacing")
-            if value is None:
-                value = payload.get("spacing")
-            if value is not None:
+            legacy_value = payload.get("min_node_distance")
+            if legacy_value is None:
+                legacy_value = payload.get("node_spacing")
+            if legacy_value is None:
+                legacy_value = payload.get("spacing")
+            if legacy_value is not None:
                 try:
-                    return cls(float(value))
+                    value = float(legacy_value)
+                    return cls(value, value)
                 except (TypeError, ValueError):
                     return cls()
+
+            x_value = payload.get("node_x_distance")
+            y_value = payload.get("node_y_distance")
+            try:
+                return cls(
+                    DEFAULT_NODE_X_DISTANCE if x_value is None else float(x_value),
+                    DEFAULT_NODE_Y_DISTANCE if y_value is None else float(y_value),
+                )
+            except (TypeError, ValueError):
+                return cls()
         return cls()
 
 
@@ -596,9 +611,9 @@ def _clamp_layout_distance(value: float) -> float:
     try:
         numeric = float(value)
     except (TypeError, ValueError):
-        return DEFAULT_MIN_NODE_DISTANCE
+        return DEFAULT_NODE_X_DISTANCE
 
     if not math.isfinite(numeric):
-        return DEFAULT_MIN_NODE_DISTANCE
+        return DEFAULT_NODE_X_DISTANCE
 
-    return max(MIN_NODE_DISTANCE_MIN, min(MIN_NODE_DISTANCE_MAX, numeric))
+    return max(LAYOUT_DISTANCE_MIN, min(LAYOUT_DISTANCE_MAX, numeric))

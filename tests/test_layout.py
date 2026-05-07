@@ -217,26 +217,43 @@ def test_decorative_nodes_move_to_left_column():
 
 
 def test_spacing_setting_expands_layout_and_group():
-    logger.info("Testing configurable spacing")
+    logger.info("Testing configurable x/y spacing")
     wf = Workflow()
     group = Group(id=1, name="load", bounding=[0, 0, 1000, 1000])
     wf.groups = [group]
 
-    n1 = Node(id=1, type="LoadImage", x=100, y=100, size=[200, 100], mode=0, order=0)
-    n2 = Node(id=2, type="PreviewImage", x=500, y=200, size=[200, 100], mode=0, order=1)
+    n1 = Node(id=1, type="NodeA", x=0, y=0, size=[120, 80], mode=0, order=0)
+    n2 = Node(id=2, type="NodeB", x=200, y=0, size=[120, 80], mode=0, order=1)
+    n3 = Node(id=3, type="NodeC", x=200, y=180, size=[120, 80], mode=0, order=2)
+    n4 = Node(id=4, type="NodeD", x=400, y=80, size=[120, 80], mode=0, order=3)
     wf.nodes[1] = n1
     wf.nodes[2] = n2
-    link = Link(id=10, source=1, source_port=0, target=2, target_port=0, type="IMAGE")
-    wf.links[10] = link
-    n1.output_links.append(10)
+    wf.nodes[3] = n3
+    wf.nodes[4] = n4
+    links = [
+        Link(id=10, source=1, source_port=0, target=2, target_port=0, type="DATA"),
+        Link(id=11, source=1, source_port=0, target=3, target_port=0, type="DATA"),
+        Link(id=12, source=2, source_port=0, target=4, target_port=0, type="DATA"),
+        Link(id=13, source=3, source_port=0, target=4, target_port=1, type="DATA"),
+    ]
+    for link in links:
+        wf.links[link.id] = link
+    n1.output_links.extend([10, 11])
     n2.input_links.append(10)
+    n2.output_links.append(12)
+    n3.input_links.append(11)
+    n3.output_links.append(13)
+    n4.input_links.extend([12, 13])
 
-    compact = apply(deepcopy(wf), LayoutSettings(min_node_distance=40))
-    roomy = apply(deepcopy(wf), LayoutSettings(min_node_distance=160))
+    compact = apply(deepcopy(wf), LayoutSettings(node_x_distance=40, node_y_distance=40))
+    roomy = apply(deepcopy(wf), LayoutSettings(node_x_distance=160, node_y_distance=160))
 
     compact_dx = compact.nodes[2].x - compact.nodes[1].x
     roomy_dx = roomy.nodes[2].x - roomy.nodes[1].x
+    compact_dy = compact.nodes[3].y - compact.nodes[2].y
+    roomy_dy = roomy.nodes[3].y - roomy.nodes[2].y
     assert roomy_dx > compact_dx
+    assert roomy_dy > compact_dy
     assert roomy.groups[0].bounding[2] >= compact.groups[0].bounding[2]
     assert roomy.groups[0].bounding[3] >= compact.groups[0].bounding[3]
     logger.info("Configurable spacing test passed")

@@ -38,6 +38,64 @@ SIMPLE_WORKFLOW = {
     "groups": []
 }
 
+SPACING_WORKFLOW = {
+    "nodes": [
+        {
+            "id": 1,
+            "type": "NodeA",
+            "pos": [0, 0],
+            "size": [120, 80],
+            "mode": 0,
+            "order": 0,
+            "inputs": [],
+            "outputs": [{"links": [10, 11]}],
+        },
+        {
+            "id": 2,
+            "type": "NodeB",
+            "pos": [200, 0],
+            "size": [120, 80],
+            "mode": 0,
+            "order": 1,
+            "inputs": [{"link": 10}],
+            "outputs": [{"links": [12]}],
+        },
+        {
+            "id": 3,
+            "type": "NodeC",
+            "pos": [200, 180],
+            "size": [120, 80],
+            "mode": 0,
+            "order": 2,
+            "inputs": [{"link": 11}],
+            "outputs": [{"links": [13]}],
+        },
+        {
+            "id": 4,
+            "type": "NodeD",
+            "pos": [400, 80],
+            "size": [120, 80],
+            "mode": 0,
+            "order": 3,
+            "inputs": [{"link": 12}, {"link": 13}],
+            "outputs": [],
+        },
+    ],
+    "links": [
+        [10, 1, 0, 2, 0, "DATA"],
+        [11, 1, 0, 3, 0, "DATA"],
+        [12, 2, 0, 4, 0, "DATA"],
+        [13, 3, 0, 4, 1, "DATA"],
+    ],
+    "groups": [
+        {
+            "id": 7,
+            "title": "Load Model",
+            "bounding": [0, 0, 1200, 1200],
+        }
+    ],
+}
+
 
 @pytest.fixture
 async def client(aiohttp_client):
@@ -96,22 +154,13 @@ async def test_layout_endpoint(client):
 
 @pytest.mark.asyncio
 async def test_layout_endpoint_accepts_custom_spacing(client):
-    logger.info("Testing /layout endpoint with custom spacing")
-    workflow = deepcopy(SIMPLE_WORKFLOW)
-    workflow["groups"] = [
-        {
-            "id": 7,
-            "title": "Load Model",
-            "bounding": [0, 0, 1000, 1000],
-        }
-    ]
-
-    compact_resp = await client.post("/layout", json=workflow)
+    logger.info("Testing /layout endpoint with custom x/y spacing")
+    compact_resp = await client.post("/layout", json=SPACING_WORKFLOW)
     roomy_resp = await client.post(
         "/layout",
         json={
-            "workflow": workflow,
-            "layout": {"min_node_distance": 160},
+            "workflow": deepcopy(SPACING_WORKFLOW),
+            "layout": {"node_x_distance": 160, "node_y_distance": 160},
         },
     )
 
@@ -123,12 +172,17 @@ async def test_layout_endpoint_accepts_custom_spacing(client):
 
     compact_node1 = next(n for n in compact["nodes"] if n["id"] == 1)
     compact_node2 = next(n for n in compact["nodes"] if n["id"] == 2)
+    compact_node3 = next(n for n in compact["nodes"] if n["id"] == 3)
     roomy_node1 = next(n for n in roomy["nodes"] if n["id"] == 1)
     roomy_node2 = next(n for n in roomy["nodes"] if n["id"] == 2)
+    roomy_node3 = next(n for n in roomy["nodes"] if n["id"] == 3)
 
     compact_dx = compact_node2["pos"][0] - compact_node1["pos"][0]
     roomy_dx = roomy_node2["pos"][0] - roomy_node1["pos"][0]
+    compact_dy = compact_node3["pos"][1] - compact_node2["pos"][1]
+    roomy_dy = roomy_node3["pos"][1] - roomy_node2["pos"][1]
     assert roomy_dx > compact_dx
+    assert roomy_dy > compact_dy
     assert roomy["groups"][0]["bounding"][2] >= compact["groups"][0]["bounding"][2]
     assert roomy["groups"][0]["bounding"][3] >= compact["groups"][0]["bounding"][3]
     logger.info("Custom spacing request OK")

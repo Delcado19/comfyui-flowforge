@@ -25,7 +25,7 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - Group membership is inferred from node position and group bounding boxes.
 - Group rectangles are user-authored containers. Layout may move or expand a group to contain its nodes, but it should not shrink a manually enlarged group.
 - Decorative nodes (`Note`, `MarkdownNote`, `Label`) are placed first in a left-side annotation column and should not influence group assignment or graph layout.
-- Layout spacing is parameterized through `LayoutSettings(min_node_distance)`. The single minimum-distance value scales node gaps, group gaps, and padding together; the GUI exposes it as a live 20-200 px control.
+- Layout spacing is parameterized through `LayoutSettings(node_x_distance, node_y_distance)`. The GUI exposes live X and Y controls in the 20-240 px range. Horizontal gap, vertical gap, group spacing, and padding all derive from those axis values.
 - FlowForge works on UI workflow JSON, not API prompt JSON.
 - Layout should preserve all unknown top-level and node-level fields.
 
