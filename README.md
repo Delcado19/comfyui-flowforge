@@ -106,7 +106,7 @@ Within each group, independently:
 
 1. **Layer assignment** — each node receives a layer number equal to the longest path from any source node to it (`layer = max(layer[predecessor]) + 1`, with sources at layer 0). Uses a topological sort; nodes in cycles (rare in valid ComfyUI workflows) fall back to layer 0.
 2. **Crossing minimisation** — nodes within each layer are reordered using the _barycenter heuristic_: each node's score is the average position of its neighbours in the adjacent layer. Two passes are run (forward then backward) to reduce edge crossings.
-3. **Coordinate assignment** — nodes are placed on a grid: X increases by layer, Y increases by position within the layer. Bypassed nodes (`mode = 4`) are sorted to the end of their layer so they don't interrupt the active flow. The public `layout` operation evaluates several spacing candidates and applies the most compact result, with an additional penalty for layouts that become too wide compared to their height.
+3. **Coordinate assignment** — nodes are placed on a grid: X increases by layer, Y increases by position within the layer. Bypassed nodes (`mode = 4`) are sorted to the end of their layer so they don't interrupt the active flow. The public `layout` operation evaluates several spacing candidates and applies the most compact result, with an additional penalty for layouts that become too wide compared to their height. Small workflows try 3 candidates, medium workflows 5, and larger workflows 7.
 
 ### Phase 4 — Global Positioning
 

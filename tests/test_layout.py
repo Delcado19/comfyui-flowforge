@@ -14,6 +14,7 @@ from flowforge.layout import (
     _layout_groups_internal,
     _position_groups_globally,
     _score_layout_candidate,
+    _resolve_layout_candidate_count,
     _update_bounding_boxes,
 )
 from flowforge.logger import setup_logger
@@ -285,7 +286,11 @@ def test_best_layout_tries_multiple_candidates_and_picks_best(monkeypatch):
 
     monkeypatch.setattr("flowforge.layout._apply_layout_pass", fake_apply_layout_pass)
 
-    result = apply_best_layout(wf, LayoutSettings(node_x_distance=100, node_y_distance=100))
+    result = apply_best_layout(
+        wf,
+        LayoutSettings(node_x_distance=100, node_y_distance=100),
+        candidate_count=5,
+    )
 
     assert attempts[:5] == [
         (100.0, 100.0, False),
@@ -298,6 +303,26 @@ def test_best_layout_tries_multiple_candidates_and_picks_best(monkeypatch):
     assert result.nodes[2].x == 160.0
     assert result.nodes[2].y == 90.0
     logger.info("Best-of layout candidate selection test passed")
+
+
+def test_layout_candidate_count_scales_with_workflow_size():
+    logger.info("Testing dynamic candidate count selection")
+    small = Workflow()
+    for index in range(1, 4):
+        small.nodes[index] = Node(id=index, type=f"Small{index}", x=0, y=0, size=[100, 60])
+
+    medium = Workflow()
+    for index in range(1, 18):
+        medium.nodes[index] = Node(id=index, type=f"Medium{index}", x=0, y=0, size=[100, 60])
+
+    large = Workflow()
+    for index in range(1, 40):
+        large.nodes[index] = Node(id=index, type=f"Large{index}", x=0, y=0, size=[100, 60])
+
+    assert _resolve_layout_candidate_count(small) == 3
+    assert _resolve_layout_candidate_count(medium) == 5
+    assert _resolve_layout_candidate_count(large) == 7
+    logger.info("Dynamic candidate count test passed")
 
 
 def test_layout_score_penalizes_overly_wide_layouts():

@@ -16,6 +16,11 @@ logger = setup_logger(__name__)
 DEFAULT_NODE_X_DISTANCE = 80.0
 DEFAULT_NODE_Y_DISTANCE = 80.0
 DEFAULT_LAYOUT_CANDIDATES = 5
+LAYOUT_CANDIDATE_MIN = 3
+LAYOUT_CANDIDATE_MID = 5
+LAYOUT_CANDIDATE_MAX = 7
+LAYOUT_SMALL_WORKFLOW_LIMIT = 12
+LAYOUT_LARGE_WORKFLOW_LIMIT = 30
 LAYOUT_DISTANCE_MIN = 20.0
 LAYOUT_DISTANCE_MAX = 240.0
 DECORATIVE_START_X = 20.0
@@ -113,13 +118,18 @@ def apply(workflow: Workflow, settings: LayoutSettings | None = None) -> Workflo
 def apply_best_layout(
     workflow: Workflow,
     settings: LayoutSettings | None = None,
-    candidate_count: int = DEFAULT_LAYOUT_CANDIDATES,
+    candidate_count: int | None = None,
 ) -> Workflow:
     """
     Try several layout variants and return the best-scoring result.
     """
     settings = settings or LayoutSettings()
-    variants = _build_layout_candidates(settings, candidate_count)
+    resolved_candidate_count = (
+        _resolve_layout_candidate_count(workflow)
+        if candidate_count is None
+        else max(1, int(candidate_count))
+    )
+    variants = _build_layout_candidates(settings, resolved_candidate_count)
     if len(variants) == 1:
         return _apply_layout_pass(workflow, variants[0], log=True)
 
@@ -260,6 +270,15 @@ def _build_layout_candidates(settings: LayoutSettings, candidate_count: int) -> 
         profile_index += 1
 
     return variants
+
+
+def _resolve_layout_candidate_count(workflow: Workflow) -> int:
+    node_count = len(workflow.nodes)
+    if node_count <= LAYOUT_SMALL_WORKFLOW_LIMIT:
+        return LAYOUT_CANDIDATE_MIN
+    if node_count <= LAYOUT_LARGE_WORKFLOW_LIMIT:
+        return LAYOUT_CANDIDATE_MID
+    return LAYOUT_CANDIDATE_MAX
 
 
 def _score_layout_candidate(workflow: Workflow) -> LayoutScore:
