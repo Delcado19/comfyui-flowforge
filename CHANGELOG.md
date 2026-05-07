@@ -8,6 +8,7 @@ All notable changes to ComfyUI FlowForge are documented here.
 
 - GitHub Actions CI for backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build.
 - Before/after layout comparison overlay in the frontend.
+- Regression coverage for the GUI launcher's frontend development server command.
 
 ### Changed
 
