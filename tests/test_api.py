@@ -32,7 +32,7 @@ SIMPLE_WORKFLOW = {
             "mode": 0,
             "order": 1,
             "inputs": [{"name": "images", "link": 10}],
-            "outputs": []
+            "outputs": [{"name": "unused", "type": "IMAGE", "links": None}]
         }
     ],
     "links": [[10, 1, 0, 2, 0, "IMAGE"]],
@@ -258,6 +258,8 @@ async def test_layout_preserves_comfyui_metadata(client):
             "extra": {"ds": {"scale": 0.75, "offset": [12, 34]}},
             "models": [{"name": "example.safetensors"}],
             "revision": 42,
+            "last_node_id": 1,
+            "last_link_id": 5,
             "x_custom_top_level": {"keep": True},
             "groups": [
                 {
@@ -289,6 +291,8 @@ async def test_layout_preserves_comfyui_metadata(client):
     assert data["extra"] == workflow["extra"]
     assert data["models"] == workflow["models"]
     assert data["revision"] == 42
+    assert data["last_node_id"] == 1
+    assert data["last_link_id"] == 5
     assert data["x_custom_top_level"] == {"keep": True}
 
     node = next(n for n in data["nodes"] if n["id"] == 1)
@@ -299,6 +303,8 @@ async def test_layout_preserves_comfyui_metadata(client):
     assert node["bgcolor"] == "#445566"
     assert node["x_custom_node_field"] == "preserve-me"
     assert node["outputs"][0]["name"] == "IMAGE"
+    preview_node = next(n for n in data["nodes"] if n["id"] == 2)
+    assert preview_node["outputs"][0]["links"] is None
 
     group = data["groups"][0]
     assert group["title"] == "Preserved Group"

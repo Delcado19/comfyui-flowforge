@@ -42,6 +42,10 @@ cd ..
 
 When a release changes workflow parsing, layout, optimizer behavior, or serialization, also run a read-only sanity check against local ComfyUI workflow JSON before tagging.
 
+```powershell
+uv run python tools/validate_local_workflows.py
+```
+
 ## Publish Checklist
 
 Use an annotated version boundary in Git and GitHub:

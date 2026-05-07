@@ -73,6 +73,12 @@ Optional read-only local workflow sanity check:
 uv run python -c "import json; from pathlib import Path; from flowforge.parser import parse_comfyui_workflow; from flowforge.layout import apply; from flowforge.api import _workflow_to_comfyui_json; root=Path(r'H:\ComfyUI-Easy-Install\ComfyUI\user\default\workflows'); path=next(p for p in root.rglob('*.json') if not any(part.startswith('.') for part in p.relative_to(root).parts)); data=json.loads(path.read_text(encoding='utf-8-sig')); result=_workflow_to_comfyui_json(apply(parse_comfyui_workflow(data))); print(path.name, sorted(set(data)-set(result)))"
 ```
 
+Preferred local workflow validation:
+
+```powershell
+uv run python tools/validate_local_workflows.py
+```
+
 ## Handoff Format
 
 Every handoff after documentation-sensitive work should include:

@@ -14,6 +14,7 @@
 - Workflow layout is designed to preserve ComfyUI workflow metadata and update only layout-relevant fields.
 - The frontend stores and sends full ComfyUI workflow JSON instead of a separate custom connection format.
 - Documentation maintenance is now governed by `AGENTS.md` and `docs/DOCUMENTATION_MAINTENANCE.md`.
+- Local workflow validation is repeatable through `uv run python tools/validate_local_workflows.py`.
 
 ## Completed Work
 
@@ -27,7 +28,7 @@
 
 ## Open Work
 
-- Validate layout behavior against more real ComfyUI workflows.
+- Keep validating layout behavior against more real ComfyUI workflows before release tags.
 - Improve visual comparison in the frontend.
 - Exercise the first tagged GitHub release using the source-checkout release path.
 - Expand documentation when behavior stabilizes.

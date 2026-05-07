@@ -29,6 +29,7 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - The GUI exposes group CRUD controls: start drag-based group creation from the canvas, delete a single group from the canvas, and clear all groups from the toolbar. The toolbar no longer has a dedicated `+ Group` button.
 - FlowForge works on UI workflow JSON, not API prompt JSON.
 - Layout should preserve all unknown top-level and node-level fields.
+- Local UI workflow roundtrip validation is available with `uv run python tools/validate_local_workflows.py`.
 
 ## Development Rules
 

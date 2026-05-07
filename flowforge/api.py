@@ -120,13 +120,19 @@ def _workflow_to_comfyui_json(workflow: Workflow) -> Dict[str, Any]:
         return _workflow_to_minimal_json(workflow)
 
     result = deepcopy(workflow.source_json)
-    result["nodes"] = _merge_nodes(result.get("nodes", []), workflow)
-    result["links"] = _merge_links(result.get("links", []), workflow)
+    source_nodes = result.get("nodes", [])
+    source_links = result.get("links", [])
+    merged_links = _merge_links(source_links, workflow)
+    nodes_changed = _source_node_ids(source_nodes) != set(workflow.nodes)
+    links_changed = merged_links != source_links
+
+    result["nodes"] = _merge_nodes(source_nodes, workflow, sync_link_refs=links_changed)
+    result["links"] = merged_links
     result["groups"] = _merge_groups(result.get("groups", []), workflow)
 
-    if workflow.nodes:
+    if nodes_changed and workflow.nodes:
         result["last_node_id"] = max(int(result.get("last_node_id", 0)), max(workflow.nodes))
-    if workflow.links:
+    if links_changed and workflow.links:
         result["last_link_id"] = max(int(result.get("last_link_id", 0)), max(workflow.links))
 
     return result
@@ -162,7 +168,26 @@ def _extract_layout_request(data: Any) -> tuple[Any, LayoutSettings]:
     return data, LayoutSettings.from_payload(None)
 
 
-def _merge_nodes(source_nodes: List[Dict[str, Any]], workflow: Workflow) -> List[Dict[str, Any]]:
+def _source_node_ids(source_nodes: Any) -> set[int]:
+    if not isinstance(source_nodes, list):
+        return set()
+
+    node_ids: set[int] = set()
+    for node_data in source_nodes:
+        if not isinstance(node_data, dict):
+            continue
+        node_id = node_data.get("id")
+        if isinstance(node_id, int):
+            node_ids.add(node_id)
+    return node_ids
+
+
+def _merge_nodes(
+    source_nodes: List[Dict[str, Any]],
+    workflow: Workflow,
+    *,
+    sync_link_refs: bool,
+) -> List[Dict[str, Any]]:
     nodes_by_id = {
         node_data.get("id"): deepcopy(node_data)
         for node_data in source_nodes
@@ -178,7 +203,8 @@ def _merge_nodes(source_nodes: List[Dict[str, Any]], workflow: Workflow) -> List
             node_data["pos"] = [node.x, node.y]
             if node.widgets_values or "widgets_values" in node_data:
                 node_data["widgets_values"] = deepcopy(node.widgets_values)
-            _sync_node_link_refs(node_data, node, workflow)
+            if sync_link_refs:
+                _sync_node_link_refs(node_data, node, workflow)
         merged_nodes.append(node_data)
 
     return merged_nodes
@@ -231,7 +257,9 @@ def _sync_node_link_refs(node_data: Dict[str, Any], node: Node, workflow: Workfl
     if isinstance(outputs, list):
         for port_index, output_data in enumerate(outputs):
             if isinstance(output_data, dict):
-                output_data["links"] = sorted(links_by_output.get(port_index, []))
+                port_links = sorted(links_by_output.get(port_index, []))
+                if port_links or output_data.get("links") is not None:
+                    output_data["links"] = port_links
 
 
 def _new_node_json(node: Node, workflow: Workflow) -> Dict[str, Any]:
