@@ -36,7 +36,7 @@ async def cors_middleware(request, handler):
 async def layout_handler(request):
     """
     POST /layout
-    Accepts a ComfyUI workflow JSON and returns the layouted version.
+    Accepts a ComfyUI workflow JSON and returns the laid-out version.
     """
     try:
         data = await request.json()

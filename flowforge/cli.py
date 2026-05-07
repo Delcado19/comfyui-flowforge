@@ -26,7 +26,7 @@ def main():
     # Layout command - process a workflow file
     layout_parser = subparsers.add_parser("layout", help="Apply layout to a workflow file")
     layout_parser.add_argument("input", help="Input workflow JSON file")
-    layout_parser.add_argument("output", help="Output file for layouted workflow")
+    layout_parser.add_argument("output", help="Output file for the laid-out workflow")
     layout_parser.add_argument("--optimize", action="store_true", help="Run optimizer before layout")
 
     # Optimize command - optimize a workflow file
