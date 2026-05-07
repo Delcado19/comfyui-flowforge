@@ -43,6 +43,38 @@ def create_fanout_workflow() -> Workflow:
     return wf
 
 
+def create_reroute_fanout_workflow() -> Workflow:
+    """
+    Create a workflow where fanout happens after a Reroute node.
+    """
+    wf = Workflow()
+    source = Node(id=1, type="UNETLoader", x=0, y=0, size=[200, 60])
+    reroute = Node(id=2, type="Reroute", x=240, y=0, size=[100, 40])
+    wf.nodes[1] = source
+    wf.nodes[2] = reroute
+
+    consumers = []
+    for i in range(3):
+        cid = 3 + i
+        consumer = Node(id=cid, type="KSampler", x=500 + i * 250, y=i * 120, size=[200, 100])
+        consumers.append(consumer)
+        wf.nodes[cid] = consumer
+
+    links = [
+        Link(id=100, source=1, source_port=0, target=2, target_port=0, type="MODEL"),
+        Link(id=101, source=2, source_port=0, target=3, target_port=0, type="MODEL"),
+        Link(id=102, source=2, source_port=0, target=4, target_port=0, type="MODEL"),
+        Link(id=103, source=2, source_port=0, target=5, target_port=0, type="MODEL"),
+    ]
+    for link in links:
+        wf.links[link.id] = link
+        wf.nodes[link.source].output_links.append(link.id)
+        wf.nodes[link.target].input_links.append(link.id)
+
+    wf.groups = []
+    return wf
+
+
 def test_optimize_fanout():
     logger.info("Testing optimize() on high-fanout MODEL connection")
     wf = create_fanout_workflow()
@@ -72,6 +104,32 @@ def test_optimize_fanout():
         assert consumer_link.target in {2,3,4}
     
     logger.info("Optimizer fanout test passed")
+
+
+def test_optimize_reroute_fanout():
+    logger.info("Testing optimize() on fanout behind a Reroute")
+    wf = create_reroute_fanout_workflow()
+
+    optimized = optimize(wf)
+
+    set_nodes = [n for n in optimized.nodes.values() if n.type == "SetNode"]
+    get_nodes = [n for n in optimized.nodes.values() if n.type == "GetNode"]
+    reroute_nodes = [n for n in optimized.nodes.values() if n.type == "Reroute"]
+
+    assert len(set_nodes) == 1
+    assert len(get_nodes) == 3
+    assert len(reroute_nodes) == 0
+
+    set_node = set_nodes[0]
+    assert len(set_node.input_links) == 1
+    assert optimized.links[set_node.input_links[0]].source == 1
+
+    get_targets = {
+        optimized.links[get_node.output_links[0]].target
+        for get_node in get_nodes
+    }
+    assert get_targets == {3, 4, 5}
+    logger.info("Reroute fanout optimization test passed")
 
 
 def test_optimize_preserves_other_types():

@@ -3,6 +3,7 @@ Optimizer for ComfyUI FlowForge.
 Inserts SetNode/GetNode pairs for high-fanout MODEL/CLIP/VAE connections.
 """
 
+from collections import deque
 from copy import deepcopy
 from typing import Dict, List
 
@@ -13,6 +14,7 @@ logger = setup_logger(__name__)
 
 # Types that trigger optimization when fanout >= 2
 OPTIMIZE_TYPES = {"MODEL", "CLIP", "VAE"}
+
 
 def optimize(workflow: Workflow) -> Workflow:
     """
@@ -33,30 +35,66 @@ def optimize(workflow: Workflow) -> Workflow:
     # Find (node, port) where the output type is optimizable and fanout >= 2
     optimization_targets = []
     for (src_id, src_port), links in port_links.items():
-        if len(links) < 2:
+        src_node = new_workflow.nodes.get(src_id)
+        if not src_node:
             continue
-        # Check that at least one link has an optimizable type
-        if any(link.type in OPTIMIZE_TYPES for link in links):
-            src_node = new_workflow.nodes.get(src_id)
-            if src_node:
-                optimization_targets.append((src_node, src_port, links))
+
+        terminal_links, traversed_link_ids = _collect_effective_fanout(
+            new_workflow,
+            src_node,
+            src_port,
+            links,
+        )
+        if len(terminal_links) < 2:
+            continue
+
+        # Check that at least one traversed link has an optimizable type.
+        traversed_links = [new_workflow.links[link_id] for link_id in traversed_link_ids if link_id in new_workflow.links]
+        if any(link.type in OPTIMIZE_TYPES for link in traversed_links):
+            optimization_targets.append((src_node, src_port))
     
     logger.info(f"Found {len(optimization_targets)} node output ports to optimize")
     
     # Apply optimizations (each for a specific source node + output port)
-    for src_node, src_port, src_links in optimization_targets:
-        _replace_port_with_set_get(new_workflow, src_node, src_port, src_links)
+    for src_node, src_port in optimization_targets:
+        current_links = [
+            link
+            for link in new_workflow.links.values()
+            if link.source == src_node.id and link.source_port == src_port
+        ]
+        current_terminals, current_traversed = _collect_effective_fanout(
+            new_workflow,
+            src_node,
+            src_port,
+            current_links,
+        )
+        if len(current_terminals) < 2:
+            continue
+        if not any(
+            new_workflow.links[link_id].type in OPTIMIZE_TYPES
+            for link_id in current_traversed
+            if link_id in new_workflow.links
+        ):
+            continue
+
+        _replace_port_with_set_get(new_workflow, src_node, src_port, current_terminals, current_traversed)
     
     logger.info("Optimization completed")
     return new_workflow
 
 
-def _replace_port_with_set_get(workflow: Workflow, src_node: Node, src_port: int, src_links: List[Link]) -> None:
+def _replace_port_with_set_get(
+    workflow: Workflow,
+    src_node: Node,
+    src_port: int,
+    terminal_links: List[Link],
+    traversed_link_ids: set[int],
+) -> None:
     """
     Replace all connections from a given output port with a SetNode and per-target GetNodes.
     """
-    # Use the first link's type for the new links (they should all be same)
-    link_type = src_links[0].type if src_links else None
+    # Use the first terminal link's type for the new links (they should all be same).
+    link_type = terminal_links[0].type if terminal_links else None
     if not link_type:
         logger.warning(f"No link type for node {src_node.id} port {src_port}, skipping")
         return
@@ -96,8 +134,8 @@ def _replace_port_with_set_get(workflow: Workflow, src_node: Node, src_port: int
     src_node.output_links.append(set_link_id)
     set_node.input_links.append(set_link_id)
     
-    # For each original target, insert a GetNode
-    for orig_link in src_links:
+    # For each original terminal target, insert a GetNode.
+    for orig_link in terminal_links:
         target_id = orig_link.target
         target_node = workflow.nodes.get(target_id)
         if not target_node:
@@ -123,11 +161,12 @@ def _replace_port_with_set_get(workflow: Workflow, src_node: Node, src_port: int
         
         # Remove the original link (source -> target)
         old_link_id = orig_link.id
+        orig_source_node = workflow.nodes.get(orig_link.source)
         if old_link_id in workflow.links:
             del workflow.links[old_link_id]
         # Clean up node link references
-        if old_link_id in src_node.output_links:
-            src_node.output_links.remove(old_link_id)
+        if orig_source_node and old_link_id in orig_source_node.output_links:
+            orig_source_node.output_links.remove(old_link_id)
         if old_link_id in target_node.input_links:
             target_node.input_links.remove(old_link_id)
         
@@ -164,3 +203,83 @@ def _replace_port_with_set_get(workflow: Workflow, src_node: Node, src_port: int
         target_node.input_links.append(new_link_id)
         
         logger.debug(f"Rewired: {src_node.id}:{src_port} -> SetNode -> GetNode -> {target_id}")
+
+    _remove_traversed_links_and_cleanup_reroutes(workflow, traversed_link_ids)
+
+
+def _collect_effective_fanout(
+    workflow: Workflow,
+    src_node: Node,
+    src_port: int,
+    direct_links: List[Link],
+) -> tuple[List[Link], set[int]]:
+    """
+    Follow reroute chains from a source output port and return the terminal links.
+
+    The returned terminal links are the links that end at real consumer nodes.
+    Traversed links include both the terminal links and any reroute chain links
+    that were walked to reach them.
+    """
+    terminal_links: List[Link] = []
+    traversed_link_ids: set[int] = set()
+    visited_nodes: set[int] = set()
+    queue = deque(link for link in direct_links if link.source == src_node.id and link.source_port == src_port)
+
+    while queue:
+        link = queue.popleft()
+        if link.id in traversed_link_ids:
+            continue
+
+        traversed_link_ids.add(link.id)
+        target_node = workflow.nodes.get(link.target)
+        if target_node is not None and _is_reroute_node(target_node):
+            if target_node.id in visited_nodes:
+                continue
+            visited_nodes.add(target_node.id)
+            for next_link_id in target_node.output_links:
+                next_link = workflow.links.get(next_link_id)
+                if next_link and next_link.source == target_node.id:
+                    queue.append(next_link)
+            continue
+
+        terminal_links.append(link)
+
+    return terminal_links, traversed_link_ids
+
+
+def _remove_traversed_links_and_cleanup_reroutes(
+    workflow: Workflow,
+    traversed_link_ids: set[int],
+) -> None:
+    """
+    Remove every traversed link and delete now-orphaned reroute nodes.
+    """
+    for link_id in traversed_link_ids:
+        link = workflow.links.pop(link_id, None)
+        if not link:
+            continue
+
+        source_node = workflow.nodes.get(link.source)
+        target_node = workflow.nodes.get(link.target)
+
+        if source_node and link_id in source_node.output_links:
+            source_node.output_links.remove(link_id)
+        if target_node and link_id in target_node.input_links:
+            target_node.input_links.remove(link_id)
+
+    dead_reroutes: List[int] = []
+    for node_id, node in workflow.nodes.items():
+        if node is None:
+            continue
+        if not _is_reroute_node(node):
+            continue
+        if node.input_links or node.output_links:
+            continue
+        dead_reroutes.append(node_id)
+
+    for node_id in dead_reroutes:
+        del workflow.nodes[node_id]
+
+
+def _is_reroute_node(node: Node | None) -> bool:
+    return bool(node and isinstance(node.type, str) and "reroute" in node.type.lower())
