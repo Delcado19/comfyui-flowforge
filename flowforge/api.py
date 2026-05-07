@@ -65,6 +65,7 @@ async def layout_handler(request):
                     "height": layout_report.score.height,
                     "link_cost": layout_report.score.link_cost,
                     "aspect_cost": layout_report.score.aspect_cost,
+                    "gap_cost": layout_report.score.gap_cost,
                 },
             })
 

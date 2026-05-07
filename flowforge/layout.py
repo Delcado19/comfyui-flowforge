@@ -30,6 +30,8 @@ LAYOUT_SCORE_HEIGHT_WEIGHT = 1.0
 LAYOUT_SCORE_LINK_WEIGHT = 0.02
 LAYOUT_SCORE_ASPECT_WEIGHT = 120.0
 LAYOUT_SCORE_ASPECT_RATIO = 1.35
+LAYOUT_SCORE_GAP_WEIGHT = 0.12
+LAYOUT_SCORE_GAP_THRESHOLD = 160.0
 LAYOUT_CANDIDATE_PROFILES = (
     (1.0, 1.0),
     (0.8, 1.0),
@@ -109,6 +111,7 @@ class LayoutScore:
     height: float
     link_cost: float
     aspect_cost: float
+    gap_cost: float
 
 
 @dataclass(frozen=True)
@@ -156,7 +159,7 @@ def apply_best_layout(
         _apply_layout_pass(candidate, variant, log=False)
         score = _score_layout_candidate(candidate)
         logger.debug(
-            "Candidate %s/%s scored %.2f (width=%.2f height=%.2f link=%.2f aspect=%.2f)",
+            "Candidate %s/%s scored %.2f (width=%.2f height=%.2f link=%.2f aspect=%.2f gap=%.2f)",
             index,
             len(variants),
             score.total,
@@ -164,6 +167,7 @@ def apply_best_layout(
             score.height,
             score.link_cost,
             score.aspect_cost,
+            score.gap_cost,
         )
         if best_score is None or score.total < best_score.total:
             best_score = score
@@ -174,12 +178,13 @@ def apply_best_layout(
         raise RuntimeError("Layout candidate search did not produce a result")
 
     logger.info(
-        "Selected best layout candidate with score %.2f (width=%.2f height=%.2f link=%.2f aspect=%.2f)",
+        "Selected best layout candidate with score %.2f (width=%.2f height=%.2f link=%.2f aspect=%.2f gap=%.2f)",
         best_score.total,
         best_score.width,
         best_score.height,
         best_score.link_cost,
         best_score.aspect_cost,
+        best_score.gap_cost,
     )
     result = _apply_layout_pass(workflow, best_variant, log=True)
     result.layout_report = LayoutReport(
@@ -303,13 +308,40 @@ def _score_layout_candidate(workflow: Workflow) -> LayoutScore:
     link_cost = sum(_link_length(workflow, link) for link in workflow.links.values())
     aspect_ratio = width / max(1.0, height)
     aspect_cost = max(0.0, aspect_ratio - LAYOUT_SCORE_ASPECT_RATIO) * LAYOUT_SCORE_ASPECT_WEIGHT
+    gap_cost = _layout_gap_cost(workflow)
     total = (
         width * LAYOUT_SCORE_WIDTH_WEIGHT
         + height * LAYOUT_SCORE_HEIGHT_WEIGHT
         + link_cost * LAYOUT_SCORE_LINK_WEIGHT
         + aspect_cost
+        + gap_cost
     )
-    return LayoutScore(total, width, height, link_cost, aspect_cost)
+    return LayoutScore(total, width, height, link_cost, aspect_cost, gap_cost)
+
+
+def _layout_gap_cost(workflow: Workflow) -> float:
+    anchors = sorted(
+        {
+            round(node.x, 3)
+            for node in workflow.nodes.values()
+        }
+        | {
+            round(group.bounding[0], 3)
+            for group in workflow.groups
+            if _has_positive_bounding(group)
+        }
+    )
+    if len(anchors) < 2:
+        return 0.0
+
+    gap_cost = 0.0
+    previous = anchors[0]
+    for current in anchors[1:]:
+        gap = current - previous
+        if gap > LAYOUT_SCORE_GAP_THRESHOLD:
+            gap_cost += (gap - LAYOUT_SCORE_GAP_THRESHOLD) * LAYOUT_SCORE_GAP_WEIGHT
+        previous = current
+    return gap_cost
 
 
 def _workflow_bounds(workflow: Workflow) -> tuple[float, float, float, float]:

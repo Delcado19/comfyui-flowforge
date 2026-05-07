@@ -348,5 +348,26 @@ def test_layout_score_penalizes_overly_wide_layouts():
     logger.info("Aspect penalty scoring test passed")
 
 
+def test_layout_score_penalizes_large_horizontal_gaps():
+    logger.info("Testing gap penalty in layout scoring")
+    packed = Workflow()
+    packed.nodes[1] = Node(id=1, type="NodeA", x=0, y=0, size=[100, 100])
+    packed.nodes[2] = Node(id=2, type="NodeB", x=120, y=0, size=[100, 100])
+    packed.nodes[3] = Node(id=3, type="NodeC", x=260, y=0, size=[100, 100])
+
+    gapped = Workflow()
+    gapped.nodes[1] = Node(id=1, type="NodeA", x=0, y=0, size=[100, 100])
+    gapped.nodes[2] = Node(id=2, type="NodeB", x=320, y=0, size=[100, 100])
+    gapped.nodes[3] = Node(id=3, type="NodeC", x=720, y=0, size=[100, 100])
+
+    packed_score = _score_layout_candidate(packed)
+    gapped_score = _score_layout_candidate(gapped)
+
+    assert packed_score.gap_cost == 0
+    assert gapped_score.gap_cost > 0
+    assert gapped_score.total > packed_score.total
+    logger.info("Gap penalty scoring test passed")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

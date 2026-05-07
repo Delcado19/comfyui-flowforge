@@ -144,6 +144,7 @@ async def test_layout_endpoint(client):
     assert stats_data["candidate_count"] >= 3
     assert 1 <= stats_data["selected_candidate"] <= stats_data["candidate_count"]
     assert stats_data["score"]["total"] >= 0
+    assert "gap_cost" in stats_data["score"]
     data = await resp.json()
     
     # Validate structure
