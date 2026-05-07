@@ -25,12 +25,12 @@
 - Added Vue frontend under `frontend/`.
 - Added roundtrip-safe workflow serialization.
 - Added metadata-preservation and group-idempotency tests.
+- Published the first source-checkout GitHub release as `v0.1.0`.
 
 ## Open Work
 
 - Keep validating layout behavior against more real ComfyUI workflows before release tags.
 - Improve visual comparison in the frontend.
-- Exercise the first tagged GitHub release using the source-checkout release path.
 - Expand documentation when behavior stabilizes.
 
 ## Notes
