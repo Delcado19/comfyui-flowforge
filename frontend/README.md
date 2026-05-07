@@ -20,7 +20,7 @@ The frontend process receives the selected backend port through `FLOWFORGE_API_P
 - **ComfyNode.vue** - ComfyUI-like node component using workflow dimensions, colors, slots, and widget controls. Widget-backed inputs render on their widget rows, while unconnected widget inputs are not duplicated as separate free sockets.
 - **ComfyConnection.vue** - SVG Bezier curves connecting ports
 - **useWorkflowStore.ts** - Pinia store for full ComfyUI workflow JSON state
-- **Group and Minimap Layers** - Background group regions, draggable group titles, and a minimap for navigation
+- **Group and Minimap Layers** - Background group regions, draggable group titles, resize handles, and a minimap for navigation
 
 ## Usage
 
@@ -32,6 +32,8 @@ Canvas navigation:
 
 - Mouse wheel zooms smoothly around the cursor position.
 - Drag the canvas background with the left mouse button to pan the workflow.
+- Drag a group title to move the group and all nodes currently inside it.
+- Drag a group edge or corner to resize the group. Resize constraints keep contained nodes inside the group rectangle.
 
 The frontend derives display connections from the workflow `links` array. It does not maintain a separate custom connection format.
 

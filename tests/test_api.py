@@ -204,6 +204,8 @@ async def test_layout_preserves_comfyui_metadata(client):
     assert group["color"] == "#334455"
     assert group["locked"] is True
     assert group["bounding"] != [0, 0, 1000, 1000]
+    assert group["bounding"][2] >= 1000
+    assert group["bounding"][3] >= 1000
 
 
 if __name__ == "__main__":

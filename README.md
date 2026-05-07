@@ -83,7 +83,7 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 
 - **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions
 - **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
-- **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, and group-aware dragging
+- **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, group-aware dragging, and resizable group containers
 - **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks
 - **Color-Coded Nodes**: Different node types are visually distinguished and rendered with ComfyUI-like widgets
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
@@ -110,7 +110,7 @@ Within each group, independently:
 
 ### Phase 4 — Global Positioning
 
-The content size of every group is known after Phase 3. Column widths are determined by the widest group in each column. Groups are placed left-to-right by column and top-to-bottom within each column. Group padding is added around the content area. Node positions are translated from group-local coordinates to global canvas coordinates.
+The content size of every group is known after Phase 3. Column widths are determined by the widest group in each column. Groups are placed left-to-right by column and top-to-bottom within each column. Existing group rectangles are treated as containers: manually enlarged groups keep their width and height, and smaller groups expand only as much as needed to contain their nodes with padding. Node positions are translated from group-local coordinates to global canvas coordinates.
 
 ### Phase 5 — Decorative Nodes
 
@@ -118,7 +118,7 @@ Comment nodes (`Note`, `MarkdownNote`, `Label`) carry no dataflow edges and are 
 
 ### Phase 6 — Bounding Box Update
 
-Each group's `bounding` rectangle is recalculated from the final positions of its member nodes plus the group padding.
+Each group's `bounding` rectangle is reconciled with the final positions of its member nodes plus the group padding. Layout never shrinks a larger existing group rectangle; it only moves the group with its contents or expands it when node content would otherwise fall outside.
 
 ### Spacing Defaults
 

@@ -320,31 +320,24 @@ def _position_groups_globally(workflow: Workflow) -> None:
         if not group.nodes:
             continue
         
-        if group.bounding and len(group.bounding) >= 4:
-            g_width = group.bounding[2]
-            g_height = group.bounding[3]
+        min_x, min_y, max_x, max_y = _group_content_bounds(group)
+        required_width = (max_x - min_x) + 2 * GROUP_PADDING
+        required_height = (max_y - min_y) + 2 * GROUP_PADDING
+        if _has_positive_bounding(group):
+            g_width = max(group.bounding[2], required_width)
+            g_height = max(group.bounding[3], required_height)
         else:
-            min_x = min(n.x for n in group.nodes)
-            max_x = max(n.x + n.size[0] for n in group.nodes)
-            min_y = min(n.y for n in group.nodes)
-            max_y = max(n.y + n.size[1] for n in group.nodes)
-            g_width = max_x - min_x
-            g_height = max_y - min_y
-            group.bounding = [min_x, min_y, g_width, g_height]
+            g_width = required_width
+            g_height = required_height
         
-        current_min_x = min(n.x for n in group.nodes) if group.nodes else 0
-        current_min_y = min(n.y for n in group.nodes) if group.nodes else 0
-        
-        offset_x = start_x - current_min_x
-        offset_y = start_y - current_min_y
+        offset_x = (start_x + GROUP_PADDING) - min_x
+        offset_y = (start_y + GROUP_PADDING) - min_y
         
         for node in group.nodes:
             node.x += offset_x
             node.y += offset_y
         
-        if group.bounding:
-            group.bounding[0] = start_x
-            group.bounding[1] = start_y
+        group.bounding = [start_x, start_y, g_width, g_height]
         
         start_x += g_width + GROUP_H_GAP
         
@@ -370,7 +363,10 @@ def _position_ungrouped_nodes(workflow: Workflow) -> None:
     max_right = 0.0
     max_bottom = 0.0
     for group in workflow.groups:
-        if group.nodes:
+        if _has_positive_bounding(group):
+            max_right = max(max_right, group.bounding[0] + group.bounding[2])
+            max_bottom = max(max_bottom, group.bounding[1] + group.bounding[3])
+        elif group.nodes:
             group_max_x = max(n.x + n.size[0] for n in group.nodes)
             group_max_y = max(n.y + n.size[1] for n in group.nodes)
             max_right = max(max_right, group_max_x)
@@ -438,7 +434,11 @@ def _layout_decorative_nodes(workflow: Workflow) -> None:
 
 def _update_bounding_boxes(workflow: Workflow) -> None:
     """
-    Update all group bounding boxes to tightly fit their nodes.
+    Update all group bounding boxes without shrinking manually resized groups.
+
+    Existing group rectangles are treated as user-authored containers. Layout
+    may move them and expand them if needed, but it must not collapse a larger
+    group back to a tight node fit.
     """
     logger.debug("Updating group bounding boxes")
     
@@ -446,16 +446,45 @@ def _update_bounding_boxes(workflow: Workflow) -> None:
         if not group.nodes:
             continue
         
-        min_x = min(n.x for n in group.nodes)
-        max_x = max(n.x + n.size[0] for n in group.nodes)
-        min_y = min(n.y for n in group.nodes)
-        max_y = max(n.y + n.size[1] for n in group.nodes)
-        
+        min_x, min_y, max_x, max_y = _group_content_bounds(group)
+        content_left = min_x - GROUP_PADDING
+        content_top = min_y - GROUP_PADDING
+        content_right = max_x + GROUP_PADDING
+        content_bottom = max_y + GROUP_PADDING
+
+        if _has_positive_bounding(group):
+            current_left, current_top, current_width, current_height = group.bounding
+            current_right = current_left + current_width
+            current_bottom = current_top + current_height
+            next_left = min(current_left, content_left)
+            next_top = min(current_top, content_top)
+            next_right = max(current_right, content_right)
+            next_bottom = max(current_bottom, content_bottom)
+        else:
+            next_left = content_left
+            next_top = content_top
+            next_right = content_right
+            next_bottom = content_bottom
+
         group.bounding = [
-            min_x - GROUP_PADDING,
-            min_y - GROUP_PADDING,
-            (max_x - min_x) + 2 * GROUP_PADDING,
-            (max_y - min_y) + 2 * GROUP_PADDING
+            next_left,
+            next_top,
+            next_right - next_left,
+            next_bottom - next_top,
         ]
         
         logger.debug(f"Group {group.name} bounding box updated to {group.bounding}")
+
+
+def _group_content_bounds(group: Group) -> tuple[float, float, float, float]:
+    """Return [left, top, right, bottom] bounds for the group's node content."""
+    min_x = min(n.x for n in group.nodes)
+    max_x = max(n.x + n.size[0] for n in group.nodes)
+    min_y = min(n.y for n in group.nodes)
+    max_y = max(n.y + n.size[1] for n in group.nodes)
+    return min_x, min_y, max_x, max_y
+
+
+def _has_positive_bounding(group: Group) -> bool:
+    """Return True when the group has a usable, user-authored rectangle."""
+    return bool(group.bounding and len(group.bounding) >= 4 and group.bounding[2] > 0 and group.bounding[3] > 0)

@@ -161,5 +161,34 @@ def test_bounding_box_update():
     logger.info("Bounding box update test passed")
 
 
+def test_layout_preserves_resized_group_container():
+    logger.info("Testing resized group container preservation")
+    wf = Workflow()
+    group = Group(id=1, name="Load Model", bounding=[0, 0, 900, 500])
+    wf.groups = [group]
+
+    n1 = Node(id=1, type="Loader", x=100, y=100, size=[180, 80])
+    n2 = Node(id=2, type="Consumer", x=420, y=150, size=[220, 120])
+    for node in [n1, n2]:
+        wf.nodes[node.id] = node
+    link = Link(id=10, source=1, source_port=0, target=2, target_port=0, type="MODEL")
+    wf.links[10] = link
+    n1.output_links.append(10)
+    n2.input_links.append(10)
+
+    result = apply(wf)
+
+    assert result.groups[0].bounding[2] >= 900
+    assert result.groups[0].bounding[3] >= 500
+    gx, gy, gw, gh = result.groups[0].bounding
+    for node in result.groups[0].nodes:
+        assert gx <= node.x
+        assert gy <= node.y
+        assert node.x + node.size[0] <= gx + gw
+        assert node.y + node.size[1] <= gy + gh
+
+    logger.info("Resized group container preservation test passed")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

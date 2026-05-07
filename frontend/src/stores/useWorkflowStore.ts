@@ -101,6 +101,11 @@ export const useWorkflowStore = defineStore('workflow', {
         node.pos = [node.pos[0] + dx, node.pos[1] + dy]
       }
     },
+    resizeGroup(groupId: number | string, bounding: [number, number, number, number]) {
+      const group = this.workflow?.groups?.find((item) => item.id === groupId)
+      if (!group) return
+      group.bounding = bounding
+    },
     loadWorkflow(data: ComfyWorkflow) {
       if (!Array.isArray(data.nodes)) {
         throw new Error('ComfyUI workflow is missing a nodes array')

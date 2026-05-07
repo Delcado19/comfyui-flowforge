@@ -23,6 +23,7 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - `order` is ComfyUI's computed execution order and must not be changed by layout.
 - Groups use `bounding: [x, y, width, height]`.
 - Group membership is inferred from node position and group bounding boxes.
+- Group rectangles are user-authored containers. Layout may move or expand a group to contain its nodes, but it should not shrink a manually enlarged group.
 - FlowForge works on UI workflow JSON, not API prompt JSON.
 - Layout should preserve all unknown top-level and node-level fields.
 

@@ -8,6 +8,11 @@ import ComfyConnection from './ComfyConnection.vue'
 
 const store = useWorkflowStore()
 const PORT_CENTER_OFFSET = 12
+const GROUP_CONTENT_PADDING = 24
+const MIN_GROUP_WIDTH = 120
+const MIN_GROUP_HEIGHT = 80
+const resizeHandles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const
+type ResizeHandle = (typeof resizeHandles)[number]
 
 const canvasRef = ref<HTMLElement | null>(null)
 const minimapRef = ref<HTMLElement | null>(null)
@@ -24,6 +29,16 @@ const activeGroupDrag = ref<{
   lastX: number
   lastY: number
   nodeIds: Array<number | string>
+  handle: HTMLElement | null
+} | null>(null)
+const activeGroupResize = ref<{
+  groupId: number | string
+  pointerId: number
+  handleName: ResizeHandle
+  startX: number
+  startY: number
+  startBounding: [number, number, number, number]
+  contentBounds: [number, number, number, number] | null
   handle: HTMLElement | null
 } | null>(null)
 const minimapContent = computed(() => {
@@ -176,9 +191,9 @@ function getNodeBounds(node: WorkflowNode): [number, number, number, number] {
 function isNodeInsideGroup(node: WorkflowNode, group: ComfyGroup): boolean {
   const bounds = group.bounding
   if (!bounds) return false
-  const [x, y, width, height] = getNodeBounds(node)
+  const [x, y] = getNodeBounds(node)
   const [gx, gy, gw, gh] = bounds
-  return x >= gx && y >= gy && x + width <= gx + gw && y + height <= gy + gh
+  return x >= gx && y >= gy && x <= gx + gw && y <= gy + gh
 }
 
 function getGroupStyle(group: ComfyGroup) {
@@ -220,6 +235,26 @@ function getNodesInGroup(group: ComfyGroup) {
   const bounds = group.bounding
   if (!bounds) return []
   return store.nodes.filter((node) => isNodeInsideGroup(node, group))
+}
+
+function getGroupContentBounds(group: ComfyGroup): [number, number, number, number] | null {
+  const nodes = getNodesInGroup(group)
+  if (nodes.length === 0) return null
+
+  let minX = Number.POSITIVE_INFINITY
+  let minY = Number.POSITIVE_INFINITY
+  let maxX = Number.NEGATIVE_INFINITY
+  let maxY = Number.NEGATIVE_INFINITY
+
+  for (const node of nodes) {
+    const [x, y, width, height] = getNodeBounds(node)
+    minX = Math.min(minX, x)
+    minY = Math.min(minY, y)
+    maxX = Math.max(maxX, x + width)
+    maxY = Math.max(maxY, y + height)
+  }
+
+  return [minX, minY, maxX, maxY]
 }
 
 function getPortPosition(node: WorkflowNode, portIndex: number, isOutput: boolean): [number, number] {
@@ -297,6 +332,25 @@ function onGroupPointerDown(e: PointerEvent, group: ComfyGroup) {
   handle.setPointerCapture(e.pointerId)
 }
 
+function onGroupResizePointerDown(e: PointerEvent, group: ComfyGroup, handleName: ResizeHandle) {
+  if (e.button !== 0 || !Array.isArray(group.bounding)) return
+  e.preventDefault()
+  e.stopPropagation()
+
+  const handle = e.currentTarget as HTMLElement | null
+  activeGroupResize.value = {
+    groupId: group.id,
+    pointerId: e.pointerId,
+    handleName,
+    startX: e.clientX,
+    startY: e.clientY,
+    startBounding: [...group.bounding],
+    contentBounds: getGroupContentBounds(group),
+    handle,
+  }
+  handle?.setPointerCapture(e.pointerId)
+}
+
 function onGroupPointerMove(e: PointerEvent) {
   const drag = activeGroupDrag.value
   if (!drag || drag.pointerId !== e.pointerId) return
@@ -310,6 +364,44 @@ function onGroupPointerMove(e: PointerEvent) {
   drag.lastY = e.clientY
 }
 
+function onGroupResizePointerMove(e: PointerEvent) {
+  const resize = activeGroupResize.value
+  if (!resize || resize.pointerId !== e.pointerId) return
+
+  const dx = (e.clientX - resize.startX) / store.scale
+  const dy = (e.clientY - resize.startY) / store.scale
+  const [startX, startY, startWidth, startHeight] = resize.startBounding
+  let left = startX
+  let top = startY
+  let right = startX + startWidth
+  let bottom = startY + startHeight
+
+  if (resize.handleName.includes('w')) left += dx
+  if (resize.handleName.includes('e')) right += dx
+  if (resize.handleName.includes('n')) top += dy
+  if (resize.handleName.includes('s')) bottom += dy
+
+  const minBounds = resize.contentBounds
+  if (minBounds) {
+    const [contentLeft, contentTop, contentRight, contentBottom] = minBounds
+    left = Math.min(left, contentLeft - GROUP_CONTENT_PADDING)
+    top = Math.min(top, contentTop - GROUP_CONTENT_PADDING)
+    right = Math.max(right, contentRight + GROUP_CONTENT_PADDING)
+    bottom = Math.max(bottom, contentBottom + GROUP_CONTENT_PADDING)
+  }
+
+  if (right - left < MIN_GROUP_WIDTH) {
+    if (resize.handleName.includes('w')) left = right - MIN_GROUP_WIDTH
+    else right = left + MIN_GROUP_WIDTH
+  }
+  if (bottom - top < MIN_GROUP_HEIGHT) {
+    if (resize.handleName.includes('n')) top = bottom - MIN_GROUP_HEIGHT
+    else bottom = top + MIN_GROUP_HEIGHT
+  }
+
+  store.resizeGroup(resize.groupId, [left, top, right - left, bottom - top])
+}
+
 function onGroupPointerUp(e: PointerEvent) {
   const drag = activeGroupDrag.value
   if (!drag || drag.pointerId !== e.pointerId) return
@@ -319,6 +411,17 @@ function onGroupPointerUp(e: PointerEvent) {
     handle.releasePointerCapture(e.pointerId)
   }
   activeGroupDrag.value = null
+}
+
+function onGroupResizePointerUp(e: PointerEvent) {
+  const resize = activeGroupResize.value
+  if (!resize || resize.pointerId !== e.pointerId) return
+
+  const handle = resize.handle
+  if (handle?.hasPointerCapture(e.pointerId)) {
+    handle.releasePointerCapture(e.pointerId)
+  }
+  activeGroupResize.value = null
 }
 
 function slotColor(type: string | undefined): string {
@@ -428,6 +531,10 @@ function onCanvasPointerDown(e: PointerEvent) {
 }
 
 function onPointerMove(e: PointerEvent) {
+  if (activeGroupResize.value && activeGroupResize.value.pointerId === e.pointerId) {
+    onGroupResizePointerMove(e)
+    return
+  }
   if (activeGroupDrag.value && activeGroupDrag.value.pointerId === e.pointerId) {
     onGroupPointerMove(e)
     return
@@ -441,6 +548,10 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  if (activeGroupResize.value && activeGroupResize.value.pointerId === e.pointerId) {
+    onGroupResizePointerUp(e)
+    return
+  }
   if (activeGroupDrag.value && activeGroupDrag.value.pointerId === e.pointerId) {
     onGroupPointerUp(e)
     return
@@ -593,6 +704,13 @@ function addSampleWorkflow() {
         >
           {{ group.title }}
         </div>
+        <div
+          v-for="handle in resizeHandles"
+          :key="`group-${group.id}-resize-${handle}`"
+          class="group-resize-handle"
+          :class="`resize-${handle}`"
+          @pointerdown="onGroupResizePointerDown($event, group, handle)"
+        ></div>
       </div>
     </div>
     <div class="nodes-container" :style="canvasStyle">
@@ -726,6 +844,66 @@ function addSampleWorkflow() {
 .workflow-group-title {
   cursor: move;
   user-select: none;
+}
+.group-resize-handle {
+  position: absolute;
+  pointer-events: auto;
+  z-index: 5;
+}
+.resize-n,
+.resize-s {
+  left: 10px;
+  right: 10px;
+  height: 8px;
+}
+.resize-e,
+.resize-w {
+  top: 10px;
+  bottom: 10px;
+  width: 8px;
+}
+.resize-n {
+  top: -4px;
+  cursor: ns-resize;
+}
+.resize-s {
+  bottom: -4px;
+  cursor: ns-resize;
+}
+.resize-e {
+  right: -4px;
+  cursor: ew-resize;
+}
+.resize-w {
+  left: -4px;
+  cursor: ew-resize;
+}
+.resize-nw,
+.resize-ne,
+.resize-se,
+.resize-sw {
+  width: 14px;
+  height: 14px;
+}
+.resize-nw {
+  top: -7px;
+  left: -7px;
+  cursor: nwse-resize;
+}
+.resize-ne {
+  top: -7px;
+  right: -7px;
+  cursor: nesw-resize;
+}
+.resize-se {
+  right: -7px;
+  bottom: -7px;
+  cursor: nwse-resize;
+}
+.resize-sw {
+  bottom: -7px;
+  left: -7px;
+  cursor: nesw-resize;
 }
 .connections-svg {
   position: absolute;
