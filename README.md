@@ -114,11 +114,11 @@ The content size of every group is known after Phase 3. Column widths are determ
 
 ### Phase 5 — Decorative Nodes
 
-Comment nodes (`Note`, `MarkdownNote`, `Label`) carry no dataflow edges and are excluded from the graph algorithm. After layout they are repositioned by computing the original offset vector from each decorative node to its nearest layout node (in original coordinates) and applying the same offset to the layout node's new position. This keeps notes visually attached to the nodes they describe.
+Comment nodes (`Note`, `MarkdownNote`, `Label`) carry no dataflow edges and are excluded from the graph algorithm. FlowForge now places them first as a left-side annotation column, ordered by their original Y position, before the rest of the workflow is optimized.
 
 ### Phase 6 — Bounding Box Update
 
-Each group's `bounding` rectangle is reconciled with the final positions of its member nodes plus the group padding. Layout never shrinks a larger existing group rectangle; it only moves the group with its contents or expands it when node content would otherwise fall outside.
+Each group's `bounding` rectangle is reconciled with the final positions of its member nodes plus the group padding. Layout never shrinks a larger existing group rectangle; it only moves the group with its contents or expands it when node content would otherwise fall outside. Groups and ungrouped nodes are packed in vertical columns to use the Y axis before widening the workflow.
 
 ### Spacing Defaults
 

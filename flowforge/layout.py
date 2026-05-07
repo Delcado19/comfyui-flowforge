@@ -3,6 +3,8 @@ Layout algorithm for ComfyUI FlowForge.
 Implements the six-phase pipeline as described in the README.
 """
 
+import math
+
 from .model import Node, Group, Workflow
 from .logger import setup_logger
 
@@ -15,6 +17,8 @@ NODE_V_GAP = 40   # Vertical gap between nodes in the same column
 GROUP_H_GAP = 200 # Horizontal gap between group columns
 GROUP_V_GAP = 100 # Vertical gap between groups stacked in the same column
 GROUP_PADDING = 50 # Padding inside a group's bounding box
+DECORATIVE_START_X = 20.0
+DECORATIVE_START_Y = 50.0
 
 
 def apply(workflow: Workflow) -> Workflow:
@@ -35,6 +39,11 @@ def apply(workflow: Workflow) -> Workflow:
         logger.debug("Phase 1: Group Membership")
         _assign_groups(workflow)
         
+        # Phase 1b: Position decorative nodes first so they form a stable
+        # annotation column on the left edge of the workflow.
+        logger.debug("Phase 1b: Decorative Nodes")
+        decorative_right_edge = _position_decorative_nodes_left(workflow)
+
         # Phase 2: Inter-Group Topology
         logger.debug("Phase 2: Inter-Group Topology")
         _order_groups(workflow)
@@ -45,17 +54,13 @@ def apply(workflow: Workflow) -> Workflow:
         
         # Phase 4: Global Positioning
         logger.debug("Phase 4: Global Positioning")
-        _position_groups_globally(workflow)
+        _position_groups_globally(workflow, start_x=max(50.0, decorative_right_edge + GROUP_H_GAP))
         
         # Phase 4b: Position ungrouped nodes (after groups)
-        _position_ungrouped_nodes(workflow)
+        _position_ungrouped_nodes(workflow, start_x_floor=decorative_right_edge + GROUP_H_GAP)
         
-        # Phase 5: Decorative Nodes
-        logger.debug("Phase 5: Decorative Nodes")
-        _layout_decorative_nodes(workflow)
-        
-        # Phase 6: Bounding Box Update
-        logger.debug("Phase 6: Bounding Box Update")
+        # Phase 5: Bounding Box Update
+        logger.debug("Phase 5: Bounding Box Update")
         _update_bounding_boxes(workflow)
         
         logger.info("Layout algorithm completed successfully")
@@ -87,6 +92,8 @@ def _assign_groups(workflow: Workflow) -> None:
     
     # For each node, find the first group that contains it (by original position)
     for node in workflow.nodes.values():
+        if _is_decorative_node(node):
+            continue
         assigned = False
         for group in workflow.groups:
             if _node_in_group(node, group):
@@ -303,7 +310,7 @@ def _layout_groups_internal(workflow: Workflow) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _position_groups_globally(workflow: Workflow) -> None:
+def _position_groups_globally(workflow: Workflow, start_x: float = 50.0) -> None:
     """
     Position groups relative to each other based on their topological order.
     Groups that come earlier in the flow are placed to the left.
@@ -313,10 +320,17 @@ def _position_groups_globally(workflow: Workflow) -> None:
     if not workflow.groups:
         return
     
-    start_x = 50.0
     start_y = 50.0
+    current_x = start_x
+    current_y = start_y
+    column_width = 0.0
+    column_budget = _estimate_vertical_packing_budget(
+        [group for group in workflow.groups if group.nodes],
+        _group_visual_height,
+        GROUP_V_GAP,
+    )
     
-    for i, group in enumerate(workflow.groups):
+    for group in workflow.groups:
         if not group.nodes:
             continue
         
@@ -329,27 +343,32 @@ def _position_groups_globally(workflow: Workflow) -> None:
         else:
             g_width = required_width
             g_height = required_height
+
+        if current_y > start_y and current_y + g_height > start_y + column_budget:
+            current_x += column_width + GROUP_H_GAP
+            current_y = start_y
+            column_width = 0.0
         
-        offset_x = (start_x + GROUP_PADDING) - min_x
-        offset_y = (start_y + GROUP_PADDING) - min_y
+        offset_x = (current_x + GROUP_PADDING) - min_x
+        offset_y = (current_y + GROUP_PADDING) - min_y
         
         for node in group.nodes:
             node.x += offset_x
             node.y += offset_y
         
-        group.bounding = [start_x, start_y, g_width, g_height]
+        group.bounding = [current_x, current_y, g_width, g_height]
         
-        start_x += g_width + GROUP_H_GAP
+        current_y += g_height + GROUP_V_GAP
+        column_width = max(column_width, g_width)
         
-        if (i + 1) % 3 == 0:
-            start_x = 50.0
-            start_y += g_height + GROUP_V_GAP
+    # The final bounding boxes are updated later; current_y/current_x only
+    # affect placement.
 
 
-def _position_ungrouped_nodes(workflow: Workflow) -> None:
+def _position_ungrouped_nodes(workflow: Workflow, start_x_floor: float = 50.0) -> None:
     """
-    Position nodes that are not part of any group in a simple grid layout.
-    Placed to the right of all groups or starting at (50,50) if no groups.
+    Position nodes that are not part of any group using vertical column packing.
+    This keeps the workflow narrower by using the Y axis first.
     """
     if not workflow.ungrouped_nodes:
         return
@@ -361,70 +380,58 @@ def _position_ungrouped_nodes(workflow: Workflow) -> None:
     
     # Determine start position: if groups exist, start after the rightmost group extent
     max_right = 0.0
-    max_bottom = 0.0
     for group in workflow.groups:
         if _has_positive_bounding(group):
             max_right = max(max_right, group.bounding[0] + group.bounding[2])
-            max_bottom = max(max_bottom, group.bounding[1] + group.bounding[3])
         elif group.nodes:
             group_max_x = max(n.x + n.size[0] for n in group.nodes)
-            group_max_y = max(n.y + n.size[1] for n in group.nodes)
             max_right = max(max_right, group_max_x)
-            max_bottom = max(max_bottom, group_max_y)
     
-    start_x = max_right + GROUP_H_GAP if max_right > 0 else 50
+    start_x = max(start_x_floor, max_right + GROUP_H_GAP if max_right > 0 else 50)
     start_y = 50.0
+    current_x = start_x
+    current_y = start_y
+    column_width = 0.0
+    column_budget = _estimate_vertical_packing_budget(sorted_nodes, _node_visual_height, NODE_V_GAP)
     
-    # Determine column count based on screen width or constant
-    cols = 3
-    max_node_w = max((n.size[0] for n in sorted_nodes if n.size[0] > 0), default=200)
-    
-    for i, node in enumerate(sorted_nodes):
-        col = i // cols
-        row = i % cols
-        node.x = start_x + col * (max_node_w + NODE_H_GAP)
-        node.y = start_y + row * (node.size[1] + NODE_V_GAP)
+    for node in sorted_nodes:
+        node_w = _node_visual_width(node)
+        node_h = _node_visual_height(node)
+        if current_y > start_y and current_y + node_h > start_y + column_budget:
+            current_x += column_width + NODE_H_GAP
+            current_y = start_y
+            column_width = 0.0
+
+        node.x = current_x
+        node.y = current_y
+        current_y += node_h + NODE_V_GAP
+        column_width = max(column_width, node_w)
 
 
-# ---------------------------------------------------------------------------
-# Phase 5: Decorative Nodes
-# ---------------------------------------------------------------------------
-
-
-def _layout_decorative_nodes(workflow: Workflow) -> None:
+def _position_decorative_nodes_left(workflow: Workflow) -> float:
     """
-    Position decorative nodes (Note, MarkdownNote, Label) by preserving their
-    original offset from the nearest layout node.
+    Position Note / Markdown / Label nodes as a left-side annotation column.
+
+    Returns the right edge of the decorative column so later layout phases can
+    start to its right.
     """
-    logger.debug("Positioning decorative nodes")
-    
-    DECORATIVE_TYPES = {"Note", "MarkdownNote", "Label"}
-    
-    # Find all decorative nodes
-    decorative = [n for n in workflow.nodes.values() if n.type in DECORATIVE_TYPES]
-    layout_nodes = [n for n in workflow.nodes.values() if n.type not in DECORATIVE_TYPES]
-    
-    if not decorative or not layout_nodes:
-        return
-    
-    for dec_node in decorative:
-        # Find the nearest layout node by original distance
-        nearest = None
-        min_dist = float('inf')
-        for lay_node in layout_nodes:
-            dx = dec_node.x - lay_node.x
-            dy = dec_node.y - lay_node.y
-            dist = (dx*dx + dy*dy) ** 0.5
-            if dist < min_dist:
-                min_dist = dist
-                nearest = lay_node
-        if nearest:
-            # Apply the same offset vector to the layout node's new position
-            offset_x = dec_node.x - nearest.x
-            offset_y = dec_node.y - nearest.y
-            dec_node.x = nearest.x + offset_x
-            dec_node.y = nearest.y + offset_y
-            logger.debug(f"Positioned decorative node {dec_node.id} near {nearest.id} with offset ({offset_x:.0f}, {offset_y:.0f})")
+    logger.debug("Positioning decorative nodes on the left edge")
+
+    decorative = [n for n in workflow.nodes.values() if _is_decorative_node(n)]
+    if not decorative:
+        return DECORATIVE_START_X
+
+    decorative.sort(key=lambda n: (n.y, n.x, n.id))
+    current_y = DECORATIVE_START_Y
+    max_width = 0.0
+
+    for node in decorative:
+        node.x = DECORATIVE_START_X
+        node.y = current_y
+        current_y += _node_visual_height(node) + NODE_V_GAP
+        max_width = max(max_width, _node_visual_width(node))
+
+    return DECORATIVE_START_X + max_width
 
 
 # ---------------------------------------------------------------------------
@@ -488,3 +495,34 @@ def _group_content_bounds(group: Group) -> tuple[float, float, float, float]:
 def _has_positive_bounding(group: Group) -> bool:
     """Return True when the group has a usable, user-authored rectangle."""
     return bool(group.bounding and len(group.bounding) >= 4 and group.bounding[2] > 0 and group.bounding[3] > 0)
+
+
+def _is_decorative_node(node: Node) -> bool:
+    return node.type in {"Note", "MarkdownNote", "Label"}
+
+
+def _node_visual_width(node: Node) -> float:
+    return node.size[0] if node.size[0] > 0 else 200.0
+
+
+def _node_visual_height(node: Node) -> float:
+    return node.size[1] if node.size[1] > 0 else 60.0
+
+
+def _group_visual_height(group: Group) -> float:
+    if _has_positive_bounding(group):
+        return group.bounding[3]
+    _, _, _, max_y = _group_content_bounds(group)
+    min_y = min(n.y for n in group.nodes)
+    return (max_y - min_y) + 2 * GROUP_PADDING
+
+
+def _estimate_vertical_packing_budget(items, height_fn, gap: float) -> float:
+    if not items:
+        return 0.0
+
+    heights = [max(1.0, float(height_fn(item))) for item in items]
+    total_height = sum(heights) + gap * max(0, len(heights) - 1)
+    target_columns = max(1, min(len(heights), int(math.sqrt(len(heights))) or 1))
+    tallest = max(heights)
+    return max(tallest, total_height / target_columns)

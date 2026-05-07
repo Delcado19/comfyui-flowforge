@@ -129,10 +129,13 @@ def test_global_positioning():
     
     _position_groups_globally(wf)
     
-    # group2 should be to the right of group1
+    # group2 should still be placed after group1; this layout now prefers Y
+    # packing, but can start a new column if the packed height budget is full.
     min_x_g1 = min(n.x for n in group1.nodes)
     min_x_g2 = min(n.x for n in group2.nodes)
-    assert min_x_g2 > min_x_g1
+    min_y_g1 = min(n.y for n in group1.nodes)
+    min_y_g2 = min(n.y for n in group2.nodes)
+    assert min_y_g2 > min_y_g1 or min_x_g2 > min_x_g1
     logger.info("Global positioning test passed")
 
 
@@ -188,6 +191,26 @@ def test_layout_preserves_resized_group_container():
         assert node.y + node.size[1] <= gy + gh
 
     logger.info("Resized group container preservation test passed")
+
+
+def test_decorative_nodes_move_to_left_column():
+    logger.info("Testing decorative node placement")
+    wf = Workflow()
+    note = Node(id=1, type="Note", x=700, y=500, size=[260, 120])
+    markdown = Node(id=2, type="MarkdownNote", x=900, y=100, size=[320, 180])
+    regular = Node(id=3, type="LoadImage", x=200, y=200, size=[200, 120])
+    wf.nodes[note.id] = note
+    wf.nodes[markdown.id] = markdown
+    wf.nodes[regular.id] = regular
+    wf.groups = [Group(id=1, name="workflow", bounding=[150, 150, 900, 700])]
+
+    apply(wf)
+
+    assert note.x == 20.0
+    assert markdown.x == 20.0
+    assert markdown.y < note.y
+    assert regular.x > markdown.x
+    logger.info("Decorative node placement test passed")
 
 
 if __name__ == "__main__":

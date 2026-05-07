@@ -24,6 +24,7 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - Groups use `bounding: [x, y, width, height]`.
 - Group membership is inferred from node position and group bounding boxes.
 - Group rectangles are user-authored containers. Layout may move or expand a group to contain its nodes, but it should not shrink a manually enlarged group.
+- Decorative nodes (`Note`, `MarkdownNote`, `Label`) are placed first in a left-side annotation column and should not influence group assignment or graph layout.
 - FlowForge works on UI workflow JSON, not API prompt JSON.
 - Layout should preserve all unknown top-level and node-level fields.
 
