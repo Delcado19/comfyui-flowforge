@@ -26,7 +26,7 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - Group rectangles are user-authored containers. Layout may move or expand a group to contain its nodes, but it should not shrink a manually enlarged group.
 - Decorative nodes (`Note`, `MarkdownNote`, `Label`) are placed first in a left-side annotation column and should not influence group assignment or graph layout.
 - Layout spacing is parameterized through `LayoutSettings(node_x_distance, node_y_distance)`. The GUI exposes live X and Y controls in the 20-240 px range. Horizontal gap, vertical gap, group spacing, and padding all derive from those axis values.
-- The GUI exposes group CRUD controls: create a group from the current viewport, delete a single group from the canvas, and clear all groups from the toolbar.
+- The GUI exposes group CRUD controls: start drag-based group creation from the canvas, delete a single group from the canvas, and clear all groups from the toolbar.
 - FlowForge works on UI workflow JSON, not API prompt JSON.
 - Layout should preserve all unknown top-level and node-level fields.
 
@@ -81,7 +81,7 @@ These connections are not represented directly in the `links` array and may requ
 | `GetNode` | comfyui-kjnodes | Reads a value name from `widgets_values[0]` |
 
 A `SetNode` named `"VAE"` and a `GetNode` named `"VAE"` are virtually connected.
-The optimizer is reroute-aware and cost-based: it should treat `Reroute` as a pass-through node when detecting high-fanout MODEL/CLIP/VAE paths, and it should only rewrite when the estimated routing cost goes down. Local Set/Get hub links are discounted in that estimate because they represent a compact distribution spine. Candidate savings should be recomputed greedily after each rewrite so the best remaining candidate is always chosen on the current graph. The inserted `SetNode` should be anchored near the vertical center of its consumer cluster instead of being fixed to the source Y coordinate.
+The optimizer is reroute-aware and cost-based: it should treat `Reroute` as a pass-through node when detecting high-fanout MODEL/CLIP/VAE paths, and it should only rewrite when the estimated routing cost goes down. Local Set/Get hub links are discounted in that estimate because they represent a compact distribution spine. Cross-group links are weighted slightly higher so broad inter-group fanouts are prioritized. Candidate savings should be recomputed greedily after each rewrite so the best remaining candidate is always chosen on the current graph. The inserted `SetNode` should be anchored near the vertical center of its consumer cluster instead of being fixed to the source Y coordinate.
 
 ### Reroute
 

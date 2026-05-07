@@ -3,8 +3,8 @@ Tests for the optimizer module.
 """
 
 import pytest
-from flowforge.model import Node, Link, Workflow
-from flowforge.optimizer import optimize
+from flowforge.model import Node, Link, Group, Workflow
+from flowforge.optimizer import optimize, _build_node_group_index, _link_cost
 from flowforge.logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -209,6 +209,37 @@ def test_optimize_preserves_other_types():
     assert 1 in optimized.nodes
     assert 2 in optimized.nodes
     logger.info("Non-optimizable type preservation test passed")
+
+
+def test_link_cost_penalizes_cross_group_links():
+    logger.info("Testing group-aware link cost")
+    wf = Workflow()
+    source = Node(id=1, type="UNETLoader", x=0, y=0, size=[200, 60])
+    target = Node(id=2, type="KSampler", x=400, y=200, size=[200, 100])
+    wf.nodes[1] = source
+    wf.nodes[2] = target
+    wf.groups = [Group(id=1, name="group", nodes=[source, target], bounding=[0, 0, 800, 400])]
+
+    same_group_cost = _link_cost(wf, Link(id=1, source=1, source_port=0, target=2, target_port=0, type="MODEL"), _build_node_group_index(wf))
+
+    cross_wf = Workflow()
+    cross_source = Node(id=1, type="UNETLoader", x=0, y=0, size=[200, 60])
+    cross_target = Node(id=2, type="KSampler", x=400, y=200, size=[200, 100])
+    cross_wf.nodes[1] = cross_source
+    cross_wf.nodes[2] = cross_target
+    cross_wf.groups = [
+        Group(id=1, name="source", nodes=[cross_source], bounding=[0, 0, 240, 120]),
+        Group(id=2, name="target", nodes=[cross_target], bounding=[360, 160, 240, 200]),
+    ]
+
+    cross_group_cost = _link_cost(
+        cross_wf,
+        Link(id=1, source=1, source_port=0, target=2, target_port=0, type="MODEL"),
+        _build_node_group_index(cross_wf),
+    )
+
+    assert cross_group_cost > same_group_cost
+    logger.info("Group-aware link cost test passed")
 
 
 if __name__ == "__main__":

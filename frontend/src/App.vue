@@ -6,7 +6,7 @@ import ComfyCanvas from './components/ComfyCanvas.vue'
 const store = useWorkflowStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const canvasRef = ref<{
-  createGroupFromViewport: () => void
+  beginGroupCreation: () => void
   deleteAllGroups: () => void
 } | null>(null)
 const NODE_DISTANCE_DEFAULT = 80
@@ -92,7 +92,7 @@ function layout() {
 }
 
 function createGroup() {
-  canvasRef.value?.createGroupFromViewport()
+  canvasRef.value?.beginGroupCreation()
 }
 
 function deleteAllGroups() {

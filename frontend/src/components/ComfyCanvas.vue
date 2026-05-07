@@ -11,9 +11,7 @@ const PORT_CENTER_OFFSET = 12
 const GROUP_CONTENT_PADDING = 24
 const MIN_GROUP_WIDTH = 120
 const MIN_GROUP_HEIGHT = 80
-const CREATE_GROUP_WIDTH = 480
-const CREATE_GROUP_HEIGHT = 320
-const CREATE_GROUP_PADDING = 48
+const GROUP_CREATE_MIN_SIZE = 24
 const resizeHandles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const
 type ResizeHandle = (typeof resizeHandles)[number]
 
@@ -21,11 +19,20 @@ const canvasRef = ref<HTMLElement | null>(null)
 const minimapRef = ref<HTMLElement | null>(null)
 const minimapBodyRef = ref<HTMLElement | null>(null)
 const isDraggingCanvas = ref(false)
+const isCreatingGroup = ref(false)
 const dragStart = ref({ x: 0, y: 0 })
 const panStart = ref({ x: 0, y: 0 })
 const activePointerId = ref<number | null>(null)
 const isDraggingMinimap = ref(false)
 const minimapSize = ref({ width: 0, height: 0 })
+const activeGroupCreate = ref<{
+  pointerId: number
+  startX: number
+  startY: number
+  currentX: number
+  currentY: number
+  handle: HTMLElement | null
+} | null>(null)
 const activeGroupDrag = ref<{
   groupId: number | string
   pointerId: number
@@ -260,55 +267,58 @@ function getGroupContentBounds(group: ComfyGroup): [number, number, number, numb
   return [minX, minY, maxX, maxY]
 }
 
-function getViewportWorldBounds(): [number, number, number, number] | null {
+function getCanvasWorldPoint(clientX: number, clientY: number): { x: number; y: number } | null {
   const canvas = canvasRef.value
   if (!canvas || store.scale <= 0) return null
 
-  const left = -store.offsetX / store.scale
-  const top = -store.offsetY / store.scale
-  const width = canvas.clientWidth / store.scale
-  const height = canvas.clientHeight / store.scale
-  return [left, top, width, height]
+  const box = canvas.getBoundingClientRect()
+  return {
+    x: (clientX - box.left - store.offsetX) / store.scale,
+    y: (clientY - box.top - store.offsetY) / store.scale,
+  }
 }
 
-function createGroupFromViewport() {
-  const viewport = getViewportWorldBounds()
-  if (!viewport) return
+function beginGroupCreation() {
+  if (!store.workflow) return
+  if (isCreatingGroup.value || activeGroupCreate.value) {
+    cancelGroupCreation()
+    return
+  }
+  isCreatingGroup.value = true
+}
 
-  const [viewportLeft, viewportTop, viewportWidth, viewportHeight] = viewport
-  const viewportRight = viewportLeft + viewportWidth
-  const viewportBottom = viewportTop + viewportHeight
-  const visibleNodes = store.nodes.filter((node) => {
-    const [x, y, width, height] = getNodeBounds(node)
-    return x < viewportRight && x + width > viewportLeft && y < viewportBottom && y + height > viewportTop
-  })
+function cancelGroupCreation() {
+  isCreatingGroup.value = false
+  activeGroupCreate.value = null
+}
 
-  if (visibleNodes.length > 0) {
-    let minX = Number.POSITIVE_INFINITY
-    let minY = Number.POSITIVE_INFINITY
-    let maxX = Number.NEGATIVE_INFINITY
-    let maxY = Number.NEGATIVE_INFINITY
+function finalizeGroupCreation() {
+  const draft = activeGroupCreate.value
+  if (!draft) return
 
-    for (const node of visibleNodes) {
-      const [x, y, width, height] = getNodeBounds(node)
-      minX = Math.min(minX, x)
-      minY = Math.min(minY, y)
-      maxX = Math.max(maxX, x + width)
-      maxY = Math.max(maxY, y + height)
-    }
+  const left = Math.min(draft.startX, draft.currentX)
+  const top = Math.min(draft.startY, draft.currentY)
+  const width = Math.abs(draft.currentX - draft.startX)
+  const height = Math.abs(draft.currentY - draft.startY)
+  const handle = draft.handle
+  if (handle?.hasPointerCapture(draft.pointerId)) {
+    handle.releasePointerCapture(draft.pointerId)
+  }
 
-    store.createGroup([
-      minX - CREATE_GROUP_PADDING,
-      minY - CREATE_GROUP_PADDING,
-      (maxX - minX) + CREATE_GROUP_PADDING * 2,
-      (maxY - minY) + CREATE_GROUP_PADDING * 2,
-    ])
+  activeGroupCreate.value = null
+  isCreatingGroup.value = false
+
+  if (width < GROUP_CREATE_MIN_SIZE || height < GROUP_CREATE_MIN_SIZE) {
     return
   }
 
-  const left = viewportLeft + viewportWidth / 2 - CREATE_GROUP_WIDTH / 2
-  const top = viewportTop + viewportHeight / 2 - CREATE_GROUP_HEIGHT / 2
-  store.createGroup([left, top, CREATE_GROUP_WIDTH, CREATE_GROUP_HEIGHT])
+  const defaultTitle = `Group ${groups.value.length + 1}`
+  const title = window.prompt('Group title', defaultTitle)
+  if (title === null) {
+    return
+  }
+
+  store.createGroup([left, top, width, height], title.trim() || defaultTitle)
 }
 
 function deleteAllGroups() {
@@ -586,6 +596,25 @@ function onCanvasPointerDown(e: PointerEvent) {
   const target = e.target as HTMLElement
   if (target.closest('.comfy-node') || target.closest('.minimap')) return
 
+  if (isCreatingGroup.value) {
+    const point = getCanvasWorldPoint(e.clientX, e.clientY)
+    if (!point) return
+
+    e.preventDefault()
+    e.stopPropagation()
+    const handle = e.currentTarget as HTMLElement | null
+    activeGroupCreate.value = {
+      pointerId: e.pointerId,
+      startX: point.x,
+      startY: point.y,
+      currentX: point.x,
+      currentY: point.y,
+      handle,
+    }
+    handle?.setPointerCapture(e.pointerId)
+    return
+  }
+
   e.preventDefault()
   isDraggingCanvas.value = true
   activePointerId.value = e.pointerId
@@ -595,6 +624,13 @@ function onCanvasPointerDown(e: PointerEvent) {
 }
 
 function onPointerMove(e: PointerEvent) {
+  if (activeGroupCreate.value && activeGroupCreate.value.pointerId === e.pointerId) {
+    const point = getCanvasWorldPoint(e.clientX, e.clientY)
+    if (!point) return
+    activeGroupCreate.value.currentX = point.x
+    activeGroupCreate.value.currentY = point.y
+    return
+  }
   if (activeGroupResize.value && activeGroupResize.value.pointerId === e.pointerId) {
     onGroupResizePointerMove(e)
     return
@@ -612,6 +648,10 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  if (activeGroupCreate.value && activeGroupCreate.value.pointerId === e.pointerId) {
+    finalizeGroupCreation()
+    return
+  }
   if (activeGroupResize.value && activeGroupResize.value.pointerId === e.pointerId) {
     onGroupResizePointerUp(e)
     return
@@ -670,8 +710,15 @@ function onMinimapPointerUp(e: PointerEvent) {
   isDraggingMinimap.value = false
 }
 
+function onKeyDown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && (isCreatingGroup.value || activeGroupCreate.value)) {
+    cancelGroupCreation()
+  }
+}
+
 defineExpose({
-  createGroupFromViewport,
+  beginGroupCreation,
+  cancelGroupCreation,
   deleteAllGroups,
 })
 
@@ -680,12 +727,14 @@ onMounted(() => {
   window.addEventListener('pointermove', onPointerMove)
   window.addEventListener('pointerup', onPointerUp)
   window.addEventListener('pointercancel', onPointerUp)
+  window.addEventListener('keydown', onKeyDown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('pointermove', onPointerMove)
   window.removeEventListener('pointerup', onPointerUp)
   window.removeEventListener('pointercancel', onPointerUp)
+  window.removeEventListener('keydown', onKeyDown)
 })
 
 watch(
@@ -713,13 +762,20 @@ watch(
   <div
     ref="canvasRef"
     class="canvas-container"
-    :class="{ 'is-panning': isDraggingCanvas }"
+    :class="{ 'is-panning': isDraggingCanvas, 'is-creating-group': isCreatingGroup }"
     @wheel="onWheel"
     @pointerdown="onCanvasPointerDown"
   >
     <div class="canvas-bg"></div>
     <div class="group-toolbar">
-      <button type="button" title="Create group from viewport" @pointerdown.stop @click="createGroupFromViewport">+</button>
+      <button
+        type="button"
+        title="Create group by dragging"
+        @pointerdown.stop
+        @click="beginGroupCreation"
+      >
+        +
+      </button>
       <button
         type="button"
         title="Delete all groups"
@@ -731,6 +787,16 @@ watch(
       </button>
     </div>
     <div class="groups-layer" :style="canvasStyle">
+      <div
+        v-if="activeGroupCreate"
+        class="group-create-preview"
+        :style="{
+          left: `${Math.min(activeGroupCreate.startX, activeGroupCreate.currentX)}px`,
+          top: `${Math.min(activeGroupCreate.startY, activeGroupCreate.currentY)}px`,
+          width: `${Math.abs(activeGroupCreate.currentX - activeGroupCreate.startX)}px`,
+          height: `${Math.abs(activeGroupCreate.currentY - activeGroupCreate.startY)}px`,
+        }"
+      ></div>
       <div
         v-for="group in groups"
         :key="`group-${group.id}`"
@@ -848,6 +914,9 @@ watch(
 .canvas-container.is-panning {
   cursor: grabbing;
 }
+.canvas-container.is-creating-group {
+  cursor: crosshair;
+}
 .canvas-bg {
   position: absolute;
   inset: 0;
@@ -881,6 +950,15 @@ watch(
 .group-toolbar button:disabled {
   cursor: default;
   opacity: 0.45;
+}
+.group-create-preview {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed rgb(180 220 255 / 90%);
+  background: rgb(90 150 210 / 12%);
+  border-radius: 2px;
+  pointer-events: none;
+  z-index: 5;
 }
 .nodes-container {
   position: absolute;

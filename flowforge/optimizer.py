@@ -23,6 +23,7 @@ HUB_NODE_HEIGHT = 40.0
 HUB_NODE_GAP = 80.0
 FANOUT_SPAN_COST_FACTOR = 0.2
 HUB_SPAN_COST_FACTOR = 0.05
+GROUP_CROSS_LINK_FACTOR = 1.15
 
 
 def optimize(workflow: Workflow) -> Workflow:
@@ -34,6 +35,7 @@ def optimize(workflow: Workflow) -> Workflow:
     logger.info("Starting optimizer")
     
     new_workflow = deepcopy(workflow)
+    node_group_index = _build_node_group_index(new_workflow)
     
     # Build a map: (source_node_id, source_port) -> list of Link objects
     port_links: Dict[tuple, List[Link]] = {}
@@ -60,7 +62,7 @@ def optimize(workflow: Workflow) -> Workflow:
         # Check that at least one traversed link has an optimizable type.
         traversed_links = [new_workflow.links[link_id] for link_id in traversed_link_ids if link_id in new_workflow.links]
         if any(link.type in OPTIMIZE_TYPES for link in traversed_links):
-            current_cost = _current_graph_cost(new_workflow, traversed_link_ids, terminal_links)
+            current_cost = _current_graph_cost(new_workflow, traversed_link_ids, terminal_links, node_group_index)
             optimized_cost = _estimated_rewrite_cost(new_workflow, src_node, terminal_links)
             if optimized_cost < current_cost:
                 optimization_targets.append((src_node.id, src_port))
@@ -72,7 +74,7 @@ def optimize(workflow: Workflow) -> Workflow:
     # one rewrite changes the relative value of the others.
     remaining_targets = optimization_targets
     while remaining_targets:
-        best_candidate: tuple[float, Node, int, List[Link], set[int]] | None = None
+        best_candidate: tuple[float, int, float, Node, int, List[Link], set[int]] | None = None
 
         for src_id, src_port in remaining_targets:
             src_node = new_workflow.nodes.get(src_id)
@@ -99,29 +101,46 @@ def optimize(workflow: Workflow) -> Workflow:
             ):
                 continue
 
-            current_cost = _current_graph_cost(new_workflow, current_traversed, current_terminals)
+            current_cost = _current_graph_cost(new_workflow, current_traversed, current_terminals, node_group_index)
             optimized_cost = _estimated_rewrite_cost(new_workflow, src_node, current_terminals)
             savings = current_cost - optimized_cost
+            group_span = _terminal_group_span(node_group_index, current_terminals)
+            spread = _fanout_vertical_span(new_workflow, current_terminals)
             logger.debug(
-                "Cost check for %s:%s - current=%.2f optimized=%.2f savings=%.2f",
+                "Cost check for %s:%s - current=%.2f optimized=%.2f savings=%.2f groups=%s span=%.2f",
                 src_node.id,
                 src_port,
                 current_cost,
                 optimized_cost,
                 savings,
+                group_span,
+                spread,
             )
             if savings <= 0:
                 continue
 
             if best_candidate is None or savings > best_candidate[0] or (
-                savings == best_candidate[0] and (src_node.id, src_port) < (best_candidate[1].id, best_candidate[2])
+                savings == best_candidate[0]
+                and (
+                    group_span > best_candidate[1]
+                    or (
+                        group_span == best_candidate[1]
+                        and (
+                            spread > best_candidate[2]
+                            or (
+                                spread == best_candidate[2]
+                                and (src_node.id, src_port) < (best_candidate[3].id, best_candidate[4])
+                            )
+                        )
+                    )
+                )
             ):
-                best_candidate = (savings, src_node, src_port, current_terminals, current_traversed)
+                best_candidate = (savings, group_span, spread, src_node, src_port, current_terminals, current_traversed)
 
         if best_candidate is None:
             break
 
-        _, src_node, src_port, current_terminals, current_traversed = best_candidate
+        _, _, _, src_node, src_port, current_terminals, current_traversed = best_candidate
         _replace_port_with_set_get(new_workflow, src_node, src_port, current_terminals, current_traversed)
         remaining_targets = [
             (candidate_src_id, candidate_src_port)
@@ -344,13 +363,14 @@ def _current_graph_cost(
     workflow: Workflow,
     traversed_link_ids: set[int],
     terminal_links: List[Link],
+    node_group_index: Dict[int, int],
 ) -> float:
     cost = 0.0
     for link_id in traversed_link_ids:
         link = workflow.links.get(link_id)
         if not link:
             continue
-        cost += _link_cost(workflow, link) + LINK_INSERTION_COST
+        cost += _link_cost(workflow, link, node_group_index) + LINK_INSERTION_COST
     cost += _fanout_vertical_span(workflow, terminal_links) * FANOUT_SPAN_COST_FACTOR
     return cost
 
@@ -406,12 +426,22 @@ def _point_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
     return math.hypot(a[0] - b[0], a[1] - b[1])
 
 
-def _link_cost(workflow: Workflow, link: Link) -> float:
+def _link_cost(workflow: Workflow, link: Link, node_group_index: Dict[int, int] | None = None) -> float:
     source_node = workflow.nodes.get(link.source)
     target_node = workflow.nodes.get(link.target)
     if source_node is None or target_node is None:
         return 0.0
-    return _point_distance(_node_center(source_node), _node_center(target_node))
+    distance = _point_distance(_node_center(source_node), _node_center(target_node))
+    if node_group_index is None:
+        return distance
+
+    source_group = node_group_index.get(source_node.id)
+    target_group = node_group_index.get(target_node.id)
+    if source_group is None or target_group is None:
+        return distance * GROUP_CROSS_LINK_FACTOR
+    if source_group != target_group:
+        return distance * GROUP_CROSS_LINK_FACTOR
+    return distance
 
 
 def _set_node_position(workflow: Workflow, src_node: Node, terminal_links: List[Link]) -> tuple[float, float]:
@@ -454,6 +484,23 @@ def _fanout_vertical_span(workflow: Workflow, terminal_links: List[Link]) -> flo
         return 0.0
 
     return max(target_centers) - min(target_centers)
+
+
+def _build_node_group_index(workflow: Workflow) -> Dict[int, int]:
+    index: Dict[int, int] = {}
+    for group_index, group in enumerate(workflow.groups):
+        for node in group.nodes:
+            index[node.id] = group_index
+    return index
+
+
+def _terminal_group_span(node_group_index: Dict[int, int], terminal_links: List[Link]) -> int:
+    groups: set[int] = set()
+    for terminal_link in terminal_links:
+        group_index = node_group_index.get(terminal_link.target)
+        if group_index is not None:
+            groups.add(group_index)
+    return len(groups)
 
 
 def _node_width(node: Node) -> float:
