@@ -22,7 +22,7 @@ A release should include:
 - A clean Git working tree.
 - Updated version metadata in `pyproject.toml`.
 - Updated user-facing documentation when behavior, commands, limitations, dependencies, or validation requirements changed.
-- Passing backend and frontend validation gates.
+- Passing backend, frontend, and GitHub Actions validation gates.
 - A focused Git tag and matching GitHub Release.
 
 ## Pre-Release Checklist
@@ -31,6 +31,7 @@ Run these checks from the repository root unless noted:
 
 ```powershell
 git status --short --branch
+uv sync --dev --frozen
 uv run pytest
 uv run ruff check .
 uv run mypy flowforge
@@ -59,7 +60,7 @@ gh release create vX.Y.Z --title "vX.Y.Z" --notes "Release notes for vX.Y.Z."
 gh run list --limit 5
 ```
 
-Create concise release notes directly in GitHub or add a scoped changelog entry before publishing. Treat the local tag, remote tag, GitHub Release, and GitHub Actions status as separate release states that each need verification.
+Create concise release notes directly in GitHub or add a scoped changelog entry before publishing. Treat the local tag, remote tag, GitHub Release, and GitHub Actions status as separate release states that each need verification. CI runs on `master`, pull requests, and `v*` tags; wait for the relevant run to finish before treating a release as complete.
 
 ## Deferred Packaging Work
 

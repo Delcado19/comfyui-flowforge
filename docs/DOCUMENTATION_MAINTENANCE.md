@@ -25,7 +25,9 @@ The agent must treat documentation as part of the product. If code behavior chan
 | `memory.md` | Local planning notes | The maintainer explicitly asks to keep planning/project record notes in sync |
 | `docs/*.md` | Focused project documentation | Any topic-specific behavior becomes too detailed for `README.md` |
 | `pyproject.toml` | Python metadata and command surface | Package name, version, dependencies, scripts, classifiers, or URLs change |
+| `.python-version` | Local Python version pin | Default development or CI Python version changes |
 | `frontend/package.json` | Frontend metadata and command surface | Scripts, dependencies, build/typecheck behavior, or package metadata change |
+| `.github/workflows/*.yml` | GitHub Actions validation | CI jobs, runner versions, action versions, validation gates, or release checks change |
 
 ## Mandatory Checklist
 
@@ -78,6 +80,8 @@ Preferred local workflow validation:
 ```powershell
 uv run python tools/validate_local_workflows.py
 ```
+
+GitHub Actions CI mirrors the repository gates with backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build. The private local ComfyUI workflow scan remains a local-only release gate.
 
 ## Handoff Format
 

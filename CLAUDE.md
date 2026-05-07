@@ -37,6 +37,8 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - Keep changes small and verifiable.
 - Ask before large rewrites.
 - Documentation is part of the definition of done. For behavior, command, dependency, or workflow-format changes, follow `AGENTS.md` and `docs/DOCUMENTATION_MAINTENANCE.md`.
+- GitHub Actions CI mirrors the repository gates for backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build. Private local ComfyUI workflow validation remains local-only.
+- uv uses `.python-version` to pin development and CI parity to Python 3.12.
 - Chat communication should be mostly German.
 - Code, comments, docstrings, documentation files, commit messages, and release notes must be English.
 

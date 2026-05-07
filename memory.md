@@ -27,6 +27,8 @@
 - Added metadata-preservation and group-idempotency tests.
 - Published the first source-checkout GitHub release as `v0.1.0`.
 - Added a frontend before/after layout comparison overlay.
+- Added GitHub Actions CI for backend, frontend, and fixture workflow validation.
+- Pinned uv development and CI parity to Python 3.12 through `.python-version`.
 
 ## Open Work
 
