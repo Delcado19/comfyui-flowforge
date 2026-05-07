@@ -8,6 +8,7 @@ from flowforge.model import Node, Link, Group, Workflow
 import pytest
 from flowforge.layout import (
     apply,
+    apply_best_layout,
     LayoutSettings,
     _assign_groups,
     _layout_groups_internal,
@@ -257,6 +258,45 @@ def test_spacing_setting_expands_layout_and_group():
     assert roomy.groups[0].bounding[2] >= compact.groups[0].bounding[2]
     assert roomy.groups[0].bounding[3] >= compact.groups[0].bounding[3]
     logger.info("Configurable spacing test passed")
+
+
+def test_best_layout_tries_multiple_candidates_and_picks_best(monkeypatch):
+    logger.info("Testing best-of layout candidate selection")
+    wf = Workflow()
+    n1 = Node(id=1, type="NodeA", x=0, y=0, size=[120, 80], mode=0, order=0)
+    n2 = Node(id=2, type="NodeB", x=240, y=0, size=[120, 80], mode=0, order=1)
+    wf.nodes[1] = n1
+    wf.nodes[2] = n2
+    link = Link(id=10, source=1, source_port=0, target=2, target_port=0, type="DATA")
+    wf.links[10] = link
+    n1.output_links.append(10)
+    n2.input_links.append(10)
+
+    attempts = []
+
+    def fake_apply_layout_pass(workflow, settings=None, *, log=True):
+        attempts.append((round(settings.node_x_distance, 2), round(settings.node_y_distance, 2), log))
+        workflow.nodes[1].x = 0
+        workflow.nodes[1].y = 0
+        workflow.nodes[2].x = settings.node_x_distance + settings.node_y_distance
+        workflow.nodes[2].y = settings.node_y_distance
+        return workflow
+
+    monkeypatch.setattr("flowforge.layout._apply_layout_pass", fake_apply_layout_pass)
+
+    result = apply_best_layout(wf, LayoutSettings(node_x_distance=100, node_y_distance=100))
+
+    assert attempts[:5] == [
+        (100.0, 100.0, False),
+        (80.0, 100.0, False),
+        (100.0, 80.0, False),
+        (85.0, 115.0, False),
+        (70.0, 90.0, False),
+    ]
+    assert attempts[-1] == (70.0, 90.0, True)
+    assert result.nodes[2].x == 160.0
+    assert result.nodes[2].y == 90.0
+    logger.info("Best-of layout candidate selection test passed")
 
 
 if __name__ == "__main__":

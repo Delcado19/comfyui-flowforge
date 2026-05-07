@@ -106,7 +106,7 @@ Within each group, independently:
 
 1. **Layer assignment** — each node receives a layer number equal to the longest path from any source node to it (`layer = max(layer[predecessor]) + 1`, with sources at layer 0). Uses a topological sort; nodes in cycles (rare in valid ComfyUI workflows) fall back to layer 0.
 2. **Crossing minimisation** — nodes within each layer are reordered using the _barycenter heuristic_: each node's score is the average position of its neighbours in the adjacent layer. Two passes are run (forward then backward) to reduce edge crossings.
-3. **Coordinate assignment** — nodes are placed on a grid: X increases by layer, Y increases by position within the layer. Bypassed nodes (`mode = 4`) are sorted to the end of their layer so they don't interrupt the active flow.
+3. **Coordinate assignment** — nodes are placed on a grid: X increases by layer, Y increases by position within the layer. Bypassed nodes (`mode = 4`) are sorted to the end of their layer so they don't interrupt the active flow. The public `layout` operation evaluates several spacing candidates and applies the most compact result, which helps reduce overly wide workflows.
 
 ### Phase 4 — Global Positioning
 
@@ -129,7 +129,7 @@ Layout spacing is driven by two independent values:
 | `node_x_distance` | 80 px | 20-240 px | Controls horizontal spacing, group width, and the left-to-right packing distance. |
 | `node_y_distance` | 80 px | 20-240 px | Controls vertical spacing, group height, and the top-to-bottom packing distance. |
 
-The API accepts a layout wrapper of the form `{"workflow": ..., "layout": {"node_x_distance": 80, "node_y_distance": 80}}`. Bare workflow JSON remains supported for backwards compatibility, and legacy `min_node_distance` input is still accepted as an alias for both axes.
+The API accepts a layout wrapper of the form `{"workflow": ..., "layout": {"node_x_distance": 80, "node_y_distance": 80}}`. Bare workflow JSON remains supported for backwards compatibility, and legacy `min_node_distance` input is still accepted as an alias for both axes. Each `layout` run tries several axis-spacing candidates and keeps the best-scoring result.
 
 ---
 

@@ -3,10 +3,11 @@ Layout algorithm for ComfyUI FlowForge.
 Implements the six-phase pipeline as described in the README.
 """
 
+from copy import deepcopy
 from dataclasses import dataclass
 import math
 
-from .model import Node, Group, Workflow
+from .model import Link, Node, Group, Workflow
 from .logger import setup_logger
 
 # Set up logger for this module
@@ -14,10 +15,21 @@ logger = setup_logger(__name__)
 
 DEFAULT_NODE_X_DISTANCE = 80.0
 DEFAULT_NODE_Y_DISTANCE = 80.0
+DEFAULT_LAYOUT_CANDIDATES = 5
 LAYOUT_DISTANCE_MIN = 20.0
 LAYOUT_DISTANCE_MAX = 240.0
 DECORATIVE_START_X = 20.0
 DECORATIVE_START_Y = 50.0
+LAYOUT_SCORE_WIDTH_WEIGHT = 2.5
+LAYOUT_SCORE_HEIGHT_WEIGHT = 1.0
+LAYOUT_SCORE_LINK_WEIGHT = 0.02
+LAYOUT_CANDIDATE_PROFILES = (
+    (1.0, 1.0),
+    (0.8, 1.0),
+    (1.0, 0.8),
+    (0.85, 1.15),
+    (0.7, 0.9),
+)
 
 
 @dataclass
@@ -84,6 +96,68 @@ class LayoutSettings:
 
 
 def apply(workflow: Workflow, settings: LayoutSettings | None = None) -> Workflow:
+    return apply_best_layout(workflow, settings)
+
+
+def apply_best_layout(
+    workflow: Workflow,
+    settings: LayoutSettings | None = None,
+    candidate_count: int = DEFAULT_LAYOUT_CANDIDATES,
+) -> Workflow:
+    """
+    Try several layout variants and return the best-scoring result.
+    """
+    settings = settings or LayoutSettings()
+    variants = _build_layout_candidates(settings, candidate_count)
+    if len(variants) == 1:
+        return _apply_layout_pass(workflow, variants[0], log=True)
+
+    best_variant: LayoutSettings | None = None
+    best_score: tuple[float, float, float, float] | None = None
+
+    for index, variant in enumerate(variants, start=1):
+        candidate = deepcopy(workflow)
+        logger.debug(
+            "Running layout candidate %s/%s with x=%.2f y=%.2f",
+            index,
+            len(variants),
+            variant.node_x_distance,
+            variant.node_y_distance,
+        )
+        _apply_layout_pass(candidate, variant, log=False)
+        score = _score_layout_candidate(candidate)
+        logger.debug(
+            "Candidate %s/%s scored %.2f (width=%.2f height=%.2f link=%.2f)",
+            index,
+            len(variants),
+            score[0],
+            score[1],
+            score[2],
+            score[3],
+        )
+        if best_score is None or score < best_score:
+            best_score = score
+            best_variant = variant
+
+    if best_variant is None or best_score is None:
+        raise RuntimeError("Layout candidate search did not produce a result")
+
+    logger.info(
+        "Selected best layout candidate with score %.2f (width=%.2f height=%.2f link=%.2f)",
+        best_score[0],
+        best_score[1],
+        best_score[2],
+        best_score[3],
+    )
+    return _apply_layout_pass(workflow, best_variant, log=True)
+
+
+def _apply_layout_pass(
+    workflow: Workflow,
+    settings: LayoutSettings | None = None,
+    *,
+    log: bool = True,
+) -> Workflow:
     """
     Apply the layout algorithm to the workflow.
     This function orchestrates the six-phase pipeline.
@@ -95,7 +169,8 @@ def apply(workflow: Workflow, settings: LayoutSettings | None = None) -> Workflo
         The workflow with updated node positions and group bounding boxes.
     """
     settings = settings or LayoutSettings()
-    logger.info("Starting layout algorithm")
+    if log:
+        logger.info("Starting layout algorithm")
     
     try:
         # Phase 1: Group Membership
@@ -134,12 +209,99 @@ def apply(workflow: Workflow, settings: LayoutSettings | None = None) -> Workflo
         logger.debug("Phase 5: Bounding Box Update")
         _update_bounding_boxes(workflow, settings)
         
-        logger.info("Layout algorithm completed successfully")
+        if log:
+            logger.info("Layout algorithm completed successfully")
         return workflow
         
     except Exception as e:
         logger.error(f"Layout algorithm failed: {e}", exc_info=True)
         raise
+
+
+def _build_layout_candidates(settings: LayoutSettings, candidate_count: int) -> list[LayoutSettings]:
+    count = max(1, int(candidate_count))
+    variants: list[LayoutSettings] = []
+
+    for x_scale, y_scale in LAYOUT_CANDIDATE_PROFILES[:count]:
+        variants.append(
+            LayoutSettings(
+                settings.node_x_distance * x_scale,
+                settings.node_y_distance * y_scale,
+            )
+        )
+
+    if len(variants) >= count:
+        return variants[:count]
+
+    profile_index = 0
+    while len(variants) < count:
+        x_scale, y_scale = LAYOUT_CANDIDATE_PROFILES[profile_index % len(LAYOUT_CANDIDATE_PROFILES)]
+        x_delta = 1.0 + (x_scale - 1.0) * 0.5
+        y_delta = 1.0 + (y_scale - 1.0) * 0.5
+        variants.append(
+            LayoutSettings(
+                settings.node_x_distance * x_delta,
+                settings.node_y_distance * y_delta,
+            )
+        )
+        profile_index += 1
+
+    return variants
+
+
+def _score_layout_candidate(workflow: Workflow) -> tuple[float, float, float, float]:
+    left, top, right, bottom = _workflow_bounds(workflow)
+    width = max(0.0, right - left)
+    height = max(0.0, bottom - top)
+    link_cost = sum(_link_length(workflow, link) for link in workflow.links.values())
+    score = (
+        width * LAYOUT_SCORE_WIDTH_WEIGHT
+        + height * LAYOUT_SCORE_HEIGHT_WEIGHT
+        + link_cost * LAYOUT_SCORE_LINK_WEIGHT,
+        width,
+        height,
+        link_cost,
+    )
+    return score
+
+
+def _workflow_bounds(workflow: Workflow) -> tuple[float, float, float, float]:
+    left = math.inf
+    top = math.inf
+    right = -math.inf
+    bottom = -math.inf
+
+    for node in workflow.nodes.values():
+        left = min(left, node.x)
+        top = min(top, node.y)
+        right = max(right, node.x + _node_visual_width(node))
+        bottom = max(bottom, node.y + _node_visual_height(node))
+
+    for group in workflow.groups:
+        if not _has_positive_bounding(group):
+            continue
+        left = min(left, group.bounding[0])
+        top = min(top, group.bounding[1])
+        right = max(right, group.bounding[0] + group.bounding[2])
+        bottom = max(bottom, group.bounding[1] + group.bounding[3])
+
+    if math.isinf(left) or math.isinf(top) or math.isinf(right) or math.isinf(bottom):
+        return 0.0, 0.0, 0.0, 0.0
+
+    return left, top, right, bottom
+
+
+def _link_length(workflow: Workflow, link: Link) -> float:
+    source = workflow.nodes.get(link.source)
+    target = workflow.nodes.get(link.target)
+    if source is None or target is None:
+        return 0.0
+
+    source_x = source.x + _node_visual_width(source) / 2.0
+    source_y = source.y + _node_visual_height(source) / 2.0
+    target_x = target.x + _node_visual_width(target) / 2.0
+    target_y = target.y + _node_visual_height(target) / 2.0
+    return abs(target_x - source_x) + abs(target_y - source_y)
 
 
 # ---------------------------------------------------------------------------

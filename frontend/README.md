@@ -21,7 +21,7 @@ The frontend process receives the selected backend port through `FLOWFORGE_API_P
 - **ComfyConnection.vue** - SVG Bezier curves connecting ports
 - **useWorkflowStore.ts** - Pinia store for full ComfyUI workflow JSON state
 - **Group and Minimap Layers** - Background group regions, draggable group titles, per-group delete buttons, resize handles, and a minimap for navigation
-- **Toolbar Spacing Control** - Live X/Y sliders plus numeric fields that re-run `/layout` with the current spacing values
+- **Toolbar Spacing Control** - Live X/Y sliders plus numeric fields that re-run `/layout` with the current spacing values; the backend evaluates multiple spacing candidates and keeps the most compact result
 - **Toolbar Group Actions** - Buttons to start drag-based group creation or clear all groups in the workflow
 
 ## Usage
