@@ -25,6 +25,7 @@ The agent must treat documentation as part of the product. If code behavior chan
 | `CLAUDE.md` | Maintainer and local ComfyUI notes | Workflow-format assumptions, local ComfyUI scan facts, installed-node assumptions, communication rules, or recurring maintainer workflows change |
 | `memory.md` | Local planning notes | The maintainer explicitly asks to keep planning/project record notes in sync |
 | `docs/*.md` | Focused project documentation | Any topic-specific behavior becomes too detailed for `README.md` |
+| `tools/*.py` | Maintainer automation | Validation, packaging, release, or local workflow command behavior changes |
 | `pyproject.toml` | Python metadata and command surface | Package name, version, dependencies, scripts, classifiers, or URLs change |
 | `.python-version` | Local Python version pin | Default development or CI Python version changes |
 | `frontend/package.json` | Frontend metadata and command surface | Scripts, dependencies, build/typecheck behavior, or package metadata change |
@@ -50,6 +51,7 @@ For every non-trivial code or behavior change:
 - Distinguish UI workflow JSON from API prompt JSON. FlowForge works on UI workflow layout JSON.
 - Keep optimizer documentation explicit that Set/Get nodes require compatible custom nodes in the target ComfyUI install.
 - Keep frontend documentation clear that the app loads, posts, and saves full ComfyUI workflow JSON.
+- Keep packaging documentation clear about whether the GUI serves packaged `flowforge/frontend_dist`, source `frontend/dist`, or the Vite development server.
 - Do not document unreleased or unimplemented features as complete.
 
 ## Validation Commands

@@ -1,6 +1,8 @@
 """Tests for local workflow validation helpers."""
 
 from copy import deepcopy
+import json
+from pathlib import Path
 
 import pytest
 
@@ -51,3 +53,10 @@ def test_validate_layout_roundtrip_rejects_missing_source_metadata():
 
     with pytest.raises(ValueError, match="node metadata changed"):
         validate_layout_roundtrip(workflow)
+
+
+def test_validate_layout_roundtrip_accepts_realistic_fixture():
+    fixture = Path(__file__).parent / "fixtures" / "realistic_ui_workflow.json"
+    workflow = json.loads(fixture.read_text(encoding="utf-8"))
+
+    validate_layout_roundtrip(workflow)

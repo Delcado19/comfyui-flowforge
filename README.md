@@ -164,7 +164,7 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 
 Repository-local agent rules live in [AGENTS.md](AGENTS.md). Documentation synchronization is handled by the Documentation Maintenance Agent policy in [docs/DOCUMENTATION_MAINTENANCE.md](docs/DOCUMENTATION_MAINTENANCE.md).
 
-Release history is tracked in [CHANGELOG.md](CHANGELOG.md). Release and deployment expectations are tracked in [docs/RELEASE.md](docs/RELEASE.md). FlowForge currently supports source-checkout deployment with `uv`; broader packaging targets are still deferred.
+Release history is tracked in [CHANGELOG.md](CHANGELOG.md). Release and deployment expectations are tracked in [docs/RELEASE.md](docs/RELEASE.md), with frontend asset packaging details in [docs/PACKAGING.md](docs/PACKAGING.md). FlowForge currently supports source-checkout deployment with `uv`; broader distribution targets are still deferred.
 GitHub Actions CI runs backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build on `master`, pull requests, and version tags.
 For local maintainer validation against read-only ComfyUI UI workflows, run `uv run python tools/validate_local_workflows.py`.
 
@@ -201,6 +201,7 @@ comfyui-flowforge/
 │   ├── test_optimizer.py
 │   └── test_parser.py
 ├── tools/                 # Maintainer validation scripts
+│   ├── build_package_assets.py
 │   └── validate_local_workflows.py
 ├── LICENSE               # MIT license
 ├── pyproject.toml        # Project configuration

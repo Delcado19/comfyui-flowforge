@@ -14,6 +14,7 @@ Open browser to http://localhost:5173 for direct Vite development.
 The repository-level launcher `uv run flowforge-gui` starts the backend API and either serves `frontend/dist` or starts the Vite development server. It opens the selected local frontend URL and automatically falls back from port 5173 when the port is unavailable. Windows users can double-click `start-flowforge.bat`; Linux users can run `sh start-flowforge.sh`.
 The frontend process receives the selected backend port through `FLOWFORGE_API_PORT`, so local dev and the packaged launcher both talk to the same API instance.
 The `dev` and `build` scripts run Vite through the JavaScript API with the local shared config, which keeps builds independent from unrelated TypeScript config files in parent directories.
+Python package builds can stage the built frontend into `flowforge/frontend_dist` with `uv run python tools/build_package_assets.py`; installed GUI launches serve that packaged copy before falling back to source `frontend/dist` or the Vite dev server.
 
 ## Features
 
@@ -30,7 +31,7 @@ The `dev` and `build` scripts run Vite through the JavaScript API with the local
 
 - **Open** - Load a workflow JSON file
 - **Layout** - POST the full workflow JSON to `/layout` for auto-layout
-- **Compare** - Toggle the previous node positions after a layout run
+- **Before/After** - Toggle the previous node positions after a layout run
 - **Save** - Download the current full workflow JSON
 
 Canvas navigation:

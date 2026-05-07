@@ -181,9 +181,10 @@ watch([nodeXDistance, nodeYDistance], () => {
       <button
         :class="{ active: showComparison }"
         :disabled="comparisonNodes.length === 0"
+        title="Show previous node positions from the last layout run"
         @click="toggleComparison"
       >
-        Compare
+        Before/After
       </button>
       <button :disabled="!(store.workflow?.groups?.length ?? 0)" @click="deleteAllGroups">Clear Groups</button>
       <div class="spacing-control">

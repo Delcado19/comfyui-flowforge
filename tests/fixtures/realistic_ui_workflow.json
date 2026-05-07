@@ -1,0 +1,422 @@
+{
+  "version": 0.4,
+  "config": {
+    "links_ontop": true
+  },
+  "extra": {
+    "ds": {
+      "scale": 0.72,
+      "offset": [
+        -340,
+        118
+      ]
+    },
+    "definitions": {
+      "subgraphs": [
+        {
+          "id": "ce575129-b994-4bea-81b7-07c2b68948a9",
+          "name": "Anonymized Subgraph",
+          "nodes": []
+        }
+      ]
+    }
+  },
+  "models": [
+    {
+      "name": "anonymized-model.safetensors",
+      "type": "checkpoint"
+    }
+  ],
+  "nodes": [
+    {
+      "id": 1,
+      "type": "VAELoader",
+      "pos": [
+        -120,
+        90
+      ],
+      "size": [
+        260,
+        58
+      ],
+      "mode": 0,
+      "order": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            101
+          ]
+        }
+      ],
+      "widgets_values": [
+        "anonymized-vae.safetensors"
+      ],
+      "properties": {
+        "Node name for S&R": "VAELoader"
+      }
+    },
+    {
+      "id": 2,
+      "type": "Reroute",
+      "pos": [
+        240,
+        128
+      ],
+      "size": [
+        75,
+        26
+      ],
+      "mode": 0,
+      "order": 1,
+      "inputs": [
+        {
+          "name": "",
+          "type": "*",
+          "link": 101
+        }
+      ],
+      "outputs": [
+        {
+          "name": "",
+          "type": "*",
+          "links": [
+            102
+          ]
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "VAEDecode",
+      "pos": [
+        780,
+        124
+      ],
+      "size": {
+        "width": 240,
+        "height": 86
+      },
+      "mode": 0,
+      "order": 5,
+      "inputs": [
+        {
+          "name": "samples",
+          "type": "LATENT",
+          "link": 106
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 102
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            107
+          ]
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "CLIPTextEncode",
+      "pos": [
+        -100,
+        270
+      ],
+      "size": [
+        360,
+        170
+      ],
+      "mode": 0,
+      "order": 2,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CONDITIONING",
+          "type": "CONDITIONING",
+          "links": [
+            103
+          ]
+        }
+      ],
+      "widgets_values": [
+        "anonymized prompt"
+      ],
+      "color": "#223344",
+      "bgcolor": "#101820"
+    },
+    {
+      "id": 5,
+      "type": "UNETLoader",
+      "pos": [
+        -130,
+        500
+      ],
+      "size": [
+        280,
+        82
+      ],
+      "mode": 0,
+      "order": 3,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            104
+          ]
+        }
+      ],
+      "widgets_values": [
+        "anonymized-unet.safetensors"
+      ]
+    },
+    {
+      "id": 6,
+      "type": "KSampler",
+      "pos": [
+        430,
+        370
+      ],
+      "size": [
+        315,
+        260
+      ],
+      "mode": 0,
+      "order": 4,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 104
+        },
+        {
+          "name": "positive",
+          "type": "CONDITIONING",
+          "link": 103
+        },
+        {
+          "name": "latent_image",
+          "type": "LATENT",
+          "link": 105
+        }
+      ],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            106
+          ]
+        }
+      ],
+      "widgets_values": [
+        12345,
+        "fixed",
+        20,
+        7.5
+      ],
+      "flags": {
+        "collapsed": false
+      }
+    },
+    {
+      "id": 7,
+      "type": "EmptyLatentImage",
+      "pos": [
+        -105,
+        675
+      ],
+      "size": [
+        260,
+        98
+      ],
+      "mode": 0,
+      "order": 3,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "LATENT",
+          "type": "LATENT",
+          "links": [
+            105
+          ]
+        }
+      ],
+      "widgets_values": [
+        1024,
+        1024,
+        1
+      ]
+    },
+    {
+      "id": 8,
+      "type": "PreviewImage",
+      "pos": [
+        1120,
+        145
+      ],
+      "size": [
+        240,
+        100
+      ],
+      "mode": 0,
+      "order": 6,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 107
+        }
+      ],
+      "outputs": []
+    },
+    {
+      "id": 9,
+      "type": "MarkdownNote",
+      "pos": [
+        -460,
+        80
+      ],
+      "size": [
+        290,
+        150
+      ],
+      "mode": 0,
+      "order": 0,
+      "inputs": [],
+      "outputs": [],
+      "widgets_values": [
+        "Anonymized workflow note"
+      ]
+    },
+    {
+      "id": 10,
+      "type": "ce575129-b994-4bea-81b7-07c2b68948a9",
+      "pos": [
+        1100,
+        430
+      ],
+      "size": [
+        260,
+        120
+      ],
+      "mode": 0,
+      "order": 7,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "Anonymized Subgraph"
+      }
+    }
+  ],
+  "links": [
+    [
+      101,
+      1,
+      0,
+      2,
+      0,
+      "VAE"
+    ],
+    [
+      102,
+      2,
+      0,
+      3,
+      1,
+      "VAE"
+    ],
+    [
+      103,
+      4,
+      0,
+      6,
+      1,
+      "CONDITIONING"
+    ],
+    [
+      104,
+      5,
+      0,
+      6,
+      0,
+      "MODEL"
+    ],
+    [
+      105,
+      7,
+      0,
+      6,
+      2,
+      "LATENT"
+    ],
+    [
+      106,
+      6,
+      0,
+      3,
+      0,
+      "LATENT"
+    ],
+    [
+      107,
+      3,
+      0,
+      8,
+      0,
+      "IMAGE"
+    ]
+  ],
+  "groups": [
+    {
+      "id": 20,
+      "title": "Inputs",
+      "bounding": [
+        -180,
+        50,
+        510,
+        760
+      ],
+      "color": "#3f789e",
+      "font_size": 24
+    },
+    {
+      "id": 21,
+      "title": "Sampling",
+      "bounding": [
+        390,
+        95,
+        420,
+        565
+      ],
+      "color": "#8f6a3f",
+      "font_size": 24
+    },
+    {
+      "id": 22,
+      "title": "Output",
+      "bounding": [
+        740,
+        80,
+        660,
+        510
+      ],
+      "color": "#6b8f3f",
+      "font_size": 24
+    }
+  ],
+  "last_node_id": 10,
+  "last_link_id": 107,
+  "workflow_custom_field": {
+    "preserve": true
+  }
+}

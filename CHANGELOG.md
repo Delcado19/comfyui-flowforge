@@ -9,12 +9,16 @@ All notable changes to ComfyUI FlowForge are documented here.
 - GitHub Actions CI for backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build.
 - Before/after layout comparison overlay in the frontend.
 - Regression coverage for the GUI launcher's frontend development server command.
+- Packaged frontend asset support for Python distribution builds.
+- GUI smoke coverage for built frontend serving and API proxying.
+- An anonymized realistic ComfyUI UI workflow fixture with groups, reroute links, notes, subgraph metadata, and unknown fields.
 
 ### Changed
 
 - Pinned local development and CI parity to Python 3.12.
 - Fixed fixture workflow link IDs so local validation and CI reject duplicate ComfyUI link identifiers.
 - Run frontend dev and build scripts through the Vite JavaScript API with local config so builds do not inherit unrelated parent TypeScript configuration.
+- Renamed the comparison toolbar action to `Before/After` for clearer previous-layout toggling.
 
 ## [0.1.0] - 2026-05-07
 

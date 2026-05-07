@@ -24,6 +24,7 @@ A release should include:
 - Updated release notes in `CHANGELOG.md`.
 - Updated user-facing documentation when behavior, commands, limitations, dependencies, or validation requirements changed.
 - Passing backend, frontend, and GitHub Actions validation gates.
+- Frontend package assets staged with `tools/build_package_assets.py` when building a Python distribution.
 - A focused Git tag and matching GitHub Release.
 
 ## Pre-Release Checklist
@@ -63,11 +64,21 @@ gh run list --limit 5
 
 Use the matching `CHANGELOG.md` entry as the source for concise GitHub release notes before publishing. Treat the local tag, remote tag, GitHub Release, and GitHub Actions status as separate release states that each need verification. CI runs on `master`, pull requests, and `v*` tags; wait for the relevant run to finish before treating a release as complete.
 
+## Package Asset Checklist
+
+When building Python release artifacts, prepare frontend assets before `uv build`:
+
+```powershell
+uv run python tools/build_package_assets.py
+uv build
+```
+
+The generated `flowforge/frontend_dist` directory is ignored by Git and should be treated as a build artifact.
+
 ## Deferred Packaging Work
 
 Before publishing outside source installs, define:
 
 - Whether FlowForge should ship on PyPI, the ComfyUI Registry, or both.
-- Whether the frontend should be bundled into the Python package or kept as a development-time Vite app.
-- How release artifacts should include or reference generated frontend assets.
+- Which release artifacts should be published for each target.
 - Which compatibility policy applies to ComfyUI workflow JSON versions and custom-node dependencies.

@@ -21,6 +21,7 @@ logger = setup_logger(__name__)
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 FRONTEND_DIST = FRONTEND_DIR / "dist"
+PACKAGE_FRONTEND_DIST = Path(__file__).parent / "frontend_dist"
 FRONTEND_HOST = "127.0.0.1"
 FRONTEND_PORT_SEARCH_LIMIT = 20
 API_HOST = "127.0.0.1"
@@ -49,10 +50,10 @@ def main():
 
     logger.info(f"Starting API server on http://{API_HOST}:{api_port}...")
 
-    # Check if frontend dist exists, if not run dev server
-    if FRONTEND_DIST.exists() and (FRONTEND_DIST / "index.html").exists():
-        logger.info(f"Serving frontend from {FRONTEND_DIST}")
-        frontend_server, frontend_port = _create_frontend_dist_server(frontend_port, api_port)
+    frontend_dist = _select_frontend_dist()
+    if frontend_dist is not None:
+        logger.info(f"Serving frontend from {frontend_dist}")
+        frontend_server, frontend_port = _create_frontend_dist_server(frontend_port, api_port, frontend_dist)
         frontend_thread = threading.Thread(
             target=_serve_frontend_dist,
             args=(frontend_server, frontend_port),
@@ -114,8 +115,23 @@ def _run_api_server(preferred_port: int, ready_queue: queue.Queue[int | Exceptio
         loop.close()
 
 
-def _create_frontend_dist_server(preferred_port: int, api_port: int, max_attempts: int = FRONTEND_PORT_SEARCH_LIMIT):
+def _select_frontend_dist() -> Path | None:
+    """Return the packaged or source-built frontend dist directory if available."""
+    for candidate in (PACKAGE_FRONTEND_DIST, FRONTEND_DIST):
+        if candidate.exists() and (candidate / "index.html").exists():
+            return candidate
+    return None
+
+
+def _create_frontend_dist_server(
+    preferred_port: int,
+    api_port: int,
+    dist_dir: Path | None = None,
+    max_attempts: int = FRONTEND_PORT_SEARCH_LIMIT,
+):
     """Serve the built frontend files."""
+    selected_dist = dist_dir or _select_frontend_dist() or FRONTEND_DIST
+
     class Handler(SimpleHTTPRequestHandler):
         def log_message(self, format, *args):
             pass  # Suppress logs
@@ -171,7 +187,7 @@ def _create_frontend_dist_server(preferred_port: int, api_port: int, max_attempt
                 return
             self.send_error(405)
 
-    handler = partial(Handler, directory=str(FRONTEND_DIST))
+    handler = partial(Handler, directory=str(selected_dist))
     for port in _frontend_port_candidates(preferred_port, max_attempts):
         try:
             return ThreadingHTTPServer((FRONTEND_HOST, port), handler), port

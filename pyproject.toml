@@ -44,7 +44,7 @@ include = ["flowforge*"]
 exclude = ["frontend*", "tests*", "logs*", "assets*", "example-workflows*", "docs*"]
 
 [tool.setuptools.package-data]
-flowforge = ["py.typed"]
+flowforge = ["py.typed", "frontend_dist/**/*"]
 
 [dependency-groups]
 dev = [

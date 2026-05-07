@@ -41,6 +41,7 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - uv uses `.python-version` to pin development and CI parity to Python 3.12.
 - Keep release history in `CHANGELOG.md`; changelog entries and release notes are written in English.
 - The frontend Vite config sets esbuild `tsconfigRaw` for app transforms and dependency scanning so local builds do not inherit unrelated TypeScript config files from parent directories.
+- The GUI launcher serves packaged `flowforge/frontend_dist` first, then source `frontend/dist`, then falls back to the Vite development server. Use `uv run python tools/build_package_assets.py` before Python package builds that should include frontend assets.
 - Chat communication should be mostly German.
 - Code, comments, docstrings, documentation files, commit messages, and release notes must be English.
 
