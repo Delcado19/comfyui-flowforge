@@ -5,6 +5,7 @@ Inserts SetNode/GetNode pairs for high-fanout MODEL/CLIP/VAE connections.
 
 from collections import deque
 from copy import deepcopy
+import math
 from typing import Dict, List
 
 from .model import Node, Link, Workflow
@@ -14,6 +15,9 @@ logger = setup_logger(__name__)
 
 # Types that trigger optimization when fanout >= 2
 OPTIMIZE_TYPES = {"MODEL", "CLIP", "VAE"}
+NODE_INSERTION_COST = 40.0
+LINK_INSERTION_COST = 4.0
+HUB_LINK_COST_FACTOR = 0.25
 
 
 def optimize(workflow: Workflow) -> Workflow:
@@ -75,6 +79,23 @@ def optimize(workflow: Workflow) -> Workflow:
             for link_id in current_traversed
             if link_id in new_workflow.links
         ):
+            continue
+
+        current_cost = _current_graph_cost(new_workflow, current_traversed)
+        optimized_cost = _estimated_rewrite_cost(new_workflow, src_node, current_terminals)
+        logger.debug(
+            "Cost check for %s:%s - current=%.2f optimized=%.2f",
+            src_node.id,
+            src_port,
+            current_cost,
+            optimized_cost,
+        )
+        if optimized_cost >= current_cost:
+            logger.debug(
+                "Skipping optimization for %s:%s because it does not reduce cost",
+                src_node.id,
+                src_port,
+            )
             continue
 
         _replace_port_with_set_get(new_workflow, src_node, src_port, current_terminals, current_traversed)
@@ -232,7 +253,11 @@ def _collect_effective_fanout(
 
         traversed_link_ids.add(link.id)
         target_node = workflow.nodes.get(link.target)
-        if target_node is not None and _is_reroute_node(target_node):
+        if target_node is None:
+            terminal_links.append(link)
+            continue
+
+        if _is_reroute_node(target_node):
             if target_node.id in visited_nodes:
                 continue
             visited_nodes.add(target_node.id)
@@ -269,9 +294,7 @@ def _remove_traversed_links_and_cleanup_reroutes(
 
     dead_reroutes: List[int] = []
     for node_id, node in workflow.nodes.items():
-        if node is None:
-            continue
-        if not _is_reroute_node(node):
+        if node is None or not _is_reroute_node(node):
             continue
         if node.input_links or node.output_links:
             continue
@@ -283,3 +306,69 @@ def _remove_traversed_links_and_cleanup_reroutes(
 
 def _is_reroute_node(node: Node | None) -> bool:
     return bool(node and isinstance(node.type, str) and "reroute" in node.type.lower())
+
+
+def _current_graph_cost(workflow: Workflow, traversed_link_ids: set[int]) -> float:
+    cost = 0.0
+    for link_id in traversed_link_ids:
+        link = workflow.links.get(link_id)
+        if not link:
+            continue
+        cost += _link_cost(workflow, link) + LINK_INSERTION_COST
+    return cost
+
+
+def _estimated_rewrite_cost(workflow: Workflow, src_node: Node, terminal_links: List[Link]) -> float:
+    set_node = _synthetic_set_node(src_node)
+    cost = NODE_INSERTION_COST
+    cost += _point_distance(_node_center(src_node), _node_center(set_node)) + LINK_INSERTION_COST
+
+    for terminal_link in terminal_links:
+        target_node = workflow.nodes.get(terminal_link.target)
+        if target_node is None:
+            continue
+
+        get_node = _synthetic_get_node(src_node, target_node)
+        cost += NODE_INSERTION_COST
+        cost += _point_distance(_node_center(set_node), _node_center(get_node)) * HUB_LINK_COST_FACTOR + LINK_INSERTION_COST
+        cost += _point_distance(_node_center(get_node), _node_center(target_node)) + LINK_INSERTION_COST
+
+    return cost
+
+
+def _synthetic_set_node(src_node: Node) -> Node:
+    return Node(
+        id=-1,
+        type="SetNode",
+        x=src_node.x + 200,
+        y=src_node.y,
+        size=[160, 40],
+    )
+
+
+def _synthetic_get_node(src_node: Node, target_node: Node) -> Node:
+    return Node(
+        id=-1,
+        type="GetNode",
+        x=target_node.x - 200,
+        y=target_node.y,
+        size=[160, 40],
+    )
+
+
+def _node_center(node: Node) -> tuple[float, float]:
+    width = node.size[0] if node.size and len(node.size) >= 1 and node.size[0] > 0 else 200.0
+    height = node.size[1] if node.size and len(node.size) >= 2 and node.size[1] > 0 else 60.0
+    return node.x + width / 2, node.y + height / 2
+
+
+def _point_distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+    return math.hypot(a[0] - b[0], a[1] - b[1])
+
+
+def _link_cost(workflow: Workflow, link: Link) -> float:
+    source_node = workflow.nodes.get(link.source)
+    target_node = workflow.nodes.get(link.target)
+    if source_node is None or target_node is None:
+        return 0.0
+    return _point_distance(_node_center(source_node), _node_center(target_node))

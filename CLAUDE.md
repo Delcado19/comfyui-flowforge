@@ -80,7 +80,7 @@ These connections are not represented directly in the `links` array and may requ
 | `GetNode` | comfyui-kjnodes | Reads a value name from `widgets_values[0]` |
 
 A `SetNode` named `"VAE"` and a `GetNode` named `"VAE"` are virtually connected.
-The optimizer is reroute-aware: it should treat `Reroute` as a pass-through node when detecting high-fanout MODEL/CLIP/VAE paths.
+The optimizer is reroute-aware and cost-based: it should treat `Reroute` as a pass-through node when detecting high-fanout MODEL/CLIP/VAE paths, and it should only rewrite when the estimated routing cost goes down. Local Set/Get hub links are discounted in that estimate because they represent a compact distribution spine.
 
 ### Reroute
 

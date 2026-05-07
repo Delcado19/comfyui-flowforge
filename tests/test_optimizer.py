@@ -75,6 +75,37 @@ def create_reroute_fanout_workflow() -> Workflow:
     return wf
 
 
+def create_short_fanout_workflow() -> Workflow:
+    """
+    Create a workflow where fanout exists but the rewrite is too expensive.
+    """
+    wf = Workflow()
+    source = Node(id=1, type="UNETLoader", x=0, y=0, size=[200, 60])
+    wf.nodes[1] = source
+    consumers = []
+    for i in range(2):
+        cid = 2 + i
+        consumer = Node(id=cid, type="KSampler", x=80 + i * 20, y=i * 20, size=[160, 80])
+        consumers.append(consumer)
+        wf.nodes[cid] = consumer
+
+    for i, consumer in enumerate(consumers):
+        link = Link(
+            id=110 + i,
+            source=1,
+            source_port=0,
+            target=consumer.id,
+            target_port=0,
+            type="MODEL",
+        )
+        wf.links[link.id] = link
+        source.output_links.append(link.id)
+        consumer.input_links.append(link.id)
+
+    wf.groups = []
+    return wf
+
+
 def test_optimize_fanout():
     logger.info("Testing optimize() on high-fanout MODEL connection")
     wf = create_fanout_workflow()
@@ -130,6 +161,20 @@ def test_optimize_reroute_fanout():
     }
     assert get_targets == {3, 4, 5}
     logger.info("Reroute fanout optimization test passed")
+
+
+def test_optimize_skips_low_value_fanout():
+    logger.info("Testing that optimizer skips short fanout when it is not cost-effective")
+    wf = create_short_fanout_workflow()
+
+    optimized = optimize(wf)
+
+    set_nodes = [n for n in optimized.nodes.values() if n.type == "SetNode"]
+    get_nodes = [n for n in optimized.nodes.values() if n.type == "GetNode"]
+    assert len(set_nodes) == 0
+    assert len(get_nodes) == 0
+    assert len(optimized.links) == len(wf.links)
+    logger.info("Low-value fanout correctly skipped")
 
 
 def test_optimize_preserves_other_types():

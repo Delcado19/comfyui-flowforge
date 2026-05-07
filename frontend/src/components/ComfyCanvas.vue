@@ -520,7 +520,7 @@ function fitWorkflowToCanvas() {
 function onCanvasPointerDown(e: PointerEvent) {
   if (e.button !== 0 && e.button !== 1) return
   const target = e.target as HTMLElement
-  if (target.closest('.comfy-node') || target.closest('.empty-hint') || target.closest('.minimap')) return
+  if (target.closest('.comfy-node') || target.closest('.minimap')) return
 
   e.preventDefault()
   isDraggingCanvas.value = true
@@ -638,47 +638,6 @@ watch(
   { immediate: true },
 )
 
-function addSampleWorkflow() {
-  store.loadWorkflow({
-    version: 0.4,
-    last_node_id: 3,
-    last_link_id: 1,
-    nodes: [
-      {
-        id: 1,
-        type: 'LoadImage',
-        pos: [100, 100],
-        size: [200, 100],
-        title: 'Load Image',
-        inputs: [],
-        outputs: [{ name: 'IMAGE', type: 'IMAGE', links: [1] }]
-      },
-      {
-        id: 2,
-        type: 'KSampler',
-        pos: [400, 100],
-        size: [200, 120],
-        title: 'KSampler',
-        inputs: [
-          { name: 'LATENT', type: 'LATENT' },
-          { name: 'MODEL', type: 'MODEL' }
-        ],
-        outputs: [{ name: 'LATENT', type: 'LATENT', links: [] }]
-      },
-      {
-        id: 3,
-        type: 'SaveImage',
-        pos: [700, 100],
-        size: [200, 80],
-        title: 'Save Image',
-        inputs: [{ name: 'images', type: 'IMAGE', link: 1 }],
-        outputs: []
-      }
-    ],
-    links: [[1, 1, 0, 3, 0, 'IMAGE']],
-    groups: [],
-  })
-}
 </script>
 
 <template>
@@ -782,9 +741,6 @@ function addSampleWorkflow() {
         ></div>
         <div class="minimap-viewport" :style="viewportStyle"></div>
       </div>
-    </div>
-    <div v-if="store.nodes.length === 0" class="empty-hint" @click="addSampleWorkflow">
-      Click to add sample workflow
     </div>
   </div>
 </template>
@@ -931,22 +887,6 @@ function addSampleWorkflow() {
   box-shadow:
     inset 0 0 0 1px rgb(255 255 255 / 18%),
     0 0 2px rgb(0 0 0 / 80%);
-}
-.empty-hint {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: #666;
-  font-size: 14px;
-  padding: 20px 40px;
-  border: 2px dashed #444;
-  border-radius: 8px;
-  cursor: pointer;
-}
-.empty-hint:hover {
-  color: #888;
-  border-color: #666;
 }
 .minimap {
   position: absolute;

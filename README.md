@@ -142,7 +142,7 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 - Eliminates the long wires entirely, which reduces crossing counts after layout.
 - Breaks inter-group cycles that loader fan-out would otherwise create, allowing the layout algorithm to produce a strictly left-to-right result.
 
-**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, one `SetNode` is inserted immediately after the source and one `GetNode` is inserted before each target. `Reroute` chains are collapsed during detection, so fanout hidden behind reroute nodes is optimized too. The original links are removed. The workflow runs identically in ComfyUI.
+**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, FlowForge estimates the routing cost before and after a rewrite. Local `SetNode -> GetNode` hub links are discounted in that estimate because they behave like a compact distribution spine. If the rewritten graph is cheaper, it inserts one `SetNode` immediately after the source and one `GetNode` before each target. `Reroute` chains are collapsed during detection, so fanout hidden behind reroute nodes is considered too. The original links are removed. The workflow runs identically in ComfyUI.
 
 **Requirement:** comfyui-kjnodes must be installed in your ComfyUI instance, otherwise ComfyUI will show missing-node warnings on load.
 
