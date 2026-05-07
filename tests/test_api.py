@@ -3,6 +3,7 @@ API endpoint tests using aiohttp test client.
 """
 
 from copy import deepcopy
+import json
 
 import pytest
 
@@ -137,6 +138,12 @@ async def test_layout_endpoint(client):
     logger.info("Testing /layout endpoint")
     resp = await client.post('/layout', json=SIMPLE_WORKFLOW)
     assert resp.status == 200
+    stats = resp.headers.get("X-FlowForge-Layout-Stats")
+    assert stats is not None
+    stats_data = json.loads(stats)
+    assert stats_data["candidate_count"] >= 3
+    assert 1 <= stats_data["selected_candidate"] <= stats_data["candidate_count"]
+    assert stats_data["score"]["total"] >= 0
     data = await resp.json()
     
     # Validate structure

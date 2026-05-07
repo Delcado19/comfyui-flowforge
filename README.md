@@ -129,7 +129,7 @@ Layout spacing is driven by two independent values:
 | `node_x_distance` | 80 px | 20-240 px | Controls horizontal spacing, group width, and the left-to-right packing distance. |
 | `node_y_distance` | 80 px | 20-240 px | Controls vertical spacing, group height, and the top-to-bottom packing distance. |
 
-The API accepts a layout wrapper of the form `{"workflow": ..., "layout": {"node_x_distance": 80, "node_y_distance": 80}}`. Bare workflow JSON remains supported for backwards compatibility, and legacy `min_node_distance` input is still accepted as an alias for both axes. Each `layout` run tries several axis-spacing candidates and keeps the best-scoring result.
+The API accepts a layout wrapper of the form `{"workflow": ..., "layout": {"node_x_distance": 80, "node_y_distance": 80}}`. Bare workflow JSON remains supported for backwards compatibility, and legacy `min_node_distance` input is still accepted as an alias for both axes. Each `layout` run tries several axis-spacing candidates and keeps the best-scoring result. The `/layout` response also includes a `X-FlowForge-Layout-Stats` header with the selected candidate and score breakdown.
 
 ---
 

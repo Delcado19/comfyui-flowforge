@@ -111,6 +111,13 @@ class LayoutScore:
     aspect_cost: float
 
 
+@dataclass(frozen=True)
+class LayoutReport:
+    candidate_count: int
+    selected_candidate: int
+    score: LayoutScore
+
+
 def apply(workflow: Workflow, settings: LayoutSettings | None = None) -> Workflow:
     return apply_best_layout(workflow, settings)
 
@@ -135,6 +142,7 @@ def apply_best_layout(
 
     best_variant: LayoutSettings | None = None
     best_score: LayoutScore | None = None
+    best_index = 0
 
     for index, variant in enumerate(variants, start=1):
         candidate = deepcopy(workflow)
@@ -160,6 +168,7 @@ def apply_best_layout(
         if best_score is None or score.total < best_score.total:
             best_score = score
             best_variant = variant
+            best_index = index
 
     if best_variant is None or best_score is None:
         raise RuntimeError("Layout candidate search did not produce a result")
@@ -172,7 +181,13 @@ def apply_best_layout(
         best_score.link_cost,
         best_score.aspect_cost,
     )
-    return _apply_layout_pass(workflow, best_variant, log=True)
+    result = _apply_layout_pass(workflow, best_variant, log=True)
+    result.layout_report = LayoutReport(
+        candidate_count=len(variants),
+        selected_candidate=best_index,
+        score=best_score,
+    )
+    return result
 
 
 def _apply_layout_pass(

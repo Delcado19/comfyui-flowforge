@@ -5,6 +5,7 @@ import ComfyCanvas from './components/ComfyCanvas.vue'
 
 const store = useWorkflowStore()
 const fileInput = ref<HTMLInputElement | null>(null)
+const layoutStatus = ref('')
 const canvasRef = ref<{
   deleteAllGroups: () => void
 } | null>(null)
@@ -17,6 +18,14 @@ const nodeYDistance = ref(NODE_DISTANCE_DEFAULT)
 
 let layoutTimer: ReturnType<typeof window.setTimeout> | undefined
 let layoutRequestId = 0
+
+type LayoutStats = {
+  candidate_count: number
+  selected_candidate: number
+  score: {
+    total: number
+  }
+}
 
 function openFile() {
   fileInput.value?.click()
@@ -32,6 +41,7 @@ function onFileSelected(e: Event) {
     try {
       const data = JSON.parse(reader.result as string)
       store.loadWorkflow(data)
+      layoutStatus.value = ''
     } catch (err) {
       alert('Invalid workflow file')
     }
@@ -69,9 +79,14 @@ function scheduleLayout(immediate = false) {
         throw new Error(data.error || 'Layout request failed')
       }
       if (requestId !== layoutRequestId) return
+      const layoutStats = parseLayoutStats(response.headers.get('X-FlowForge-Layout-Stats'))
+      layoutStatus.value = layoutStats
+        ? `Layout: ${layoutStats.selected_candidate}/${layoutStats.candidate_count} candidates, score ${layoutStats.score.total.toFixed(1)}`
+        : 'Layout completed'
       store.loadWorkflow(data)
     } catch (err) {
       if (requestId !== layoutRequestId) return
+      layoutStatus.value = ''
       alert('Layout failed: ' + err)
     }
   }
@@ -105,6 +120,24 @@ function save() {
   a.download = 'workflow.json'
   a.click()
   URL.revokeObjectURL(url)
+}
+
+function parseLayoutStats(raw: string | null) {
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as Partial<LayoutStats>
+    if (
+      typeof parsed.candidate_count === 'number' &&
+      typeof parsed.selected_candidate === 'number' &&
+      parsed.score !== undefined &&
+      typeof parsed.score.total === 'number'
+    ) {
+      return parsed as LayoutStats
+    }
+  } catch {
+    return null
+  }
+  return null
 }
 
 watch([nodeXDistance, nodeYDistance], () => {
@@ -157,6 +190,7 @@ watch([nodeXDistance, nodeYDistance], () => {
         </label>
       </div>
       <button @click="save">Save</button>
+      <span v-if="layoutStatus" class="layout-info">{{ layoutStatus }}</span>
       <span class="zoom-info">Zoom: {{ Math.round(store.scale * 100) }}%</span>
     </div>
     <ComfyCanvas ref="canvasRef" class="canvas" />
@@ -236,6 +270,15 @@ body {
   color: #888;
   font-size: 12px;
   padding: 6px 12px;
+}
+.layout-info {
+  color: #9aa8b8;
+  font-size: 12px;
+  padding: 6px 0 6px 8px;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .canvas {
   flex: 1;

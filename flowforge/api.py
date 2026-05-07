@@ -3,6 +3,7 @@ aiohttp API server for ComfyUI FlowForge.
 Provides endpoints for layout and optimization.
 """
 
+import json
 from copy import deepcopy
 from typing import Any, Dict, List
 
@@ -10,7 +11,7 @@ from aiohttp import web
 
 from .logger import setup_logger
 from .parser import parse_comfyui_workflow
-from .layout import LayoutSettings, apply as apply_layout
+from .layout import LayoutReport, LayoutSettings, apply as apply_layout
 from .model import Link, Node, Workflow
 from .optimizer import optimize
 
@@ -28,6 +29,7 @@ async def cors_middleware(request, handler):
     response.headers["Access-Control-Allow-Origin"] = "*"
     response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
     response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    response.headers["Access-Control-Expose-Headers"] = "X-FlowForge-Layout-Stats"
     return response
 
 
@@ -48,11 +50,25 @@ async def layout_handler(request):
         
         # Apply layout algorithm
         layouted = apply_layout(workflow, layout_settings)
-        
+
         # Convert back to ComfyUI JSON format
         result = _workflow_to_comfyui_json(layouted)
-        
-        return web.json_response(result)
+        response = web.json_response(result)
+        layout_report = getattr(layouted, "layout_report", None)
+        if isinstance(layout_report, LayoutReport):
+            response.headers["X-FlowForge-Layout-Stats"] = json.dumps({
+                "candidate_count": layout_report.candidate_count,
+                "selected_candidate": layout_report.selected_candidate,
+                "score": {
+                    "total": layout_report.score.total,
+                    "width": layout_report.score.width,
+                    "height": layout_report.score.height,
+                    "link_cost": layout_report.score.link_cost,
+                    "aspect_cost": layout_report.score.aspect_cost,
+                },
+            })
+
+        return response
     except Exception as e:
         logger.error(f"Layout error: {e}", exc_info=True)
         return web.json_response({"error": str(e)}, status=500)

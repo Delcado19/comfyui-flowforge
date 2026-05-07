@@ -46,3 +46,4 @@ class Workflow:
     groups: List[Group] = field(default_factory=list)
     ungrouped_nodes: List[Node] = field(default_factory=list)
     source_json: Optional[Dict[str, Any]] = None
+    layout_report: Optional[Any] = None
