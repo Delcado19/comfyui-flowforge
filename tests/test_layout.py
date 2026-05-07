@@ -13,6 +13,7 @@ from flowforge.layout import (
     _assign_groups,
     _layout_groups_internal,
     _position_groups_globally,
+    _score_layout_candidate,
     _update_bounding_boxes,
 )
 from flowforge.logger import setup_logger
@@ -297,6 +298,29 @@ def test_best_layout_tries_multiple_candidates_and_picks_best(monkeypatch):
     assert result.nodes[2].x == 160.0
     assert result.nodes[2].y == 90.0
     logger.info("Best-of layout candidate selection test passed")
+
+
+def test_layout_score_penalizes_overly_wide_layouts():
+    logger.info("Testing aspect penalty in layout scoring")
+    wide = Workflow()
+    wide.nodes[1] = Node(id=1, type="NodeA", x=0, y=0, size=[100, 100])
+    wide.nodes[2] = Node(id=2, type="NodeB", x=500, y=0, size=[100, 100])
+
+    tall = Workflow()
+    tall.nodes[1] = Node(id=1, type="NodeA", x=0, y=0, size=[100, 100])
+    tall.nodes[2] = Node(id=2, type="NodeB", x=300, y=500, size=[100, 100])
+
+    wide_score = _score_layout_candidate(wide)
+    tall_score = _score_layout_candidate(tall)
+
+    assert wide_score.width == 600
+    assert wide_score.height == 100
+    assert tall_score.width == 400
+    assert tall_score.height == 600
+    assert wide_score.total > tall_score.total
+    assert wide_score.aspect_cost > 0
+    assert tall_score.aspect_cost == 0
+    logger.info("Aspect penalty scoring test passed")
 
 
 if __name__ == "__main__":

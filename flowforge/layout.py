@@ -23,6 +23,8 @@ DECORATIVE_START_Y = 50.0
 LAYOUT_SCORE_WIDTH_WEIGHT = 2.5
 LAYOUT_SCORE_HEIGHT_WEIGHT = 1.0
 LAYOUT_SCORE_LINK_WEIGHT = 0.02
+LAYOUT_SCORE_ASPECT_WEIGHT = 120.0
+LAYOUT_SCORE_ASPECT_RATIO = 1.35
 LAYOUT_CANDIDATE_PROFILES = (
     (1.0, 1.0),
     (0.8, 1.0),
@@ -95,6 +97,15 @@ class LayoutSettings:
         return cls()
 
 
+@dataclass(frozen=True)
+class LayoutScore:
+    total: float
+    width: float
+    height: float
+    link_cost: float
+    aspect_cost: float
+
+
 def apply(workflow: Workflow, settings: LayoutSettings | None = None) -> Workflow:
     return apply_best_layout(workflow, settings)
 
@@ -113,7 +124,7 @@ def apply_best_layout(
         return _apply_layout_pass(workflow, variants[0], log=True)
 
     best_variant: LayoutSettings | None = None
-    best_score: tuple[float, float, float, float] | None = None
+    best_score: LayoutScore | None = None
 
     for index, variant in enumerate(variants, start=1):
         candidate = deepcopy(workflow)
@@ -127,15 +138,16 @@ def apply_best_layout(
         _apply_layout_pass(candidate, variant, log=False)
         score = _score_layout_candidate(candidate)
         logger.debug(
-            "Candidate %s/%s scored %.2f (width=%.2f height=%.2f link=%.2f)",
+            "Candidate %s/%s scored %.2f (width=%.2f height=%.2f link=%.2f aspect=%.2f)",
             index,
             len(variants),
-            score[0],
-            score[1],
-            score[2],
-            score[3],
+            score.total,
+            score.width,
+            score.height,
+            score.link_cost,
+            score.aspect_cost,
         )
-        if best_score is None or score < best_score:
+        if best_score is None or score.total < best_score.total:
             best_score = score
             best_variant = variant
 
@@ -143,11 +155,12 @@ def apply_best_layout(
         raise RuntimeError("Layout candidate search did not produce a result")
 
     logger.info(
-        "Selected best layout candidate with score %.2f (width=%.2f height=%.2f link=%.2f)",
-        best_score[0],
-        best_score[1],
-        best_score[2],
-        best_score[3],
+        "Selected best layout candidate with score %.2f (width=%.2f height=%.2f link=%.2f aspect=%.2f)",
+        best_score.total,
+        best_score.width,
+        best_score.height,
+        best_score.link_cost,
+        best_score.aspect_cost,
     )
     return _apply_layout_pass(workflow, best_variant, log=True)
 
@@ -249,20 +262,20 @@ def _build_layout_candidates(settings: LayoutSettings, candidate_count: int) -> 
     return variants
 
 
-def _score_layout_candidate(workflow: Workflow) -> tuple[float, float, float, float]:
+def _score_layout_candidate(workflow: Workflow) -> LayoutScore:
     left, top, right, bottom = _workflow_bounds(workflow)
     width = max(0.0, right - left)
     height = max(0.0, bottom - top)
     link_cost = sum(_link_length(workflow, link) for link in workflow.links.values())
-    score = (
+    aspect_ratio = width / max(1.0, height)
+    aspect_cost = max(0.0, aspect_ratio - LAYOUT_SCORE_ASPECT_RATIO) * LAYOUT_SCORE_ASPECT_WEIGHT
+    total = (
         width * LAYOUT_SCORE_WIDTH_WEIGHT
         + height * LAYOUT_SCORE_HEIGHT_WEIGHT
-        + link_cost * LAYOUT_SCORE_LINK_WEIGHT,
-        width,
-        height,
-        link_cost,
+        + link_cost * LAYOUT_SCORE_LINK_WEIGHT
+        + aspect_cost
     )
-    return score
+    return LayoutScore(total, width, height, link_cost, aspect_cost)
 
 
 def _workflow_bounds(workflow: Workflow) -> tuple[float, float, float, float]:
