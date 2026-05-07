@@ -29,7 +29,7 @@
 
 - Validate layout behavior against more real ComfyUI workflows.
 - Improve visual comparison in the frontend.
-- Define the deployment and release path.
+- Exercise the first tagged GitHub release using the source-checkout release path.
 - Expand documentation when behavior stabilizes.
 
 ## Notes

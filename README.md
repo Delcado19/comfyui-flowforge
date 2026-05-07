@@ -162,6 +162,8 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 
 Repository-local agent rules live in [AGENTS.md](AGENTS.md). Documentation synchronization is handled by the Documentation Maintenance Agent policy in [docs/DOCUMENTATION_MAINTENANCE.md](docs/DOCUMENTATION_MAINTENANCE.md).
 
+Release and deployment expectations are tracked in [docs/RELEASE.md](docs/RELEASE.md). FlowForge currently supports source-checkout deployment with `uv`; broader packaging targets are still deferred.
+
 ---
 
 ## Project Structure
