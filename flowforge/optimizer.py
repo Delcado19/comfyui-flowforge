@@ -42,7 +42,6 @@ def optimize(workflow: Workflow) -> Workflow:
         port_links.setdefault(key, []).append(link)
     
     # Find (node, port) where the output type is optimizable and fanout >= 2.
-    # Rank candidates by their estimated savings so the biggest win is applied first.
     optimization_targets = []
     for (src_id, src_port), links in port_links.items():
         src_node = new_workflow.nodes.get(src_id)
@@ -64,54 +63,71 @@ def optimize(workflow: Workflow) -> Workflow:
             current_cost = _current_graph_cost(new_workflow, traversed_link_ids, terminal_links)
             optimized_cost = _estimated_rewrite_cost(new_workflow, src_node, terminal_links)
             if optimized_cost < current_cost:
-                optimization_targets.append(
-                    (current_cost - optimized_cost, src_node, src_port)
-                )
-
-    optimization_targets.sort(key=lambda item: (-item[0], item[1].id, item[2]))
+                optimization_targets.append((src_node.id, src_port))
     
     logger.info(f"Found {len(optimization_targets)} node output ports to optimize")
     
-    # Apply optimizations (each for a specific source node + output port)
-    for _, src_node, src_port in optimization_targets:
-        current_links = [
-            link
-            for link in new_workflow.links.values()
-            if link.source == src_node.id and link.source_port == src_port
-        ]
-        current_terminals, current_traversed = _collect_effective_fanout(
-            new_workflow,
-            src_node,
-            src_port,
-            current_links,
-        )
-        if len(current_terminals) < 2:
-            continue
-        if not any(
-            new_workflow.links[link_id].type in OPTIMIZE_TYPES
-            for link_id in current_traversed
-            if link_id in new_workflow.links
-        ):
-            continue
+    # Apply the best savings candidate first, then recompute the remaining
+    # candidates against the modified graph. This keeps the pass adaptive when
+    # one rewrite changes the relative value of the others.
+    remaining_targets = optimization_targets
+    while remaining_targets:
+        best_candidate: tuple[float, Node, int, List[Link], set[int]] | None = None
 
-        current_cost = _current_graph_cost(new_workflow, current_traversed, current_terminals)
-        optimized_cost = _estimated_rewrite_cost(new_workflow, src_node, current_terminals)
-        logger.debug(
-            "Cost check for %s:%s - current=%.2f optimized=%.2f",
-            src_node.id,
-            src_port,
-            current_cost,
-            optimized_cost,
-        )
-        if optimized_cost >= current_cost:
+        for src_id, src_port in remaining_targets:
+            src_node = new_workflow.nodes.get(src_id)
+            if not src_node:
+                continue
+
+            current_links = [
+                link
+                for link in new_workflow.links.values()
+                if link.source == src_node.id and link.source_port == src_port
+            ]
+            current_terminals, current_traversed = _collect_effective_fanout(
+                new_workflow,
+                src_node,
+                src_port,
+                current_links,
+            )
+            if len(current_terminals) < 2:
+                continue
+            if not any(
+                new_workflow.links[link_id].type in OPTIMIZE_TYPES
+                for link_id in current_traversed
+                if link_id in new_workflow.links
+            ):
+                continue
+
+            current_cost = _current_graph_cost(new_workflow, current_traversed, current_terminals)
+            optimized_cost = _estimated_rewrite_cost(new_workflow, src_node, current_terminals)
+            savings = current_cost - optimized_cost
             logger.debug(
-                "Skipping optimization for %s:%s because it does not reduce cost",
+                "Cost check for %s:%s - current=%.2f optimized=%.2f savings=%.2f",
                 src_node.id,
                 src_port,
+                current_cost,
+                optimized_cost,
+                savings,
             )
-            continue
+            if savings <= 0:
+                continue
 
+            if best_candidate is None or savings > best_candidate[0] or (
+                savings == best_candidate[0] and (src_node.id, src_port) < (best_candidate[1].id, best_candidate[2])
+            ):
+                best_candidate = (savings, src_node, src_port, current_terminals, current_traversed)
+
+        if best_candidate is None:
+            break
+
+        _, src_node, src_port, current_terminals, current_traversed = best_candidate
         _replace_port_with_set_get(new_workflow, src_node, src_port, current_terminals, current_traversed)
+        remaining_targets = [
+            (candidate_src_id, candidate_src_port)
+            for candidate_src_id, candidate_src_port in remaining_targets
+            if (candidate_src_id, candidate_src_port) != (src_node.id, src_port)
+        ]
     
     logger.info("Optimization completed")
     return new_workflow

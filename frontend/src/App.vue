@@ -5,6 +5,10 @@ import ComfyCanvas from './components/ComfyCanvas.vue'
 
 const store = useWorkflowStore()
 const fileInput = ref<HTMLInputElement | null>(null)
+const canvasRef = ref<{
+  createGroupFromViewport: () => void
+  deleteAllGroups: () => void
+} | null>(null)
 const NODE_DISTANCE_DEFAULT = 80
 const NODE_DISTANCE_MIN = 20
 const NODE_DISTANCE_MAX = 240
@@ -87,6 +91,14 @@ function layout() {
   scheduleLayout(true)
 }
 
+function createGroup() {
+  canvasRef.value?.createGroupFromViewport()
+}
+
+function deleteAllGroups() {
+  canvasRef.value?.deleteAllGroups()
+}
+
 function save() {
   if (!store.workflow) return
 
@@ -112,6 +124,8 @@ watch([nodeXDistance, nodeYDistance], () => {
     <div class="toolbar">
       <button @click="openFile">Open</button>
       <button @click="layout">Layout</button>
+      <button :disabled="!store.workflow" @click="createGroup">+ Group</button>
+      <button :disabled="!(store.workflow?.groups?.length ?? 0)" @click="deleteAllGroups">Clear Groups</button>
       <div class="spacing-control">
         <label class="spacing-row">
           <span>X</span>
@@ -151,7 +165,7 @@ watch([nodeXDistance, nodeYDistance], () => {
       <button @click="save">Save</button>
       <span class="zoom-info">Zoom: {{ Math.round(store.scale * 100) }}%</span>
     </div>
-    <ComfyCanvas class="canvas" />
+    <ComfyCanvas ref="canvasRef" class="canvas" />
     <input ref="fileInput" type="file" accept=".json" @change="onFileSelected" style="display: none" />
   </div>
 </template>
@@ -190,6 +204,10 @@ body {
 }
 .toolbar button:hover {
   background: #444;
+}
+.toolbar button:disabled {
+  cursor: default;
+  opacity: 0.45;
 }
 .spacing-control {
   display: flex;

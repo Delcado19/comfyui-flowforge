@@ -83,8 +83,8 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 
 - **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions
 - **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
-- **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, group-aware dragging, and resizable group containers
-- **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus live X/Y spacing controls for layout density
+- **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, group-aware dragging, resizable group containers, and group creation/deletion controls
+- **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus live X/Y spacing controls for layout density and toolbar buttons to create or clear groups
 - **Color-Coded Nodes**: Different node types are visually distinguished and rendered with ComfyUI-like widgets
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
 
@@ -142,7 +142,7 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 - Eliminates the long wires entirely, which reduces crossing counts after layout.
 - Breaks inter-group cycles that loader fan-out would otherwise create, allowing the layout algorithm to produce a strictly left-to-right result.
 
-**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, FlowForge estimates the routing cost before and after a rewrite. Local `SetNode -> GetNode` hub links are discounted in that estimate because they behave like a compact distribution spine. Candidates are processed in descending estimated savings, and the inserted `SetNode` is anchored near the vertical center of its consumer cluster instead of being pinned to the source node's Y position. If the rewritten graph is cheaper, FlowForge inserts one `SetNode` immediately after the source and one `GetNode` before each target. `Reroute` chains are collapsed during detection, so fanout hidden behind reroute nodes is considered too. The original links are removed. The workflow runs identically in ComfyUI.
+**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, FlowForge estimates the routing cost before and after a rewrite. Local `SetNode -> GetNode` hub links are discounted in that estimate because they behave like a compact distribution spine. Candidate savings are recomputed greedily after each rewrite so the optimizer always applies the best remaining candidate on the current graph. The inserted `SetNode` is anchored near the vertical center of its consumer cluster instead of being pinned to the source node's Y position. If the rewritten graph is cheaper, FlowForge inserts one `SetNode` immediately after the source and one `GetNode` before each target. `Reroute` chains are collapsed during detection, so fanout hidden behind reroute nodes is considered too. The original links are removed. The workflow runs identically in ComfyUI.
 
 **Requirement:** comfyui-kjnodes must be installed in your ComfyUI instance, otherwise ComfyUI will show missing-node warnings on load.
 

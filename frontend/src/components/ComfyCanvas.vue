@@ -11,6 +11,9 @@ const PORT_CENTER_OFFSET = 12
 const GROUP_CONTENT_PADDING = 24
 const MIN_GROUP_WIDTH = 120
 const MIN_GROUP_HEIGHT = 80
+const CREATE_GROUP_WIDTH = 480
+const CREATE_GROUP_HEIGHT = 320
+const CREATE_GROUP_PADDING = 48
 const resizeHandles = ['nw', 'n', 'ne', 'e', 'se', 's', 'sw', 'w'] as const
 type ResizeHandle = (typeof resizeHandles)[number]
 
@@ -255,6 +258,67 @@ function getGroupContentBounds(group: ComfyGroup): [number, number, number, numb
   }
 
   return [minX, minY, maxX, maxY]
+}
+
+function getViewportWorldBounds(): [number, number, number, number] | null {
+  const canvas = canvasRef.value
+  if (!canvas || store.scale <= 0) return null
+
+  const left = -store.offsetX / store.scale
+  const top = -store.offsetY / store.scale
+  const width = canvas.clientWidth / store.scale
+  const height = canvas.clientHeight / store.scale
+  return [left, top, width, height]
+}
+
+function createGroupFromViewport() {
+  const viewport = getViewportWorldBounds()
+  if (!viewport) return
+
+  const [viewportLeft, viewportTop, viewportWidth, viewportHeight] = viewport
+  const viewportRight = viewportLeft + viewportWidth
+  const viewportBottom = viewportTop + viewportHeight
+  const visibleNodes = store.nodes.filter((node) => {
+    const [x, y, width, height] = getNodeBounds(node)
+    return x < viewportRight && x + width > viewportLeft && y < viewportBottom && y + height > viewportTop
+  })
+
+  if (visibleNodes.length > 0) {
+    let minX = Number.POSITIVE_INFINITY
+    let minY = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let maxY = Number.NEGATIVE_INFINITY
+
+    for (const node of visibleNodes) {
+      const [x, y, width, height] = getNodeBounds(node)
+      minX = Math.min(minX, x)
+      minY = Math.min(minY, y)
+      maxX = Math.max(maxX, x + width)
+      maxY = Math.max(maxY, y + height)
+    }
+
+    store.createGroup([
+      minX - CREATE_GROUP_PADDING,
+      minY - CREATE_GROUP_PADDING,
+      (maxX - minX) + CREATE_GROUP_PADDING * 2,
+      (maxY - minY) + CREATE_GROUP_PADDING * 2,
+    ])
+    return
+  }
+
+  const left = viewportLeft + viewportWidth / 2 - CREATE_GROUP_WIDTH / 2
+  const top = viewportTop + viewportHeight / 2 - CREATE_GROUP_HEIGHT / 2
+  store.createGroup([left, top, CREATE_GROUP_WIDTH, CREATE_GROUP_HEIGHT])
+}
+
+function deleteAllGroups() {
+  if (!groups.value.length) return
+  if (!window.confirm('Delete all groups?')) return
+  store.deleteAllGroups()
+}
+
+function deleteGroup(groupId: number | string) {
+  store.deleteGroup(groupId)
 }
 
 function getPortPosition(node: WorkflowNode, portIndex: number, isOutput: boolean): [number, number] {
@@ -606,6 +670,11 @@ function onMinimapPointerUp(e: PointerEvent) {
   isDraggingMinimap.value = false
 }
 
+defineExpose({
+  createGroupFromViewport,
+  deleteAllGroups,
+})
+
 onMounted(() => {
   syncMinimapSize()
   window.addEventListener('pointermove', onPointerMove)
@@ -649,6 +718,18 @@ watch(
     @pointerdown="onCanvasPointerDown"
   >
     <div class="canvas-bg"></div>
+    <div class="group-toolbar">
+      <button type="button" title="Create group from viewport" @pointerdown.stop @click="createGroupFromViewport">+</button>
+      <button
+        type="button"
+        title="Delete all groups"
+        :disabled="groups.length === 0"
+        @pointerdown.stop
+        @click="deleteAllGroups"
+      >
+        ×
+      </button>
+    </div>
     <div class="groups-layer" :style="canvasStyle">
       <div
         v-for="group in groups"
@@ -660,8 +741,17 @@ watch(
           class="workflow-group-title"
           :style="getGroupTitleStyle(group)"
           @pointerdown="onGroupPointerDown($event, group)"
-        >
-          {{ group.title }}
+      >
+          <span class="workflow-group-title-text">{{ group.title }}</span>
+          <button
+            type="button"
+            class="workflow-group-delete-button"
+            title="Delete group"
+            @pointerdown.stop
+            @click.stop="deleteGroup(group.id)"
+          >
+            ×
+          </button>
         </div>
         <div
           v-for="handle in resizeHandles"
@@ -764,6 +854,34 @@ watch(
   background: radial-gradient(circle, #2a2a2a 1px, transparent 1px);
   background-size: 20px 20px;
 }
+.group-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  gap: 6px;
+  z-index: 6;
+  pointer-events: auto;
+}
+.group-toolbar button,
+.workflow-group-delete-button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid #555;
+  border-radius: 4px;
+  background: #252525;
+  color: #ddd;
+  cursor: pointer;
+}
+.group-toolbar button:hover:not(:disabled),
+.workflow-group-delete-button:hover {
+  background: #3a3a3a;
+}
+.group-toolbar button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
 .nodes-container {
   position: absolute;
   inset: 0;
@@ -787,6 +905,11 @@ watch(
   position: absolute;
   top: 4px;
   left: 8px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   padding: 0;
   background: transparent;
   border: 0;
@@ -796,6 +919,14 @@ watch(
   white-space: nowrap;
   z-index: 4;
   pointer-events: auto;
+}
+.workflow-group-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workflow-group-delete-button {
+  flex: 0 0 auto;
 }
 .workflow-group-title {
   cursor: move;

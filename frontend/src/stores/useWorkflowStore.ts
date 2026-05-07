@@ -106,6 +106,30 @@ export const useWorkflowStore = defineStore('workflow', {
       if (!group) return
       group.bounding = bounding
     },
+    createGroup(bounding: [number, number, number, number], title?: string) {
+      if (!this.workflow) return
+
+      const groups = this.workflow.groups ?? (this.workflow.groups = [])
+      const nextId = groups.reduce((max, group) => {
+        return typeof group.id === 'number' && Number.isFinite(group.id)
+          ? Math.max(max, group.id)
+          : max
+      }, 0) + 1
+
+      groups.push({
+        id: nextId,
+        title: title || `Group ${nextId}`,
+        bounding,
+      })
+    },
+    deleteGroup(groupId: number | string) {
+      if (!this.workflow?.groups) return
+      this.workflow.groups = this.workflow.groups.filter((group) => group.id !== groupId)
+    },
+    deleteAllGroups() {
+      if (!this.workflow) return
+      this.workflow.groups = []
+    },
     loadWorkflow(data: ComfyWorkflow) {
       if (!Array.isArray(data.nodes)) {
         throw new Error('ComfyUI workflow is missing a nodes array')
