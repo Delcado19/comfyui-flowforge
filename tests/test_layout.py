@@ -10,6 +10,7 @@ from flowforge.layout import (
     apply,
     apply_best_layout,
     LayoutSettings,
+    LayoutScore,
     _assign_groups,
     _layout_groups_internal,
     _position_groups_globally,
@@ -293,11 +294,11 @@ def test_best_layout_tries_multiple_candidates_and_picks_best(monkeypatch):
     )
 
     assert attempts[:5] == [
-        (100.0, 100.0, False),
-        (80.0, 100.0, False),
-        (100.0, 80.0, False),
         (85.0, 115.0, False),
+        (80.0, 100.0, False),
         (70.0, 90.0, False),
+        (100.0, 100.0, False),
+        (100.0, 80.0, False),
     ]
     assert attempts[-1] == (70.0, 90.0, True)
     assert result.nodes[2].x == 160.0
@@ -323,6 +324,48 @@ def test_layout_candidate_count_scales_with_workflow_size():
     assert _resolve_layout_candidate_count(medium) == 5
     assert _resolve_layout_candidate_count(large) == 7
     logger.info("Dynamic candidate count test passed")
+
+
+def test_best_layout_stops_after_stale_candidates(monkeypatch):
+    logger.info("Testing early stop in layout candidate search")
+    wf = Workflow()
+    wf.nodes[1] = Node(id=1, type="NodeA", x=0, y=0, size=[120, 80], mode=0, order=0)
+    wf.nodes[2] = Node(id=2, type="NodeB", x=240, y=0, size=[120, 80], mode=0, order=1)
+    wf.nodes[3] = Node(id=3, type="NodeC", x=480, y=0, size=[120, 80], mode=0, order=2)
+
+    attempts = []
+    totals = iter([10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0])
+
+    def fake_apply_layout_pass(workflow, settings=None, *, log=True):
+        attempts.append((round(settings.node_x_distance, 2), round(settings.node_y_distance, 2), log))
+        workflow.nodes[1].x = settings.node_x_distance
+        workflow.nodes[2].x = settings.node_x_distance + 100
+        workflow.nodes[3].x = settings.node_x_distance + 200
+        return workflow
+
+    def fake_score_layout_candidate(workflow):
+        total = next(totals)
+        return LayoutScore(
+            total=total,
+            width=100.0,
+            height=100.0,
+            link_cost=0.0,
+            aspect_cost=0.0,
+            gap_cost=0.0,
+        )
+
+    monkeypatch.setattr("flowforge.layout._apply_layout_pass", fake_apply_layout_pass)
+    monkeypatch.setattr("flowforge.layout._score_layout_candidate", fake_score_layout_candidate)
+
+    result = apply_best_layout(wf, LayoutSettings(node_x_distance=100, node_y_distance=100), candidate_count=7)
+
+    assert len(attempts) == 4
+    assert attempts[-1][2] is True
+    assert result.layout_report is not None
+    assert result.layout_report.candidate_count == 3
+    assert result.layout_report.selected_candidate == 1
+    assert result.nodes[1].x == attempts[0][0]
+    logger.info("Early stop in layout candidate search test passed")
 
 
 def test_layout_score_penalizes_overly_wide_layouts():

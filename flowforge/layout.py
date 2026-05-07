@@ -19,8 +19,12 @@ DEFAULT_LAYOUT_CANDIDATES = 5
 LAYOUT_CANDIDATE_MIN = 3
 LAYOUT_CANDIDATE_MID = 5
 LAYOUT_CANDIDATE_MAX = 7
+LAYOUT_CANDIDATE_MIN_EVALUATIONS = 3
+LAYOUT_CANDIDATE_PATIENCE = 2
 LAYOUT_SMALL_WORKFLOW_LIMIT = 12
 LAYOUT_LARGE_WORKFLOW_LIMIT = 30
+LAYOUT_WIDE_WORKFLOW_RATIO = 1.35
+LAYOUT_TALL_WORKFLOW_RATIO = 0.75
 LAYOUT_DISTANCE_MIN = 20.0
 LAYOUT_DISTANCE_MAX = 240.0
 DECORATIVE_START_X = 20.0
@@ -139,15 +143,18 @@ def apply_best_layout(
         if candidate_count is None
         else max(1, int(candidate_count))
     )
-    variants = _build_layout_candidates(settings, resolved_candidate_count)
+    variants = _build_layout_candidates(workflow, settings, resolved_candidate_count)
     if len(variants) == 1:
         return _apply_layout_pass(workflow, variants[0], log=True)
 
     best_variant: LayoutSettings | None = None
     best_score: LayoutScore | None = None
     best_index = 0
+    evaluated_count = 0
+    stale_runs = 0
 
     for index, variant in enumerate(variants, start=1):
+        evaluated_count = index
         candidate = deepcopy(workflow)
         logger.debug(
             "Running layout candidate %s/%s with x=%.2f y=%.2f",
@@ -173,6 +180,19 @@ def apply_best_layout(
             best_score = score
             best_variant = variant
             best_index = index
+            stale_runs = 0
+        else:
+            stale_runs += 1
+
+        if (
+            index >= LAYOUT_CANDIDATE_MIN_EVALUATIONS
+            and stale_runs >= LAYOUT_CANDIDATE_PATIENCE
+        ):
+            logger.debug(
+                "Stopping layout candidate search after %s evaluations without improvement",
+                index,
+            )
+            break
 
     if best_variant is None or best_score is None:
         raise RuntimeError("Layout candidate search did not produce a result")
@@ -188,7 +208,7 @@ def apply_best_layout(
     )
     result = _apply_layout_pass(workflow, best_variant, log=True)
     result.layout_report = LayoutReport(
-        candidate_count=len(variants),
+        candidate_count=evaluated_count,
         selected_candidate=best_index,
         score=best_score,
     )
@@ -261,11 +281,16 @@ def _apply_layout_pass(
         raise
 
 
-def _build_layout_candidates(settings: LayoutSettings, candidate_count: int) -> list[LayoutSettings]:
+def _build_layout_candidates(
+    workflow: Workflow,
+    settings: LayoutSettings,
+    candidate_count: int,
+) -> list[LayoutSettings]:
     count = max(1, int(candidate_count))
     variants: list[LayoutSettings] = []
+    profiles = _ordered_layout_profiles(workflow)
 
-    for x_scale, y_scale in LAYOUT_CANDIDATE_PROFILES[:count]:
+    for x_scale, y_scale in profiles[:count]:
         variants.append(
             LayoutSettings(
                 settings.node_x_distance * x_scale,
@@ -278,7 +303,7 @@ def _build_layout_candidates(settings: LayoutSettings, candidate_count: int) -> 
 
     profile_index = 0
     while len(variants) < count:
-        x_scale, y_scale = LAYOUT_CANDIDATE_PROFILES[profile_index % len(LAYOUT_CANDIDATE_PROFILES)]
+        x_scale, y_scale = profiles[profile_index % len(profiles)]
         x_delta = 1.0 + (x_scale - 1.0) * 0.5
         y_delta = 1.0 + (y_scale - 1.0) * 0.5
         variants.append(
@@ -292,6 +317,23 @@ def _build_layout_candidates(settings: LayoutSettings, candidate_count: int) -> 
     return variants
 
 
+def _ordered_layout_profiles(workflow: Workflow) -> list[tuple[float, float]]:
+    profiles = list(LAYOUT_CANDIDATE_PROFILES)
+    width, height = _workflow_extent(workflow)
+    ratio = width / max(1.0, height)
+
+    if ratio >= LAYOUT_WIDE_WORKFLOW_RATIO:
+        profiles.sort(key=lambda profile: (profile[0] >= 1.0, abs(profile[0] - 1.0), abs(profile[1] - 1.0)))
+        return profiles
+
+    if ratio <= LAYOUT_TALL_WORKFLOW_RATIO:
+        profiles.sort(key=lambda profile: (profile[1] >= 1.0, abs(profile[1] - 1.0), abs(profile[0] - 1.0)))
+        return profiles
+
+    profiles.sort(key=lambda profile: (abs(profile[0] - 1.0) + abs(profile[1] - 1.0), abs(profile[0] - profile[1])))
+    return profiles
+
+
 def _resolve_layout_candidate_count(workflow: Workflow) -> int:
     node_count = len(workflow.nodes)
     if node_count <= LAYOUT_SMALL_WORKFLOW_LIMIT:
@@ -299,6 +341,11 @@ def _resolve_layout_candidate_count(workflow: Workflow) -> int:
     if node_count <= LAYOUT_LARGE_WORKFLOW_LIMIT:
         return LAYOUT_CANDIDATE_MID
     return LAYOUT_CANDIDATE_MAX
+
+
+def _workflow_extent(workflow: Workflow) -> tuple[float, float]:
+    left, top, right, bottom = _workflow_bounds(workflow)
+    return max(0.0, right - left), max(0.0, bottom - top)
 
 
 def _score_layout_candidate(workflow: Workflow) -> LayoutScore:
