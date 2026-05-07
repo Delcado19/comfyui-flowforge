@@ -2,10 +2,13 @@
 Tests for the layout algorithm.
 """
 
+from copy import deepcopy
+
 from flowforge.model import Node, Link, Group, Workflow
 import pytest
 from flowforge.layout import (
     apply,
+    LayoutSettings,
     _assign_groups,
     _layout_groups_internal,
     _position_groups_globally,
@@ -105,7 +108,7 @@ def test_internal_layout_stages():
     for n in wf.nodes.values():
         wf.groups[0].nodes.append(n)
     
-    _layout_groups_internal(wf)
+    _layout_groups_internal(wf, LayoutSettings())
     
     # Check that nodes were assigned to layers
     # Node 1 should be leftmost, node 4 rightmost
@@ -127,7 +130,7 @@ def test_global_positioning():
         g.nodes.append(n)
         wf.nodes[n.id] = n
     
-    _position_groups_globally(wf)
+    _position_groups_globally(wf, LayoutSettings())
     
     # group2 should still be placed after group1; this layout now prefers Y
     # packing, but can start a new column if the packed height budget is full.
@@ -150,7 +153,7 @@ def test_bounding_box_update():
     wf.nodes[1] = n1
     wf.nodes[2] = n2
     
-    _update_bounding_boxes(wf)
+    _update_bounding_boxes(wf, LayoutSettings())
     
     b = group.bounding
     # Should encompass both nodes plus padding
@@ -211,6 +214,32 @@ def test_decorative_nodes_move_to_left_column():
     assert markdown.y < note.y
     assert regular.x > markdown.x
     logger.info("Decorative node placement test passed")
+
+
+def test_spacing_setting_expands_layout_and_group():
+    logger.info("Testing configurable spacing")
+    wf = Workflow()
+    group = Group(id=1, name="load", bounding=[0, 0, 1000, 1000])
+    wf.groups = [group]
+
+    n1 = Node(id=1, type="LoadImage", x=100, y=100, size=[200, 100], mode=0, order=0)
+    n2 = Node(id=2, type="PreviewImage", x=500, y=200, size=[200, 100], mode=0, order=1)
+    wf.nodes[1] = n1
+    wf.nodes[2] = n2
+    link = Link(id=10, source=1, source_port=0, target=2, target_port=0, type="IMAGE")
+    wf.links[10] = link
+    n1.output_links.append(10)
+    n2.input_links.append(10)
+
+    compact = apply(deepcopy(wf), LayoutSettings(min_node_distance=40))
+    roomy = apply(deepcopy(wf), LayoutSettings(min_node_distance=160))
+
+    compact_dx = compact.nodes[2].x - compact.nodes[1].x
+    roomy_dx = roomy.nodes[2].x - roomy.nodes[1].x
+    assert roomy_dx > compact_dx
+    assert roomy.groups[0].bounding[2] >= compact.groups[0].bounding[2]
+    assert roomy.groups[0].bounding[3] >= compact.groups[0].bounding[3]
+    logger.info("Configurable spacing test passed")
 
 
 if __name__ == "__main__":

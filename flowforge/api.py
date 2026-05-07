@@ -10,7 +10,7 @@ from aiohttp import web
 
 from .logger import setup_logger
 from .parser import parse_comfyui_workflow
-from .layout import apply as apply_layout
+from .layout import LayoutSettings, apply as apply_layout
 from .model import Link, Node, Workflow
 from .optimizer import optimize
 
@@ -39,13 +39,15 @@ async def layout_handler(request):
     try:
         data = await request.json()
         logger.info("Received layout request")
-        
+
+        workflow_data, layout_settings = _extract_layout_request(data)
+
         # Parse workflow
-        workflow = parse_comfyui_workflow(data)
+        workflow = parse_comfyui_workflow(workflow_data)
         logger.debug(f"Parsed workflow with {len(workflow.nodes)} nodes")
         
         # Apply layout algorithm
-        layouted = apply_layout(workflow)
+        layouted = apply_layout(workflow, layout_settings)
         
         # Convert back to ComfyUI JSON format
         result = _workflow_to_comfyui_json(layouted)
@@ -133,6 +135,14 @@ def _workflow_to_minimal_json(workflow: Workflow) -> Dict[str, Any]:
         "last_link_id": max(workflow.links.keys()) if workflow.links else 0,
         "revision": 0,
     }
+
+
+def _extract_layout_request(data: Any) -> tuple[Any, LayoutSettings]:
+    if isinstance(data, dict) and "workflow" in data:
+        workflow_data = data["workflow"]
+        return workflow_data, LayoutSettings.from_payload(data.get("layout"))
+
+    return data, LayoutSettings()
 
 
 def _merge_nodes(source_nodes: List[Dict[str, Any]], workflow: Workflow) -> List[Dict[str, Any]]:

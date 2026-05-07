@@ -84,7 +84,7 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 - **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions
 - **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
 - **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, group-aware dragging, and resizable group containers
-- **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks
+- **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus a live minimum-distance control for layout density
 - **Color-Coded Nodes**: Different node types are visually distinguished and rendered with ComfyUI-like widgets
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
 
@@ -120,17 +120,15 @@ Comment nodes (`Note`, `MarkdownNote`, `Label`) carry no dataflow edges and are 
 
 Each group's `bounding` rectangle is reconciled with the final positions of its member nodes plus the group padding. Layout never shrinks a larger existing group rectangle; it only moves the group with its contents or expands it when node content would otherwise fall outside. Groups and ungrouped nodes are packed in vertical columns to use the Y axis before widening the workflow.
 
-### Spacing Defaults
+### Layout Spacing
 
-All spacing is defined as module-level constants in `flowforge/layout.py` and can be adjusted:
+Layout spacing is driven by a single minimum node distance value that scales the node gaps, group gaps, and group padding together.
 
-| Constant        | Default | Description                                             |
-| --------------- | ------- | ------------------------------------------------------- |
-| `NODE_H_GAP`    | 80 px   | Horizontal gap between node columns within a group.     |
-| `NODE_V_GAP`    | 40 px   | Vertical gap between nodes in the same column.          |
-| `GROUP_H_GAP`   | 200 px  | Horizontal gap between group columns.                   |
-| `GROUP_V_GAP`   | 100 px  | Vertical gap between groups stacked in the same column. |
-| `GROUP_PADDING` | 50 px   | Padding inside a group's bounding box.                  |
+| Setting | Default | Range | Description |
+| ------- | ------- | ----- | ----------- |
+| `min_node_distance` | 80 px | 20-200 px | Controls the live layout density in the GUI and the spacing used by the layout algorithm. |
+
+The API accepts a layout wrapper of the form `{"workflow": ..., "layout": {"min_node_distance": 80}}`. Bare workflow JSON remains supported for backwards compatibility.
 
 ---
 

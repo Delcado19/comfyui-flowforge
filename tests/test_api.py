@@ -95,6 +95,45 @@ async def test_layout_endpoint(client):
 
 
 @pytest.mark.asyncio
+async def test_layout_endpoint_accepts_custom_spacing(client):
+    logger.info("Testing /layout endpoint with custom spacing")
+    workflow = deepcopy(SIMPLE_WORKFLOW)
+    workflow["groups"] = [
+        {
+            "id": 7,
+            "title": "Load Model",
+            "bounding": [0, 0, 1000, 1000],
+        }
+    ]
+
+    compact_resp = await client.post("/layout", json=workflow)
+    roomy_resp = await client.post(
+        "/layout",
+        json={
+            "workflow": workflow,
+            "layout": {"min_node_distance": 160},
+        },
+    )
+
+    assert compact_resp.status == 200
+    assert roomy_resp.status == 200
+
+    compact = await compact_resp.json()
+    roomy = await roomy_resp.json()
+
+    compact_node1 = next(n for n in compact["nodes"] if n["id"] == 1)
+    compact_node2 = next(n for n in compact["nodes"] if n["id"] == 2)
+    roomy_node1 = next(n for n in roomy["nodes"] if n["id"] == 1)
+    roomy_node2 = next(n for n in roomy["nodes"] if n["id"] == 2)
+
+    compact_dx = compact_node2["pos"][0] - compact_node1["pos"][0]
+    roomy_dx = roomy_node2["pos"][0] - roomy_node1["pos"][0]
+    assert roomy_dx > compact_dx
+    assert roomy["groups"][0]["bounding"][2] >= compact["groups"][0]["bounding"][2]
+    assert roomy["groups"][0]["bounding"][3] >= compact["groups"][0]["bounding"][3]
+    logger.info("Custom spacing request OK")
+
+
 @pytest.mark.asyncio
 async def test_optimize_endpoint(client):
     logger.info("Testing /optimize endpoint")

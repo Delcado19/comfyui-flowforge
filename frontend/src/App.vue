@@ -1,10 +1,18 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useWorkflowStore } from './stores/useWorkflowStore'
 import ComfyCanvas from './components/ComfyCanvas.vue'
 
 const store = useWorkflowStore()
 const fileInput = ref<HTMLInputElement | null>(null)
+const MIN_NODE_DISTANCE_DEFAULT = 80
+const MIN_NODE_DISTANCE_MIN = 20
+const MIN_NODE_DISTANCE_MAX = 200
+
+const minNodeDistance = ref(MIN_NODE_DISTANCE_DEFAULT)
+
+let layoutTimer: ReturnType<typeof window.setTimeout> | undefined
+let layoutRequestId = 0
 
 function openFile() {
   fileInput.value?.click()
@@ -27,23 +35,54 @@ function onFileSelected(e: Event) {
   reader.readAsText(file)
 }
 
-async function layout() {
+function scheduleLayout(immediate = false) {
   if (!store.workflow) return
 
-  try {
-    const response = await fetch('/layout', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(store.workflow)
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      throw new Error(data.error || 'Layout request failed')
-    }
-    store.loadWorkflow(data)
-  } catch (err) {
-    alert('Layout failed: ' + err)
+  if (layoutTimer !== undefined) {
+    clearTimeout(layoutTimer)
+    layoutTimer = undefined
   }
+
+  const requestId = ++layoutRequestId
+
+  const run = async () => {
+    if (requestId !== layoutRequestId) return
+
+    try {
+      const response = await fetch('/layout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          workflow: store.workflow,
+          layout: {
+            min_node_distance: minNodeDistance.value,
+          },
+        }),
+      })
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || 'Layout request failed')
+      }
+      if (requestId !== layoutRequestId) return
+      store.loadWorkflow(data)
+    } catch (err) {
+      if (requestId !== layoutRequestId) return
+      alert('Layout failed: ' + err)
+    }
+  }
+
+  if (immediate) {
+    void run()
+    return
+  }
+
+  layoutTimer = window.setTimeout(() => {
+    void run()
+  }, 180)
+}
+
+function layout() {
+  scheduleLayout(true)
 }
 
 function save() {
@@ -58,6 +97,12 @@ function save() {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+watch(minNodeDistance, () => {
+  if (Number.isFinite(minNodeDistance.value)) {
+    scheduleLayout()
+  }
+})
 </script>
 
 <template>
@@ -65,6 +110,23 @@ function save() {
     <div class="toolbar">
       <button @click="openFile">Open</button>
       <button @click="layout">Layout</button>
+      <div class="spacing-control">
+        <span>Min distance</span>
+        <input
+          v-model.number="minNodeDistance"
+          type="range"
+          :min="MIN_NODE_DISTANCE_MIN"
+          :max="MIN_NODE_DISTANCE_MAX"
+          step="5"
+        />
+        <input
+          v-model.number="minNodeDistance"
+          type="number"
+          :min="MIN_NODE_DISTANCE_MIN"
+          :max="MIN_NODE_DISTANCE_MAX"
+          step="5"
+        />
+      </div>
       <button @click="save">Save</button>
       <span class="zoom-info">Zoom: {{ Math.round(store.scale * 100) }}%</span>
     </div>
@@ -95,6 +157,7 @@ body {
   padding: 8px;
   background: #222;
   border-bottom: 1px solid #333;
+  align-items: center;
 }
 .toolbar button {
   padding: 6px 12px;
@@ -106,6 +169,25 @@ body {
 }
 .toolbar button:hover {
   background: #444;
+}
+.spacing-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  color: #bbb;
+  font-size: 12px;
+}
+.spacing-control input[type='range'] {
+  width: 220px;
+}
+.spacing-control input[type='number'] {
+  width: 72px;
+  padding: 6px 8px;
+  background: #111;
+  border: 1px solid #444;
+  color: #ddd;
+  border-radius: 4px;
 }
 .zoom-info {
   margin-left: auto;
