@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useWorkflowStore, type ComfyNode, type ComfyPort } from '../stores/useWorkflowStore'
-import { TITLE_HEIGHT, ROW_HEIGHT, SLOT_ROW_OFFSET, WIDGET_GAP, NODE_BOTTOM_PADDING, getNodeDisplayHeight, getNodeSize } from '../utils/nodeGeometry'
+import { TITLE_HEIGHT, ROW_HEIGHT, SLOT_ROW_OFFSET, getNodeDisplayHeight, getNodeSize } from '../utils/nodeGeometry'
+import { getNodeDisplayRows, type DisplayRow } from '../utils/nodeWidgets'
 
 interface Props {
   node: ComfyNode
@@ -31,7 +32,6 @@ const nodeSize = computed<[number, number]>(() => {
 
 const title = computed(() => props.node.title || props.node.type)
 
-const inputs = computed(() => props.node.inputs ?? [])
 const outputs = computed(() => props.node.outputs ?? [])
 const isReroute = computed(() => props.node.type.toLowerCase().includes('reroute'))
 
@@ -71,18 +71,6 @@ const titleStyle = computed(() => ({
   lineHeight: TITLE_HEIGHT + 'px',
 }))
 
-const portRowCount = computed(() => Math.max(inputs.value.length, outputs.value.length, isReroute.value ? 1 : 0))
-const widgetBlockHeight = computed(() => {
-  if (isCollapsed.value || isReroute.value) return 0
-  return widgetRows.value.reduce((total, row) => total + row.height + 4, 0)
-})
-
-const minimumContentHeight = computed(() => {
-  const slotHeight = SLOT_ROW_OFFSET + portRowCount.value * ROW_HEIGHT
-  const widgetHeight = widgetRows.value.length > 0 && !isCollapsed.value && !isReroute.value ? WIDGET_GAP + widgetBlockHeight.value : 0
-  return slotHeight + widgetHeight + NODE_BOTTOM_PADDING
-})
-
 const nodeHeight = computed(() => {
   return getNodeDisplayHeight(props.node)
 })
@@ -94,53 +82,15 @@ const dragPointerId = ref<number | null>(null)
 const dragStart = ref({ x: 0, y: 0 })
 const nodeStart = ref({ x: 0, y: 0 })
 
-interface WidgetRow {
-  name: string
-  value: string
-  kind: 'text' | 'select' | 'toggle' | 'number' | 'compact'
-  height: number
-}
-
-const widgetRows = computed<WidgetRow[]>(() => {
+const displayRows = computed<DisplayRow[]>(() => {
   if (isCollapsed.value || isReroute.value) {
     return []
   }
-
-  const rows: WidgetRow[] = []
-  const values = Array.isArray(props.node.widgets_values) ? props.node.widgets_values : []
-  let widgetIndex = 0
-
-  for (const input of inputs.value) {
-    if (!input.widget) continue
-    const value = values[widgetIndex]
-    rows.push(buildWidgetRow(input, value, widgetIndex))
-    widgetIndex += 1
-  }
-
-  for (let index = widgetIndex; index < values.length; index += 1) {
-    const value = values[index]
-    rows.push({
-      name: `value_${index}`,
-      value: formatWidgetValue(value),
-      kind: inferWidgetKind(value, undefined),
-      height: inferWidgetHeight(value, undefined),
-    })
-  }
-
-  return rows
+  return getNodeDisplayRows(props.node)
 })
 
 const inputRows = computed(() => {
-  return inputs.value.map((input) => {
-    return {
-      input,
-    }
-  })
-})
-
-const fallbackWidgetStart = computed(() => {
-  const slotRows = Math.max(inputs.value.length, outputs.value.length)
-  return SLOT_ROW_OFFSET + slotRows * ROW_HEIGHT + WIDGET_GAP
+  return displayRows.value.filter((row) => row.kind === 'input')
 })
 
 function getPortName(port: ComfyPort): string {
@@ -172,72 +122,9 @@ function slotColor(type: string | undefined): string {
   }
 }
 
-function widgetTopOffset(index: number): number {
-  const previous = widgetRows.value.slice(0, index)
-  return previous.reduce((total, row) => total + row.height + 4, 0)
-}
-
 function rowTop(index: number): string {
   const baseOffset = isReroute.value ? 6 : SLOT_ROW_OFFSET
   return baseOffset + index * ROW_HEIGHT + 'px'
-}
-
-function buildWidgetRow(input: ComfyPort, value: unknown, index: number): WidgetRow {
-  const widget = input.widget ?? {}
-  const name = getWidgetName(input, index)
-  const kind = inferWidgetKind(value, widget)
-  return {
-    name,
-    value: formatWidgetValue(value),
-    kind,
-    height: inferWidgetHeight(value, widget),
-  }
-}
-
-function getWidgetName(input: ComfyPort, index: number): string {
-  const widget = input.widget
-  const widgetName = widget && typeof widget.name === 'string' ? widget.name : ''
-  return widgetName || getPortName(input) || `value_${index}`
-}
-
-function inferWidgetKind(value: unknown, widget: Record<string, unknown> | undefined): WidgetRow['kind'] {
-  const widgetType = typeof widget?.type === 'string' ? widget.type.toLowerCase() : ''
-  if (widgetType.includes('toggle') || widgetType.includes('checkbox') || typeof value === 'boolean') {
-    return 'toggle'
-  }
-  if (widgetType.includes('combo') || widgetType.includes('select') || widgetType.includes('dropdown')) {
-    return 'select'
-  }
-  if (widgetType.includes('number') || widgetType.includes('slider') || typeof value === 'number') {
-    return 'number'
-  }
-  if (widgetType.includes('text') || widgetType.includes('string')) {
-    return isMultilineWidget(value) ? 'text' : 'compact'
-  }
-  return isMultilineWidget(value) ? 'text' : 'compact'
-}
-
-function inferWidgetHeight(value: unknown, widget: Record<string, unknown> | undefined): number {
-  const kind = inferWidgetKind(value, widget)
-  if (kind === 'text') {
-    const text = formatWidgetValue(value)
-    const lines = Math.max(3, text.split(/\r?\n/).length)
-    const estimated = Math.ceil(text.length / 54)
-    return Math.min(180, Math.max(60, Math.max(lines, estimated) * 18 + 10))
-  }
-  return 20
-}
-
-function isMultilineWidget(value: unknown): boolean {
-  const text = formatWidgetValue(value)
-  return text.includes('\n') || text.length > 54
-}
-
-function formatWidgetValue(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
-  return JSON.stringify(value)
 }
 
 function shadeColor(color: string, amount: number): string {
@@ -308,15 +195,15 @@ onUnmounted(() => {
     <div class="node-body" :style="{ height: contentHeight + 'px' }">
       <div
         v-for="(row, index) in inputRows"
-        :key="'input-' + index"
+        :key="row.key"
         class="slot-row input-row"
-        :style="{ top: rowTop(index) }"
+        :style="{ top: row.top + 'px', height: row.height + 'px' }"
       >
         <span
           class="slot-dot input-dot"
-          :style="{ backgroundColor: slotColor(getPortType(row.input)) }"
+          :style="{ backgroundColor: slotColor(getPortType(row.input!)) }"
         ></span>
-        <span class="slot-label">{{ getPortName(row.input) }}</span>
+        <span class="slot-label">{{ row.name }}</span>
       </div>
       <div
         v-for="(output, index) in outputs"
@@ -331,14 +218,14 @@ onUnmounted(() => {
         ></span>
       </div>
       <div
-        v-for="(widget, index) in widgetRows"
-        :key="'widget-' + index"
+        v-for="widget in displayRows.filter((row) => row.kind === 'widget')"
+        :key="widget.key"
         class="widget-row"
-        :class="[`widget-kind-${widget.kind}`]"
-        :style="{ top: fallbackWidgetStart + widgetTopOffset(index) + 'px', height: widget.height + 'px' }"
+        :class="[`widget-kind-${widget.widgetKind}`]"
+        :style="{ top: widget.top + 'px', height: widget.height + 'px' }"
       >
         <span class="widget-name">{{ widget.name }}</span>
-        <span v-if="widget.kind === 'text'" class="widget-text">{{ widget.value }}</span>
+        <span v-if="widget.widgetKind === 'text'" class="widget-text">{{ widget.value }}</span>
         <span v-else class="widget-value">{{ widget.value }}</span>
       </div>
     </div>

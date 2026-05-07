@@ -1,16 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useWorkflowStore, type ComfyNode as WorkflowNode, type ComfyGroup, type Connection } from '../stores/useWorkflowStore'
-import { getNodeDisplaySize } from '../utils/nodeGeometry'
+import { TITLE_HEIGHT, ROW_HEIGHT, SLOT_ROW_OFFSET, REROUTE_SLOT_OFFSET, getNodeDisplaySize, getNodeInputPortY } from '../utils/nodeGeometry'
+import { getVisibleInputPortIndexes } from '../utils/nodeWidgets'
 import ComfyNode from './ComfyNode.vue'
 import ComfyConnection from './ComfyConnection.vue'
 
 const store = useWorkflowStore()
-const TITLE_HEIGHT = 26
-const SLOT_ROW_HEIGHT = 20
-const SLOT_ROW_OFFSET = 8
 const PORT_CENTER_OFFSET = 12
-const REROUTE_SLOT_OFFSET = 6
 
 const canvasRef = ref<HTMLElement | null>(null)
 const minimapRef = ref<HTMLElement | null>(null)
@@ -228,7 +225,9 @@ function getNodesInGroup(group: ComfyGroup) {
 function getPortPosition(node: WorkflowNode, portIndex: number, isOutput: boolean): [number, number] {
   const nodeLeft = node.pos[0]
   const baseOffset = typeof node.type === 'string' && node.type.toLowerCase().includes('reroute') ? REROUTE_SLOT_OFFSET : SLOT_ROW_OFFSET
-  const portY = node.pos[1] + TITLE_HEIGHT + baseOffset + SLOT_ROW_HEIGHT / 2 + portIndex * SLOT_ROW_HEIGHT
+  const portY = isOutput
+    ? node.pos[1] + TITLE_HEIGHT + baseOffset + ROW_HEIGHT / 2 + portIndex * ROW_HEIGHT
+    : node.pos[1] + getNodeInputPortY(node, portIndex)
   const nodeSize = getNodeSize(node)
   
   if (isOutput) {
@@ -256,7 +255,8 @@ function getPortType(port: { type?: unknown }): string {
 
 function getNodePorts(node: WorkflowNode) {
   return {
-    inputs: (node.inputs ?? []).map((input, index) => {
+    inputs: getVisibleInputPortIndexes(node).map((index) => {
+      const input = (node.inputs ?? [])[index]
       const [x, y] = getPortPosition(node, index, false)
       return {
         key: `input-${node.id}-${index}`,

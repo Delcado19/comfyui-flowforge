@@ -17,7 +17,7 @@ The frontend process receives the selected backend port through `FLOWFORGE_API_P
 ## Features
 
 - **ComfyCanvas.vue** - Main canvas with wheel zoom and pan
-- **ComfyNode.vue** - ComfyUI-like node component using workflow dimensions, colors, slots, and widget controls
+- **ComfyNode.vue** - ComfyUI-like node component using workflow dimensions, colors, slots, and widget controls. Widget-backed inputs render on their widget rows, while unconnected widget inputs are not duplicated as separate free sockets.
 - **ComfyConnection.vue** - SVG Bezier curves connecting ports
 - **useWorkflowStore.ts** - Pinia store for full ComfyUI workflow JSON state
 - **Group and Minimap Layers** - Background group regions, draggable group titles, and a minimap for navigation
