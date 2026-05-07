@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { useWorkflowStore } from './stores/useWorkflowStore'
+import { useWorkflowStore, type ComfyNode, type NodeSize } from './stores/useWorkflowStore'
 import ComfyCanvas from './components/ComfyCanvas.vue'
 
 const store = useWorkflowStore()
@@ -15,6 +15,8 @@ const NODE_DISTANCE_MAX = 240
 
 const nodeXDistance = ref(NODE_DISTANCE_DEFAULT)
 const nodeYDistance = ref(NODE_DISTANCE_DEFAULT)
+const comparisonNodes = ref<ComfyNode[]>([])
+const showComparison = ref(false)
 
 let layoutTimer: ReturnType<typeof window.setTimeout> | undefined
 let layoutRequestId = 0
@@ -42,6 +44,8 @@ function onFileSelected(e: Event) {
       const data = JSON.parse(reader.result as string)
       store.loadWorkflow(data)
       layoutStatus.value = ''
+      comparisonNodes.value = []
+      showComparison.value = false
     } catch (err) {
       alert('Invalid workflow file')
     }
@@ -58,6 +62,7 @@ function scheduleLayout(immediate = false) {
   }
 
   const requestId = ++layoutRequestId
+  const beforeLayout = captureComparisonNodes()
 
   const run = async () => {
     if (requestId !== layoutRequestId) return
@@ -84,6 +89,8 @@ function scheduleLayout(immediate = false) {
         ? `Layout: ${layoutStats.selected_candidate}/${layoutStats.candidate_count} candidates, score ${layoutStats.score.total.toFixed(1)}`
         : 'Layout completed'
       store.loadWorkflow(data)
+      comparisonNodes.value = beforeLayout
+      showComparison.value = beforeLayout.length > 0
     } catch (err) {
       if (requestId !== layoutRequestId) return
       layoutStatus.value = ''
@@ -103,6 +110,11 @@ function scheduleLayout(immediate = false) {
 
 function layout() {
   scheduleLayout(true)
+}
+
+function toggleComparison() {
+  if (comparisonNodes.value.length === 0) return
+  showComparison.value = !showComparison.value
 }
 
 function deleteAllGroups() {
@@ -140,6 +152,20 @@ function parseLayoutStats(raw: string | null) {
   return null
 }
 
+function captureComparisonNodes(): ComfyNode[] {
+  return store.nodes.map((node) => ({
+    ...node,
+    pos: [node.pos[0], node.pos[1]],
+    size: copyNodeSize(node.size),
+  }))
+}
+
+function copyNodeSize(size: NodeSize | undefined): NodeSize | undefined {
+  if (Array.isArray(size)) return [size[0], size[1]]
+  if (size && typeof size === 'object') return { ...size }
+  return size
+}
+
 watch([nodeXDistance, nodeYDistance], () => {
   if (Number.isFinite(nodeXDistance.value) && Number.isFinite(nodeYDistance.value)) {
     scheduleLayout()
@@ -152,6 +178,13 @@ watch([nodeXDistance, nodeYDistance], () => {
     <div class="toolbar">
       <button @click="openFile">Open</button>
       <button @click="layout">Layout</button>
+      <button
+        :class="{ active: showComparison }"
+        :disabled="comparisonNodes.length === 0"
+        @click="toggleComparison"
+      >
+        Compare
+      </button>
       <button :disabled="!(store.workflow?.groups?.length ?? 0)" @click="deleteAllGroups">Clear Groups</button>
       <div class="spacing-control">
         <label class="spacing-row">
@@ -193,7 +226,12 @@ watch([nodeXDistance, nodeYDistance], () => {
       <span v-if="layoutStatus" class="layout-info">{{ layoutStatus }}</span>
       <span class="zoom-info">Zoom: {{ Math.round(store.scale * 100) }}%</span>
     </div>
-    <ComfyCanvas ref="canvasRef" class="canvas" />
+    <ComfyCanvas
+      ref="canvasRef"
+      class="canvas"
+      :comparison-nodes="comparisonNodes"
+      :show-comparison="showComparison"
+    />
     <input ref="fileInput" type="file" accept=".json" @change="onFileSelected" style="display: none" />
   </div>
 </template>
@@ -232,6 +270,11 @@ body {
 }
 .toolbar button:hover {
   background: #444;
+}
+.toolbar button.active {
+  border-color: #6aa8d8;
+  background: #24425c;
+  color: #eef7ff;
 }
 .toolbar button:disabled {
   cursor: default;

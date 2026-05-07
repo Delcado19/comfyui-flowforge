@@ -85,6 +85,7 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 - **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
 - **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, group-aware dragging, resizable group containers, and group creation/deletion controls
 - **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus live X/Y spacing controls for layout density and toolbar buttons to create or clear groups
+- **Before/After Comparison**: Toggle ghost outlines of the previous node positions after a layout run
 - **Color-Coded Nodes**: Different node types are visually distinguished and rendered with ComfyUI-like widgets
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
 

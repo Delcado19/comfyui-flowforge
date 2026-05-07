@@ -26,11 +26,11 @@
 - Added roundtrip-safe workflow serialization.
 - Added metadata-preservation and group-idempotency tests.
 - Published the first source-checkout GitHub release as `v0.1.0`.
+- Added a frontend before/after layout comparison overlay.
 
 ## Open Work
 
 - Keep validating layout behavior against more real ComfyUI workflows before release tags.
-- Improve visual comparison in the frontend.
 - Expand documentation when behavior stabilizes.
 
 ## Notes

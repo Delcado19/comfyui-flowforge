@@ -23,11 +23,13 @@ The frontend process receives the selected backend port through `FLOWFORGE_API_P
 - **Group and Minimap Layers** - Background group regions, draggable group titles, per-group delete buttons, resize handles, and a minimap for navigation
 - **Toolbar Spacing Control** - Live X/Y sliders plus numeric fields that re-run `/layout` with the current spacing values; the backend evaluates multiple spacing candidates, keeps the most compact result, and reports the selected candidate in a response header
 - **Toolbar Group Actions** - Button to clear all groups in the workflow; drag-based group creation starts from the canvas overlay controls
+- **Before/After Layout Comparison** - After a layout run, the canvas can show the previous node positions as ghost outlines behind the current layout
 
 ## Usage
 
 - **Open** - Load a workflow JSON file
 - **Layout** - POST the full workflow JSON to `/layout` for auto-layout
+- **Compare** - Toggle the previous node positions after a layout run
 - **Save** - Download the current full workflow JSON
 
 Canvas navigation:

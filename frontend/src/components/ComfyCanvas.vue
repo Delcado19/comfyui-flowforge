@@ -7,6 +7,13 @@ import ComfyNode from './ComfyNode.vue'
 import ComfyConnection from './ComfyConnection.vue'
 
 const store = useWorkflowStore()
+const props = withDefaults(defineProps<{
+  comparisonNodes?: WorkflowNode[]
+  showComparison?: boolean
+}>(), {
+  comparisonNodes: () => [],
+  showComparison: false,
+})
 const PORT_CENTER_OFFSET = 12
 const GROUP_CONTENT_PADDING = 24
 const MIN_GROUP_WIDTH = 120
@@ -137,6 +144,15 @@ const minimapNodeStyle = computed(() => (node: WorkflowNode) => {
     top: `${(node.pos[1] - content.minY) * scale + offset.y}px`,
     width: `${Math.max(6, width * scale)}px`,
     height: `${Math.max(6, height * scale)}px`,
+  }
+})
+const comparisonNodeStyle = computed(() => (node: WorkflowNode) => {
+  const [width, height] = getNodeDisplaySize(node)
+  return {
+    left: `${node.pos[0]}px`,
+    top: `${node.pos[1]}px`,
+    width: `${width}px`,
+    height: `${height}px`,
   }
 })
 
@@ -828,6 +844,15 @@ watch(
         ></div>
       </div>
     </div>
+    <div v-if="props.showComparison" class="comparison-layer" :style="canvasStyle">
+      <div
+        v-for="node in props.comparisonNodes"
+        :key="`compare-${node.id}`"
+        class="comparison-node"
+        :class="{ 'is-reroute': typeof node.type === 'string' && node.type.toLowerCase().includes('reroute') }"
+        :style="comparisonNodeStyle(node)"
+      ></div>
+    </div>
     <div class="nodes-container" :style="canvasStyle">
       <ComfyNode
         v-for="node in store.nodes"
@@ -971,6 +996,22 @@ watch(
   inset: 0;
   pointer-events: none;
   z-index: 0;
+}
+.comparison-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.comparison-node {
+  position: absolute;
+  box-sizing: border-box;
+  border: 1px dashed rgb(255 214 102 / 75%);
+  border-radius: 4px;
+  background: rgb(255 214 102 / 8%);
+}
+.comparison-node.is-reroute {
+  border-radius: 999px;
 }
 .workflow-group {
   position: absolute;
