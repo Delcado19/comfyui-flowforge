@@ -127,6 +127,14 @@ def test_optimize_fanout():
     assert len(set_node.input_links) == 1
     assert set_node.input_links[0] in optimized.links
     assert optimized.links[set_node.input_links[0]].source == 1
+    assert set_node.x > optimized.nodes[1].x
+
+    target_centers = [
+        optimized.nodes[target_id].y + optimized.nodes[target_id].size[1] / 2
+        for target_id in (2, 3, 4)
+    ]
+    expected_center_y = sorted(target_centers)[len(target_centers) // 2]
+    assert set_node.y + set_node.size[1] / 2 == pytest.approx(expected_center_y)
     
     # Each GetNode connected to its consumer
     for get_node in get_nodes:

@@ -18,6 +18,11 @@ OPTIMIZE_TYPES = {"MODEL", "CLIP", "VAE"}
 NODE_INSERTION_COST = 40.0
 LINK_INSERTION_COST = 4.0
 HUB_LINK_COST_FACTOR = 0.25
+HUB_NODE_WIDTH = 160.0
+HUB_NODE_HEIGHT = 40.0
+HUB_NODE_GAP = 80.0
+FANOUT_SPAN_COST_FACTOR = 0.2
+HUB_SPAN_COST_FACTOR = 0.05
 
 
 def optimize(workflow: Workflow) -> Workflow:
@@ -36,7 +41,8 @@ def optimize(workflow: Workflow) -> Workflow:
         key = (link.source, link.source_port)
         port_links.setdefault(key, []).append(link)
     
-    # Find (node, port) where the output type is optimizable and fanout >= 2
+    # Find (node, port) where the output type is optimizable and fanout >= 2.
+    # Rank candidates by their estimated savings so the biggest win is applied first.
     optimization_targets = []
     for (src_id, src_port), links in port_links.items():
         src_node = new_workflow.nodes.get(src_id)
@@ -55,12 +61,19 @@ def optimize(workflow: Workflow) -> Workflow:
         # Check that at least one traversed link has an optimizable type.
         traversed_links = [new_workflow.links[link_id] for link_id in traversed_link_ids if link_id in new_workflow.links]
         if any(link.type in OPTIMIZE_TYPES for link in traversed_links):
-            optimization_targets.append((src_node, src_port))
+            current_cost = _current_graph_cost(new_workflow, traversed_link_ids, terminal_links)
+            optimized_cost = _estimated_rewrite_cost(new_workflow, src_node, terminal_links)
+            if optimized_cost < current_cost:
+                optimization_targets.append(
+                    (current_cost - optimized_cost, src_node, src_port)
+                )
+
+    optimization_targets.sort(key=lambda item: (-item[0], item[1].id, item[2]))
     
     logger.info(f"Found {len(optimization_targets)} node output ports to optimize")
     
     # Apply optimizations (each for a specific source node + output port)
-    for src_node, src_port in optimization_targets:
+    for _, src_node, src_port in optimization_targets:
         current_links = [
             link
             for link in new_workflow.links.values()
@@ -81,7 +94,7 @@ def optimize(workflow: Workflow) -> Workflow:
         ):
             continue
 
-        current_cost = _current_graph_cost(new_workflow, current_traversed)
+        current_cost = _current_graph_cost(new_workflow, current_traversed, current_terminals)
         optimized_cost = _estimated_rewrite_cost(new_workflow, src_node, current_terminals)
         logger.debug(
             "Cost check for %s:%s - current=%.2f optimized=%.2f",
@@ -119,6 +132,8 @@ def _replace_port_with_set_get(
     if not link_type:
         logger.warning(f"No link type for node {src_node.id} port {src_port}, skipping")
         return
+
+    set_x, set_y = _set_node_position(workflow, src_node, terminal_links)
     
     # Create a SetNode to replace the fanout
     set_node_id = src_node.id + 1000000  # Ensure unique high IDs
@@ -129,9 +144,9 @@ def _replace_port_with_set_get(
     set_node = Node(
         id=set_node_id,
         type="SetNode",
-        x=src_node.x + 200,
-        y=src_node.y,
-        size=[160, 40],  # approximate
+        x=set_x,
+        y=set_y,
+        size=[HUB_NODE_WIDTH, HUB_NODE_HEIGHT],
         mode=0,
         order=0,
         widgets_values=[f"opt_{src_node.id}_{src_port}"]
@@ -167,12 +182,13 @@ def _replace_port_with_set_get(
         get_node_id = target_id + 2000000
         while get_node_id in workflow.nodes:
             get_node_id += 1
+        get_x, get_y = _get_node_position(target_node)
         get_node = Node(
             id=get_node_id,
             type="GetNode",
-            x=target_node.x - 200,
-            y=target_node.y,
-            size=[160, 40],
+            x=get_x,
+            y=get_y,
+            size=[HUB_NODE_WIDTH, HUB_NODE_HEIGHT],
             mode=0,
             order=0,
             widgets_values=[f"opt_{src_node.id}_{src_port}"]
@@ -308,27 +324,33 @@ def _is_reroute_node(node: Node | None) -> bool:
     return bool(node and isinstance(node.type, str) and "reroute" in node.type.lower())
 
 
-def _current_graph_cost(workflow: Workflow, traversed_link_ids: set[int]) -> float:
+def _current_graph_cost(
+    workflow: Workflow,
+    traversed_link_ids: set[int],
+    terminal_links: List[Link],
+) -> float:
     cost = 0.0
     for link_id in traversed_link_ids:
         link = workflow.links.get(link_id)
         if not link:
             continue
         cost += _link_cost(workflow, link) + LINK_INSERTION_COST
+    cost += _fanout_vertical_span(workflow, terminal_links) * FANOUT_SPAN_COST_FACTOR
     return cost
 
 
 def _estimated_rewrite_cost(workflow: Workflow, src_node: Node, terminal_links: List[Link]) -> float:
-    set_node = _synthetic_set_node(src_node)
+    set_node = _synthetic_set_node(workflow, src_node, terminal_links)
     cost = NODE_INSERTION_COST
     cost += _point_distance(_node_center(src_node), _node_center(set_node)) + LINK_INSERTION_COST
+    cost += _fanout_vertical_span(workflow, terminal_links) * HUB_SPAN_COST_FACTOR
 
     for terminal_link in terminal_links:
         target_node = workflow.nodes.get(terminal_link.target)
         if target_node is None:
             continue
 
-        get_node = _synthetic_get_node(src_node, target_node)
+        get_node = _synthetic_get_node(target_node)
         cost += NODE_INSERTION_COST
         cost += _point_distance(_node_center(set_node), _node_center(get_node)) * HUB_LINK_COST_FACTOR + LINK_INSERTION_COST
         cost += _point_distance(_node_center(get_node), _node_center(target_node)) + LINK_INSERTION_COST
@@ -336,23 +358,25 @@ def _estimated_rewrite_cost(workflow: Workflow, src_node: Node, terminal_links: 
     return cost
 
 
-def _synthetic_set_node(src_node: Node) -> Node:
+def _synthetic_set_node(workflow: Workflow, src_node: Node, terminal_links: List[Link]) -> Node:
+    set_x, set_y = _set_node_position(workflow, src_node, terminal_links)
     return Node(
         id=-1,
         type="SetNode",
-        x=src_node.x + 200,
-        y=src_node.y,
-        size=[160, 40],
+        x=set_x,
+        y=set_y,
+        size=[HUB_NODE_WIDTH, HUB_NODE_HEIGHT],
     )
 
 
-def _synthetic_get_node(src_node: Node, target_node: Node) -> Node:
+def _synthetic_get_node(target_node: Node) -> Node:
+    get_x, get_y = _get_node_position(target_node)
     return Node(
         id=-1,
         type="GetNode",
-        x=target_node.x - 200,
-        y=target_node.y,
-        size=[160, 40],
+        x=get_x,
+        y=get_y,
+        size=[HUB_NODE_WIDTH, HUB_NODE_HEIGHT],
     )
 
 
@@ -372,3 +396,51 @@ def _link_cost(workflow: Workflow, link: Link) -> float:
     if source_node is None or target_node is None:
         return 0.0
     return _point_distance(_node_center(source_node), _node_center(target_node))
+
+
+def _set_node_position(workflow: Workflow, src_node: Node, terminal_links: List[Link]) -> tuple[float, float]:
+    anchor_y = _fanout_anchor_y(workflow, terminal_links)
+    return src_node.x + _node_width(src_node) + HUB_NODE_GAP, anchor_y - HUB_NODE_HEIGHT / 2
+
+
+def _get_node_position(target_node: Node) -> tuple[float, float]:
+    return (
+        target_node.x - HUB_NODE_WIDTH - HUB_NODE_GAP,
+        _node_center(target_node)[1] - HUB_NODE_HEIGHT / 2,
+    )
+
+
+def _fanout_anchor_y(workflow: Workflow, terminal_links: List[Link]) -> float:
+    target_centers: List[float] = []
+    for terminal_link in terminal_links:
+        target_node = workflow.nodes.get(terminal_link.target)
+        if target_node is not None:
+            target_centers.append(_node_center(target_node)[1])
+
+    if not target_centers:
+        return 0.0
+
+    target_centers.sort()
+    middle = len(target_centers) // 2
+    if len(target_centers) % 2:
+        return target_centers[middle]
+    return (target_centers[middle - 1] + target_centers[middle]) / 2.0
+
+
+def _fanout_vertical_span(workflow: Workflow, terminal_links: List[Link]) -> float:
+    target_centers: List[float] = []
+    for terminal_link in terminal_links:
+        target_node = workflow.nodes.get(terminal_link.target)
+        if target_node is not None:
+            target_centers.append(_node_center(target_node)[1])
+
+    if len(target_centers) < 2:
+        return 0.0
+
+    return max(target_centers) - min(target_centers)
+
+
+def _node_width(node: Node) -> float:
+    if node.size and len(node.size) >= 1 and node.size[0] > 0:
+        return float(node.size[0])
+    return 200.0
