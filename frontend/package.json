@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node ./scripts/vite-dev.mjs",
+    "build": "node ./scripts/vite-build.mjs",
     "preview": "vite preview",
     "typecheck": "vue-tsc --noEmit"
   },

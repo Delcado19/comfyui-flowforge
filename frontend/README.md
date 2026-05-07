@@ -13,6 +13,7 @@ Open browser to http://localhost:5173 for direct Vite development.
 
 The repository-level launcher `uv run flowforge-gui` starts the backend API and either serves `frontend/dist` or starts the Vite development server. It opens the selected local frontend URL and automatically falls back from port 5173 when the port is unavailable. Windows users can double-click `start-flowforge.bat`; Linux users can run `sh start-flowforge.sh`.
 The frontend process receives the selected backend port through `FLOWFORGE_API_PORT`, so local dev and the packaged launcher both talk to the same API instance.
+The `dev` and `build` scripts run Vite through the JavaScript API with the local shared config, which keeps builds independent from unrelated TypeScript config files in parent directories.
 
 ## Features
 
