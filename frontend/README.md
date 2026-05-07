@@ -22,7 +22,7 @@ The frontend process receives the selected backend port through `FLOWFORGE_API_P
 - **useWorkflowStore.ts** - Pinia store for full ComfyUI workflow JSON state
 - **Group and Minimap Layers** - Background group regions, draggable group titles, per-group delete buttons, resize handles, and a minimap for navigation
 - **Toolbar Spacing Control** - Live X/Y sliders plus numeric fields that re-run `/layout` with the current spacing values; the backend evaluates multiple spacing candidates and keeps the most compact result
-- **Toolbar Group Actions** - Buttons to start drag-based group creation or clear all groups in the workflow
+- **Toolbar Group Actions** - Button to clear all groups in the workflow; drag-based group creation starts from the canvas overlay controls
 
 ## Usage
 
@@ -34,7 +34,7 @@ Canvas navigation:
 
 - Mouse wheel zooms smoothly around the cursor position.
 - Drag the canvas background with the left mouse button to pan the workflow.
-- Click `+ Group`, drag on empty canvas space to define a group rectangle, and enter a title when prompted.
+- Use the canvas group creation control to drag on empty canvas space, define a group rectangle, and enter a title when prompted.
 - Drag a group title to move the group and all nodes currently inside it.
 - Click the group delete button to remove a single group.
 - Drag a group edge or corner to resize the group. Resize constraints keep contained nodes inside the group rectangle.

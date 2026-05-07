@@ -6,7 +6,6 @@ import ComfyCanvas from './components/ComfyCanvas.vue'
 const store = useWorkflowStore()
 const fileInput = ref<HTMLInputElement | null>(null)
 const canvasRef = ref<{
-  beginGroupCreation: () => void
   deleteAllGroups: () => void
 } | null>(null)
 const NODE_DISTANCE_DEFAULT = 80
@@ -91,10 +90,6 @@ function layout() {
   scheduleLayout(true)
 }
 
-function createGroup() {
-  canvasRef.value?.beginGroupCreation()
-}
-
 function deleteAllGroups() {
   canvasRef.value?.deleteAllGroups()
 }
@@ -124,7 +119,6 @@ watch([nodeXDistance, nodeYDistance], () => {
     <div class="toolbar">
       <button @click="openFile">Open</button>
       <button @click="layout">Layout</button>
-      <button :disabled="!store.workflow" @click="createGroup">+ Group</button>
       <button :disabled="!(store.workflow?.groups?.length ?? 0)" @click="deleteAllGroups">Clear Groups</button>
       <div class="spacing-control">
         <label class="spacing-row">
