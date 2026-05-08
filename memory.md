@@ -17,6 +17,7 @@
 - Local workflow validation is repeatable through `uv run python tools/validate_local_workflows.py`.
 - Release readiness is repeatable through `uv run python tools/check_release_ready.py`.
 - Read-only layout quality reporting is repeatable through `uv run python tools/report_layout_quality.py example-workflows`.
+- Layout quality reports include laid-out crossing and right-to-left link-category breakdowns.
 
 ## Completed Work
 
@@ -37,6 +38,7 @@
 - Added layout quality reporting for real workflow folders.
 - Improved linked ungrouped node placement so real-workflow reports show fewer right-to-left links and fewer straight-line crossings in the largest Z-Image outlier.
 - Corrected internal layout layer assignment to use deepest dependency paths, reducing right-to-left links in grouped real workflows.
+- Refined internal grouped layer ordering with adjacent-layer barycenter sweeps, reducing real-workflow straight-line crossings.
 
 ## Open Work
 

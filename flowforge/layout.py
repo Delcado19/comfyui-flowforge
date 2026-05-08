@@ -588,32 +588,10 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
         layer_to_nodes: dict[int, list[int]] = {}
         for nid, layer in layers.items():
             layer_to_nodes.setdefault(layer, []).append(nid)
+        for layer_nodes in layer_to_nodes.values():
+            layer_nodes.sort(key=lambda node_id: (workflow.nodes[node_id].y, workflow.nodes[node_id].x, node_id))
         
-        # Two passes: forward (top to bottom) then backward (bottom to top)
-        for pass_num in range(2):
-            for layer in range(max_layer + 1):
-                if layer not in layer_to_nodes:
-                    continue
-                nodes_in_layer = layer_to_nodes[layer]
-                if len(nodes_in_layer) <= 1:
-                    continue
-                # Compute barycenter score for each node based on neighbours in next/prev layer
-                avg_positions = []
-                for nid in nodes_in_layer:
-                    neighbours = []
-                    if layer < max_layer:
-                        neighbours.extend(adj.get(nid, []))
-                    if layer > 0:
-                        neighbours.extend(rev_adj.get(nid, []))
-                    # Get vertical (Y) positions of neighbour nodes (original y)
-                    if neighbours:
-                        avg = sum(workflow.nodes[n].y for n in neighbours) / len(neighbours)
-                    else:
-                        avg = 0.0
-                    avg_positions.append(avg)
-                # Reorder nodes_in_layer by avg_positions ascending
-                sorted_pairs = sorted(zip(nodes_in_layer, avg_positions), key=lambda p: p[1])
-                layer_to_nodes[layer] = [p[0] for p in sorted_pairs]
+        _minimize_layer_crossings(layer_to_nodes, adj, rev_adj, workflow, max_layer)
         
         # --- 3. Coordinate assignment ---
         # Determine bounding box for group (original or computed)
@@ -670,6 +648,46 @@ def _assign_longest_path_layers(
         layers[node_id] = 0
 
     return layers
+
+
+def _minimize_layer_crossings(
+    layer_to_nodes: dict[int, list[int]],
+    adj: dict[int, list[int]],
+    rev_adj: dict[int, list[int]],
+    workflow: Workflow,
+    max_layer: int,
+) -> None:
+    """Order nodes within layers using forward/backward barycenter sweeps."""
+    sweeps = (
+        range(1, max_layer + 1),
+        range(max_layer - 1, -1, -1),
+    )
+    for layers in sweeps:
+        for layer in layers:
+            nodes_in_layer = layer_to_nodes.get(layer, [])
+            if len(nodes_in_layer) <= 1:
+                continue
+
+            position_by_node = {
+                node_id: position
+                for other_layer in (layer - 1, layer + 1)
+                for position, node_id in enumerate(layer_to_nodes.get(other_layer, []))
+            }
+
+            def sort_key(node_id: int) -> tuple[float, float, float, int]:
+                neighbours = [
+                    neighbour
+                    for neighbour in [*rev_adj.get(node_id, []), *adj.get(node_id, [])]
+                    if neighbour in position_by_node
+                ]
+                if neighbours:
+                    barycenter = sum(position_by_node[neighbour] for neighbour in neighbours) / len(neighbours)
+                else:
+                    barycenter = float("inf")
+                node = workflow.nodes[node_id]
+                return (barycenter, node.y, node.x, node_id)
+
+            layer_to_nodes[layer] = sorted(nodes_in_layer, key=sort_key)
 
 
 # ---------------------------------------------------------------------------

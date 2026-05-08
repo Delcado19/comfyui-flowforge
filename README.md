@@ -107,7 +107,7 @@ A directed graph is built between groups: a group A gets an edge to group B when
 Within each group, independently:
 
 1. **Layer assignment** — each node receives a layer number equal to the longest path from any source node to it (`layer = max(layer[predecessor]) + 1`, with sources at layer 0). Uses a topological sort; nodes in cycles (rare in valid ComfyUI workflows) fall back to layer 0.
-2. **Crossing minimisation** — nodes within each layer are reordered using the _barycenter heuristic_: each node's score is the average position of its neighbours in the adjacent layer. Two passes are run (forward then backward) to reduce edge crossings.
+2. **Crossing minimisation** — nodes within each layer are reordered using the _barycenter heuristic_: each node's score is the average position of its neighbours in the adjacent layer's current order. Two passes are run (forward then backward) to reduce edge crossings.
 3. **Coordinate assignment** — nodes are placed on a grid: X increases by layer, Y increases by position within the layer. Bypassed nodes (`mode = 4`) are sorted to the end of their layer so they don't interrupt the active flow. The public `layout` operation evaluates several spacing candidates and applies the most compact result, with additional penalties for layouts that become too wide compared to their height or leave large horizontal gaps. Small workflows try 3 candidates, medium workflows 5, and larger workflows 7. Candidate search can stop early once later variants stop improving, and candidate order is biased by the workflow's overall aspect ratio.
 
 ### Phase 4 — Global Positioning
@@ -169,7 +169,7 @@ Release history is tracked in [CHANGELOG.md](CHANGELOG.md). Release and deployme
 GitHub Actions CI runs backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build on `master`, pull requests, and version tags.
 For local maintainer validation against read-only ComfyUI UI workflows, run `uv run python tools/validate_local_workflows.py`.
 For release readiness, run `uv run python tools/check_release_ready.py`; add `--tag vX.Y.Z --github` after tagging and publishing to verify remote refs, the GitHub Release, and Actions.
-For read-only layout quality metrics across workflow folders, run `uv run python tools/report_layout_quality.py example-workflows`.
+For read-only layout quality metrics across workflow folders, run `uv run python tools/report_layout_quality.py example-workflows`. The report includes aggregate crossing/right-to-left counts and link-category breakdowns for the laid-out result.
 
 ---
 

@@ -28,10 +28,11 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - Layout spacing is parameterized through `LayoutSettings(node_x_distance, node_y_distance)`. The GUI exposes live X and Y controls in the 20-240 px range. Horizontal gap, vertical gap, group spacing, and padding all derive from those axis values. The public layout pass evaluates a dynamic candidate count by workflow size: 3 for small graphs, 5 for medium graphs, and 7 for larger ones. It keeps the best compactness score, with extra penalties for layouts that stretch too far in X relative to Y or leave large horizontal gaps, and candidate search can stop early once the score stops improving. Candidate order is biased by the workflow aspect ratio. The API exposes the selected candidate through `X-FlowForge-Layout-Stats` for the UI.
 - The GUI exposes group CRUD controls: start drag-based group creation from the canvas, delete a single group from the canvas, and clear all groups from the toolbar. The toolbar no longer has a dedicated `+ Group` button.
 - Linked ungrouped nodes are positioned by local dataflow layers before vertical placement, instead of being ordered only by original Y position.
+- Internal grouped node ordering uses forward/backward barycenter sweeps against adjacent layer order to reduce crossings.
 - FlowForge works on UI workflow JSON, not API prompt JSON.
 - Layout should preserve all unknown top-level and node-level fields.
 - Local UI workflow roundtrip validation is available with `uv run python tools/validate_local_workflows.py`.
-- Read-only layout quality reporting is available with `uv run python tools/report_layout_quality.py example-workflows`.
+- Read-only layout quality reporting is available with `uv run python tools/report_layout_quality.py example-workflows`; it includes aggregate crossing/right-to-left metrics and laid-out link-category breakdowns.
 
 ## Development Rules
 

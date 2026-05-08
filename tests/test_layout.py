@@ -17,6 +17,7 @@ from flowforge.layout import (
     _score_layout_candidate,
     _resolve_layout_candidate_count,
     _assign_longest_path_layers,
+    _minimize_layer_crossings,
     _update_bounding_boxes,
 )
 from flowforge.logger import setup_logger
@@ -149,6 +150,21 @@ def test_longest_path_layer_assignment_uses_deepest_dependency():
     assert layers[4] == 2
     assert layers[5] == 3
     logger.info("Longest-path layer assignment test passed")
+
+
+def test_layer_crossing_minimization_uses_adjacent_layer_order():
+    logger.info("Testing internal layer crossing minimization")
+    wf = Workflow()
+    for node_id, y in [(1, 0), (2, 200), (3, 0), (4, 200)]:
+        wf.nodes[node_id] = Node(id=node_id, type=f"Node{node_id}", x=0, y=y, size=[100, 60])
+    layer_to_nodes = {0: [1, 2], 1: [3, 4]}
+    adj = {1: [4], 2: [3], 3: [], 4: []}
+    rev_adj = {1: [], 2: [], 3: [2], 4: [1]}
+
+    _minimize_layer_crossings(layer_to_nodes, adj, rev_adj, wf, max_layer=1)
+
+    assert layer_to_nodes[1] == [4, 3]
+    logger.info("Internal layer crossing minimization test passed")
 
 
 def test_global_positioning():

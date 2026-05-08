@@ -37,6 +37,8 @@ class WorkflowQualityReport:
     original: GeometryMetrics
     laid_out: GeometryMetrics
     moved_nodes: int
+    laid_out_crossing_categories: dict[str, int] = field(default_factory=dict)
+    laid_out_right_to_left_categories: dict[str, int] = field(default_factory=dict)
     layout_candidate_count: int | None = None
     selected_layout_candidate: int | None = None
     layout_score: float | None = None
@@ -130,6 +132,8 @@ def build_workflow_quality_report(data: dict[str, Any], path: str = "<memory>") 
         original=original_metrics,
         laid_out=laid_out_metrics,
         moved_nodes=_count_moved_nodes(data, laid_out_data),
+        laid_out_crossing_categories=_count_crossing_categories(data, laid_out_data),
+        laid_out_right_to_left_categories=_count_right_to_left_categories(data, laid_out_data),
         layout_candidate_count=_layout_candidate_count(layout_report),
         selected_layout_candidate=_selected_layout_candidate(layout_report),
         layout_score=_layout_score(layout_report),
@@ -152,6 +156,12 @@ def summarize_quality_text(summary: WorkflowQualitySummary, *, top: int = 10) ->
         laid_out_crossings = sum(report.laid_out.link_crossings for report in summary.reports)
         original_rtl = sum(report.original.right_to_left_links for report in summary.reports)
         laid_out_rtl = sum(report.laid_out.right_to_left_links for report in summary.reports)
+        crossing_categories = _merge_category_counts(
+            report.laid_out_crossing_categories for report in summary.reports
+        )
+        rtl_categories = _merge_category_counts(
+            report.laid_out_right_to_left_categories for report in summary.reports
+        )
         lines.extend(
             [
                 f"Total nodes: {total_nodes}",
@@ -160,6 +170,14 @@ def summarize_quality_text(summary: WorkflowQualitySummary, *, top: int = 10) ->
                 f"Right-to-left links: {original_rtl} -> {laid_out_rtl}",
             ]
         )
+        if crossing_categories:
+            lines.append("Top laid-out crossing categories:")
+            for name, count in _top_category_counts(crossing_categories, top=5):
+                lines.append(f"- {name}: {count}")
+        if rtl_categories:
+            lines.append("Top laid-out right-to-left categories:")
+            for name, count in _top_category_counts(rtl_categories, top=5):
+                lines.append(f"- {name}: {count}")
         largest = sorted(summary.reports, key=lambda item: item.laid_out.area, reverse=True)[:top]
         if largest:
             lines.append(f"Largest laid-out workflows (top {len(largest)}):")
@@ -282,6 +300,88 @@ def _count_link_crossings(data: dict[str, Any], centers: dict[int, tuple[float, 
     return crossings
 
 
+def _count_crossing_categories(original: dict[str, Any], laid_out: dict[str, Any]) -> dict[str, int]:
+    centers = _node_centers(laid_out)
+    categories = _link_categories(original)
+    segments: list[tuple[int, int, str, tuple[float, float], tuple[float, float]]] = []
+    for source, target in _link_node_pairs(laid_out):
+        if source not in centers or target not in centers:
+            continue
+        category = categories.get((source, target), "unknown")
+        segments.append((source, target, category, centers[source], centers[target]))
+
+    counts: dict[str, int] = {}
+    for index, first in enumerate(segments):
+        for second in segments[index + 1 :]:
+            if first[0] in second[:2] or first[1] in second[:2]:
+                continue
+            if _segments_intersect(first[3], first[4], second[3], second[4]):
+                name = " x ".join(sorted((first[2], second[2])))
+                counts[name] = counts.get(name, 0) + 1
+    return counts
+
+
+def _count_right_to_left_categories(original: dict[str, Any], laid_out: dict[str, Any]) -> dict[str, int]:
+    centers = _node_centers(laid_out)
+    categories = _link_categories(original)
+    counts: dict[str, int] = {}
+    for source, target in _link_node_pairs(laid_out):
+        if source not in centers or target not in centers:
+            continue
+        if centers[target][0] < centers[source][0]:
+            category = categories.get((source, target), "unknown")
+            counts[category] = counts.get(category, 0) + 1
+    return counts
+
+
+def _link_categories(data: dict[str, Any]) -> dict[tuple[int, int], str]:
+    node_groups = _node_group_membership(data)
+    categories: dict[tuple[int, int], str] = {}
+    for source, target in _link_node_pairs(data):
+        source_group = node_groups.get(source)
+        target_group = node_groups.get(target)
+        if source_group is None and target_group is None:
+            category = "ungrouped->ungrouped"
+        elif source_group is None:
+            category = "ungrouped->group"
+        elif target_group is None:
+            category = "group->ungrouped"
+        elif source_group == target_group:
+            category = "within_group"
+        else:
+            category = "group->group"
+        categories[(source, target)] = category
+    return categories
+
+
+def _node_group_membership(data: dict[str, Any]) -> dict[int, int | None]:
+    memberships: dict[int, int | None] = {}
+    groups = data.get("groups", [])
+    nodes = data.get("nodes", [])
+    if not isinstance(nodes, list):
+        return memberships
+
+    group_boxes: list[tuple[int, tuple[float, float, float, float]]] = []
+    if isinstance(groups, list):
+        for group_index, group in enumerate(groups):
+            if not isinstance(group, dict):
+                continue
+            group_id = group.get("id", group_index)
+            group_boxes.append((int(group_id), _box(group.get("bounding", [0.0, 0.0, 0.0, 0.0]))))
+
+    for node in nodes:
+        if not isinstance(node, dict) or "id" not in node:
+            continue
+        node_id = int(node["id"])
+        x, y = _point(node.get("pos", [0.0, 0.0]))
+        memberships[node_id] = None
+        for group_id, (gx, gy, width, height) in group_boxes:
+            if gx <= x <= gx + width and gy <= y <= gy + height:
+                memberships[node_id] = group_id
+                break
+    return memberships
+
+
 def _segments_intersect(
     a: tuple[float, float],
     b: tuple[float, float],
@@ -311,6 +411,18 @@ def _link_node_pairs(data: dict[str, Any]) -> list[tuple[int, int]]:
         if isinstance(link, list) and len(link) >= 4:
             pairs.append((int(link[1]), int(link[3])))
     return pairs
+
+
+def _merge_category_counts(category_sets) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for categories in category_sets:
+        for name, count in categories.items():
+            totals[name] = totals.get(name, 0) + count
+    return totals
+
+
+def _top_category_counts(categories: dict[str, int], *, top: int) -> list[tuple[str, int]]:
+    return sorted(categories.items(), key=lambda item: item[1], reverse=True)[:top]
 
 
 def _count_moved_nodes(original: dict[str, Any], laid_out: dict[str, Any]) -> int:

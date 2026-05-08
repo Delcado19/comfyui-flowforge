@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 from flowforge.layout_quality import (
     build_quality_summary,
@@ -39,6 +40,8 @@ def test_build_workflow_quality_report_counts_geometry_and_layout_metrics():
     assert report.original.width == 560
     assert report.original.link_crossings == 1
     assert report.moved_nodes > 0
+    assert sum(report.laid_out_crossing_categories.values()) == report.laid_out.link_crossings
+    assert sum(report.laid_out_right_to_left_categories.values()) == report.laid_out.right_to_left_links
     assert report.layout_candidate_count is not None
     assert report.layout_score is not None
 
@@ -66,3 +69,20 @@ def test_summarize_quality_text_includes_aggregate_metrics(tmp_path):
     assert "Checked UI workflows: 1" in text
     assert "Straight-line crossings:" in text
     assert "Largest laid-out workflows" in text
+
+
+def test_summarize_quality_text_includes_category_breakdowns(tmp_path):
+    (tmp_path / "workflow.json").write_text(json.dumps(WORKFLOW), encoding="utf-8")
+    summary = build_quality_summary(tmp_path)
+    summary.reports[0] = replace(
+        summary.reports[0],
+        laid_out_crossing_categories={"within_group x group->group": 2},
+        laid_out_right_to_left_categories={"within_group": 1},
+    )
+
+    text = summarize_quality_text(summary)
+
+    assert "Top laid-out crossing categories:" in text
+    assert "- within_group x group->group: 2" in text
+    assert "Top laid-out right-to-left categories:" in text
+    assert "- within_group: 1" in text
