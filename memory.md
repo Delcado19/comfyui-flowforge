@@ -15,6 +15,7 @@
 - The frontend stores and sends full ComfyUI workflow JSON instead of a separate custom connection format.
 - Documentation maintenance is now governed by `AGENTS.md` and `docs/DOCUMENTATION_MAINTENANCE.md`.
 - Local workflow validation is repeatable through `uv run python tools/validate_local_workflows.py`.
+- Release readiness is repeatable through `uv run python tools/check_release_ready.py`.
 
 ## Completed Work
 
@@ -26,13 +27,16 @@
 - Added roundtrip-safe workflow serialization.
 - Added metadata-preservation and group-idempotency tests.
 - Published the first source-checkout GitHub release as `v0.1.0`.
+- Published the second source-checkout GitHub release as `v0.2.0`.
 - Added a frontend before/after layout comparison overlay.
 - Added GitHub Actions CI for backend, frontend, and fixture workflow validation.
 - Pinned uv development and CI parity to Python 3.12 through `.python-version`.
+- Added `tools/check_release_ready.py` to run local release gates and optional tag/GitHub verification.
+- Validated 95 read-only workflows from `example-workflows` without overwriting originals.
 
 ## Open Work
 
-- Keep validating layout behavior against more real ComfyUI workflows before release tags.
+- Build a layout-quality report for real ComfyUI workflows, beyond roundtrip safety.
 - Expand documentation when behavior stabilizes.
 
 ## Notes
