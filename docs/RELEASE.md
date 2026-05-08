@@ -43,6 +43,12 @@ npm run build
 cd ..
 ```
 
+The same local gate set is available as one command:
+
+```powershell
+uv run python tools/check_release_ready.py
+```
+
 When a release changes workflow parsing, layout, optimizer behavior, or serialization, also run a read-only sanity check against local ComfyUI workflow JSON before tagging.
 
 ```powershell
@@ -60,6 +66,12 @@ git push origin master
 git push origin vX.Y.Z
 gh release create vX.Y.Z --title "vX.Y.Z" --notes "Release notes for vX.Y.Z."
 gh run list --limit 5
+```
+
+After publishing the tag and GitHub Release, run the remote release gate:
+
+```powershell
+uv run python tools/check_release_ready.py --tag vX.Y.Z --github
 ```
 
 Use the matching `CHANGELOG.md` entry as the source for concise GitHub release notes before publishing. Treat the local tag, remote tag, GitHub Release, and GitHub Actions status as separate release states that each need verification. CI runs on `master`, pull requests, and `v*` tags; wait for the relevant run to finish before treating a release as complete.

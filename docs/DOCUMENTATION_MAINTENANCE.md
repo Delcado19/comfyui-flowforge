@@ -62,6 +62,7 @@ Backend:
 uv run pytest
 uv run ruff check .
 uv run mypy flowforge
+uv run python tools/check_release_ready.py
 ```
 
 Frontend:

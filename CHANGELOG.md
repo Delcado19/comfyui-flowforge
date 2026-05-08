@@ -4,6 +4,10 @@ All notable changes to ComfyUI FlowForge are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Release-readiness checker for local gates, workflow validation, tags, GitHub Releases, and GitHub Actions.
+
 ## [0.2.0] - 2026-05-08
 
 ### Added
