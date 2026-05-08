@@ -220,6 +220,26 @@ def test_decorative_nodes_move_to_left_column():
     logger.info("Decorative node placement test passed")
 
 
+def test_ungrouped_nodes_are_ordered_by_dataflow():
+    logger.info("Testing ungrouped dataflow ordering")
+    wf = Workflow()
+    source = Node(id=1, type="Source", x=600, y=200, size=[120, 80])
+    middle = Node(id=2, type="Middle", x=300, y=100, size=[120, 80])
+    target = Node(id=3, type="Target", x=0, y=0, size=[120, 80])
+    wf.nodes = {1: source, 2: middle, 3: target}
+    links = [
+        Link(id=10, source=1, source_port=0, target=2, target_port=0, type="DATA"),
+        Link(id=11, source=2, source_port=0, target=3, target_port=0, type="DATA"),
+    ]
+    for link in links:
+        wf.links[link.id] = link
+
+    result = apply(wf)
+
+    assert result.nodes[1].x <= result.nodes[2].x <= result.nodes[3].x
+    logger.info("Ungrouped dataflow ordering test passed")
+
+
 def test_spacing_setting_expands_layout_and_group():
     logger.info("Testing configurable x/y spacing")
     wf = Workflow()

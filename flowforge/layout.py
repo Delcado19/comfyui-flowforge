@@ -731,19 +731,23 @@ def _position_groups_globally(
 def _position_ungrouped_nodes(
     workflow: Workflow,
     settings: LayoutSettings,
+    nodes: list[Node] | None = None,
     start_x_floor: float = 50.0,
-) -> None:
+) -> float:
     """
     Position nodes that are not part of any group using vertical column packing.
     This keeps the workflow narrower by using the Y axis first.
     """
-    if not workflow.ungrouped_nodes:
-        return
+    nodes_to_position = workflow.ungrouped_nodes if nodes is None else nodes
+    if not nodes_to_position:
+        return start_x_floor
     
-    logger.debug(f"Positioning {len(workflow.ungrouped_nodes)} ungrouped nodes")
+    logger.debug(f"Positioning {len(nodes_to_position)} ungrouped nodes")
+
+    if _has_internal_links(workflow, nodes_to_position):
+        return _position_linked_ungrouped_nodes(workflow, nodes_to_position, settings, start_x_floor)
     
-    # Sort by original y then x to preserve some ordering
-    sorted_nodes = sorted(workflow.ungrouped_nodes, key=lambda n: (n.y, n.x))
+    sorted_nodes = _order_ungrouped_nodes_by_flow(workflow, nodes_to_position)
     
     # Determine start position: if groups exist, start after the rightmost group extent
     max_right = 0.0
@@ -773,6 +777,95 @@ def _position_ungrouped_nodes(
         node.y = current_y
         current_y += node_h + settings.node_v_gap
         column_width = max(column_width, node_w)
+
+    return current_x + column_width
+
+
+def _has_internal_links(workflow: Workflow, nodes: list[Node]) -> bool:
+    node_ids = {node.id for node in nodes}
+    return any(link.source in node_ids and link.target in node_ids for link in workflow.links.values())
+
+
+def _position_linked_ungrouped_nodes(
+    workflow: Workflow,
+    nodes: list[Node],
+    settings: LayoutSettings,
+    start_x: float,
+) -> float:
+    """Position linked ungrouped nodes in dataflow layers."""
+    layers = _ungrouped_flow_layers(workflow, nodes)
+    layer_to_nodes: dict[int, list[Node]] = {}
+    for node in nodes:
+        layer_to_nodes.setdefault(layers[node.id], []).append(node)
+
+    max_node_w = max((_node_visual_width(node) for node in nodes), default=200.0)
+    current_right = start_x
+    for layer in sorted(layer_to_nodes):
+        layer_nodes = sorted(layer_to_nodes[layer], key=lambda node: (_ungrouped_barycenter(workflow, node, layers), node.y, node.x, node.id))
+        x = start_x + layer * (max_node_w + settings.node_h_gap)
+        y = 50.0
+        column_width = 0.0
+        for node in layer_nodes:
+            node.x = x
+            node.y = y
+            y += _node_visual_height(node) + settings.node_v_gap
+            column_width = max(column_width, _node_visual_width(node))
+        current_right = max(current_right, x + column_width)
+
+    return current_right
+
+
+def _order_ungrouped_nodes_by_flow(workflow: Workflow, nodes: list[Node]) -> list[Node]:
+    """Order ungrouped nodes by local dataflow layer, then original position."""
+    layers = _ungrouped_flow_layers(workflow, nodes)
+    return sorted(nodes, key=lambda node: (layers[node.id], node.y, node.x, node.id))
+
+
+def _ungrouped_flow_layers(workflow: Workflow, nodes: list[Node]) -> dict[int, int]:
+    """Return longest-path dataflow layers for a set of ungrouped nodes."""
+    node_ids = {node.id for node in nodes}
+    if len(node_ids) <= 1:
+        return {node.id: 0 for node in nodes}
+
+    adj: dict[int, list[int]] = {node_id: [] for node_id in node_ids}
+    rev_adj: dict[int, list[int]] = {node_id: [] for node_id in node_ids}
+    for link in workflow.links.values():
+        if link.source in node_ids and link.target in node_ids:
+            adj[link.source].append(link.target)
+            rev_adj[link.target].append(link.source)
+
+    layers: dict[int, int] = {}
+    sources = [node_id for node_id in node_ids if not rev_adj[node_id]]
+    queue: list[tuple[int, int]] = [(node_id, 0) for node_id in sources]
+    while queue:
+        node_id, layer = queue.pop(0)
+        if layer <= layers.get(node_id, -1):
+            continue
+        layers[node_id] = layer
+        for target_id in adj[node_id]:
+            queue.append((target_id, layer + 1))
+
+    for node_id in node_ids:
+        layers.setdefault(node_id, 0)
+
+    return layers
+
+
+def _ungrouped_barycenter(workflow: Workflow, node: Node, layers: dict[int, int]) -> float:
+    """Return original-position barycenter for adjacent ungrouped nodes."""
+    neighbours: list[Node] = []
+    for link in workflow.links.values():
+        other_id: int | None = None
+        if link.source == node.id and link.target in layers:
+            other_id = link.target
+        elif link.target == node.id and link.source in layers:
+            other_id = link.source
+        if other_id is not None and other_id in workflow.nodes:
+            neighbours.append(workflow.nodes[other_id])
+
+    if not neighbours:
+        return node.y
+    return sum(neighbour.y for neighbour in neighbours) / len(neighbours)
 
 
 def _position_decorative_nodes_left(workflow: Workflow, settings: LayoutSettings) -> float:

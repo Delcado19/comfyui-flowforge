@@ -113,6 +113,7 @@ Within each group, independently:
 ### Phase 4 — Global Positioning
 
 The content size of every group is known after Phase 3. Column widths are determined by the widest group in each column. Groups are placed left-to-right by column and top-to-bottom within each column. Existing group rectangles are treated as containers: manually enlarged groups keep their width and height, and smaller groups expand only as much as needed to contain their nodes with padding. Node positions are translated from group-local coordinates to global canvas coordinates.
+Linked ungrouped nodes are arranged in dataflow layers before being placed after the grouped layout, so source-to-target chains continue to move left-to-right instead of being packed only by original Y position. Unlinked ungrouped nodes keep compact vertical packing.
 
 ### Phase 5 — Decorative Nodes
 

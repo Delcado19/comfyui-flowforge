@@ -9,6 +9,10 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Release-readiness checker for local gates, workflow validation, tags, GitHub Releases, and GitHub Actions.
 - Read-only layout quality report for real workflow folders.
 
+### Changed
+
+- Arrange linked ungrouped nodes by dataflow layers to reduce long right-to-left wires in real workflows.
+
 ## [0.2.0] - 2026-05-08
 
 ### Added
