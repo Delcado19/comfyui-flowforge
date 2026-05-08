@@ -16,6 +16,7 @@ from flowforge.layout import (
     _position_groups_globally,
     _score_layout_candidate,
     _resolve_layout_candidate_count,
+    _assign_longest_path_layers,
     _update_bounding_boxes,
 )
 from flowforge.logger import setup_logger
@@ -120,6 +121,34 @@ def test_internal_layout_stages():
     assert wf.nodes[2].x < wf.nodes[4].x
     assert wf.nodes[3].x < wf.nodes[4].x
     logger.info("Internal layout test passed")
+
+
+def test_longest_path_layer_assignment_uses_deepest_dependency():
+    logger.info("Testing longest-path layer assignment")
+    node_ids = {1, 2, 3, 4, 5}
+    adj = {
+        1: [2, 3],
+        2: [4],
+        3: [5],
+        4: [5],
+        5: [],
+    }
+    rev_adj = {
+        1: [],
+        2: [1],
+        3: [1],
+        4: [2],
+        5: [3, 4],
+    }
+
+    layers = _assign_longest_path_layers(node_ids, adj, rev_adj)
+
+    assert layers[1] == 0
+    assert layers[2] == 1
+    assert layers[3] == 1
+    assert layers[4] == 2
+    assert layers[5] == 3
+    logger.info("Longest-path layer assignment test passed")
 
 
 def test_global_positioning():

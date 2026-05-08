@@ -579,25 +579,8 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
         
         # --- 1. Layer assignment (longest path from sources) ---
         # Sources: nodes with no incoming edges within the group
-        layers: dict[int, int] = {}
-        # Start with sources at layer 0
-        sources = [nid for nid in node_ids if not rev_adj[nid]]
-        queue: list[tuple[int, int]] = [(nid, 0) for nid in sources]
-        visited: set[int] = set()
-        while queue:
-            nid, layer = queue.pop(0)
-            if nid in visited:
-                continue
-            visited.add(nid)
-            layers[nid] = layer
-            for succ in adj[nid]:
-                # Only increase layer if this path gives a larger value
-                queue.append((succ, layer + 1))
-        
-        # Any node not visited (in a cycle) gets layer 0 per spec
-        for nid in node_ids:
-            if nid not in layers:
-                layers[nid] = 0
+        layers = _assign_longest_path_layers(node_ids, adj, rev_adj)
+        max_layer = max(layers.values()) if layers else 0
         
         # --- 2. Crossing minimisation (Barycenter heuristic) ---
         # Order nodes in each layer by barycenter of neighbours in adjacent layer
@@ -605,7 +588,6 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
         layer_to_nodes: dict[int, list[int]] = {}
         for nid, layer in layers.items():
             layer_to_nodes.setdefault(layer, []).append(nid)
-        max_layer = max(layers.values()) if layers else 0
         
         # Two passes: forward (top to bottom) then backward (bottom to top)
         for pass_num in range(2):
@@ -662,6 +644,32 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
                 node_h = node.size[1] if node.size[1] > 0 else 60
                 node.x = base_x + layer * (max_node_w + settings.node_h_gap)
                 node.y = base_y + col * (node_h + settings.node_v_gap)
+
+
+def _assign_longest_path_layers(
+    node_ids: set[int],
+    adj: dict[int, list[int]],
+    rev_adj: dict[int, list[int]],
+) -> dict[int, int]:
+    """Assign DAG nodes to their longest-path layer; cyclic leftovers use 0."""
+    indegree = {node_id: len(rev_adj[node_id]) for node_id in node_ids}
+    layers: dict[int, int] = {node_id: 0 for node_id in node_ids if indegree[node_id] == 0}
+    queue = [node_id for node_id in node_ids if indegree[node_id] == 0]
+    processed: set[int] = set()
+
+    while queue:
+        node_id = queue.pop(0)
+        processed.add(node_id)
+        for target_id in adj[node_id]:
+            layers[target_id] = max(layers.get(target_id, 0), layers[node_id] + 1)
+            indegree[target_id] -= 1
+            if indegree[target_id] == 0:
+                queue.append(target_id)
+
+    for node_id in node_ids - processed:
+        layers[node_id] = 0
+
+    return layers
 
 
 # ---------------------------------------------------------------------------

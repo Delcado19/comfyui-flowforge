@@ -36,6 +36,7 @@
 - Validated 95 read-only workflows from `example-workflows` without overwriting originals.
 - Added layout quality reporting for real workflow folders.
 - Improved linked ungrouped node placement so real-workflow reports show fewer right-to-left links and fewer straight-line crossings in the largest Z-Image outlier.
+- Corrected internal layout layer assignment to use deepest dependency paths, reducing right-to-left links in grouped real workflows.
 
 ## Open Work
 

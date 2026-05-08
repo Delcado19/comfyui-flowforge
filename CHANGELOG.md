@@ -12,6 +12,7 @@ All notable changes to ComfyUI FlowForge are documented here.
 ### Changed
 
 - Arrange linked ungrouped nodes by dataflow layers to reduce long right-to-left wires in real workflows.
+- Correct internal layout layer assignment to use the deepest dependency path.
 
 ## [0.2.0] - 2026-05-08
 
