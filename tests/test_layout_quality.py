@@ -1,0 +1,68 @@
+"""Tests for read-only layout quality reporting."""
+
+from __future__ import annotations
+
+import json
+
+from flowforge.layout_quality import (
+    build_quality_summary,
+    build_workflow_quality_report,
+    summarize_quality_text,
+)
+
+
+WORKFLOW = {
+    "nodes": [
+        {"id": 1, "type": "SourceA", "pos": [0, 200], "size": [100, 60], "outputs": [{"links": [1]}]},
+        {"id": 2, "type": "SourceB", "pos": [0, 0], "size": [100, 60], "outputs": [{"links": [2]}]},
+        {"id": 3, "type": "TargetA", "pos": [400, 0], "size": [100, 60], "inputs": [{"link": 1}]},
+        {"id": 4, "type": "TargetB", "pos": [400, 200], "size": [100, 60], "inputs": [{"link": 2}]},
+    ],
+    "links": [
+        [1, 1, 0, 3, 0, "IMAGE"],
+        [2, 2, 0, 4, 0, "IMAGE"],
+    ],
+    "groups": [{"id": 10, "title": "Main", "bounding": [-20, -20, 560, 340]}],
+    "last_node_id": 4,
+    "last_link_id": 2,
+    "version": 0.4,
+}
+
+
+def test_build_workflow_quality_report_counts_geometry_and_layout_metrics():
+    report = build_workflow_quality_report(WORKFLOW, "crossing.json")
+
+    assert report.path == "crossing.json"
+    assert report.node_count == 4
+    assert report.link_count == 2
+    assert report.group_count == 1
+    assert report.original.width == 560
+    assert report.original.link_crossings == 1
+    assert report.moved_nodes > 0
+    assert report.layout_candidate_count is not None
+    assert report.layout_score is not None
+
+
+def test_build_quality_summary_skips_non_workflow_files(tmp_path):
+    (tmp_path / "workflow.json").write_text(json.dumps(WORKFLOW), encoding="utf-8")
+    (tmp_path / "metadata.json").write_text(json.dumps({"not": "workflow"}), encoding="utf-8")
+    (tmp_path / "generated_layouted.json").write_text(json.dumps(WORKFLOW), encoding="utf-8")
+
+    summary = build_quality_summary(tmp_path)
+
+    assert summary.ok
+    assert summary.discovered_files == 2
+    assert summary.checked_workflows == 1
+    assert summary.skipped_files == 1
+    assert summary.reports[0].path == "workflow.json"
+
+
+def test_summarize_quality_text_includes_aggregate_metrics(tmp_path):
+    (tmp_path / "workflow.json").write_text(json.dumps(WORKFLOW), encoding="utf-8")
+    summary = build_quality_summary(tmp_path)
+
+    text = summarize_quality_text(summary)
+
+    assert "Checked UI workflows: 1" in text
+    assert "Straight-line crossings:" in text
+    assert "Largest laid-out workflows" in text

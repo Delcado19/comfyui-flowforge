@@ -16,6 +16,7 @@
 - Documentation maintenance is now governed by `AGENTS.md` and `docs/DOCUMENTATION_MAINTENANCE.md`.
 - Local workflow validation is repeatable through `uv run python tools/validate_local_workflows.py`.
 - Release readiness is repeatable through `uv run python tools/check_release_ready.py`.
+- Read-only layout quality reporting is repeatable through `uv run python tools/report_layout_quality.py example-workflows`.
 
 ## Completed Work
 
@@ -33,10 +34,11 @@
 - Pinned uv development and CI parity to Python 3.12 through `.python-version`.
 - Added `tools/check_release_ready.py` to run local release gates and optional tag/GitHub verification.
 - Validated 95 read-only workflows from `example-workflows` without overwriting originals.
+- Added layout quality reporting for real workflow folders.
 
 ## Open Work
 
-- Build a layout-quality report for real ComfyUI workflows, beyond roundtrip safety.
+- Use the layout-quality report to identify extreme real-workflow layout cases.
 - Expand documentation when behavior stabilizes.
 
 ## Notes

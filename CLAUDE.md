@@ -30,6 +30,7 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - FlowForge works on UI workflow JSON, not API prompt JSON.
 - Layout should preserve all unknown top-level and node-level fields.
 - Local UI workflow roundtrip validation is available with `uv run python tools/validate_local_workflows.py`.
+- Read-only layout quality reporting is available with `uv run python tools/report_layout_quality.py example-workflows`.
 
 ## Development Rules
 

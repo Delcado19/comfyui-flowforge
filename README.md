@@ -168,6 +168,7 @@ Release history is tracked in [CHANGELOG.md](CHANGELOG.md). Release and deployme
 GitHub Actions CI runs backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build on `master`, pull requests, and version tags.
 For local maintainer validation against read-only ComfyUI UI workflows, run `uv run python tools/validate_local_workflows.py`.
 For release readiness, run `uv run python tools/check_release_ready.py`; add `--tag vX.Y.Z --github` after tagging and publishing to verify remote refs, the GitHub Release, and Actions.
+For read-only layout quality metrics across workflow folders, run `uv run python tools/report_layout_quality.py example-workflows`.
 
 ---
 
