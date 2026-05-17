@@ -290,6 +290,7 @@ def _apply_layout_pass(
         # virtual, so normal graph layering has no useful edge to preserve.
         logger.debug("Phase 4c: Virtual Set/Get Hubs")
         _position_virtual_set_get_nodes(workflow, settings)
+        _assign_virtual_hub_groups_to_endpoints(workflow)
         
         # Phase 5: Bounding Box Update
         logger.debug("Phase 5: Bounding Box Update")
@@ -988,9 +989,13 @@ def _position_virtual_set_get_nodes(workflow: Workflow, settings: LayoutSettings
         entries.sort(key=lambda item: (item[0], item[1].id))
         total_height = sum(_node_visual_height(node) for _, node, _ in entries)
         total_gap = gap * max(0, len(entries) - 1)
-        source = entries[0][2]
-        y = _node_center(source)[1] - (total_height + total_gap) / 2.0
-        for _, node, source in entries:
+        desired_centers = [
+            _node_output_port_y(source, source_port) - _node_input_port_offset(node, 0)
+            + _node_visual_height(node) / 2.0
+            for source_port, node, source in entries
+        ]
+        y = (sum(desired_centers) / len(desired_centers)) - (total_height + total_gap) / 2.0
+        for source_port, node, source in entries:
             node.x = source.x + _node_visual_width(source) + gap
             node.y = y
             y += _node_visual_height(node) + gap
@@ -999,12 +1004,56 @@ def _position_virtual_set_get_nodes(workflow: Workflow, settings: LayoutSettings
         entries.sort(key=lambda item: (item[0], item[1].id))
         total_height = sum(_node_visual_height(node) for _, node, _ in entries)
         total_gap = gap * max(0, len(entries) - 1)
-        target = entries[0][2]
-        y = _node_center(target)[1] - (total_height + total_gap) / 2.0
-        for _, node, target in entries:
+        desired_centers = [
+            _node_input_port_y(target, target_port) - _node_output_port_offset(node, 0)
+            + _node_visual_height(node) / 2.0
+            for target_port, node, target in entries
+        ]
+        y = (sum(desired_centers) / len(desired_centers)) - (total_height + total_gap) / 2.0
+        for target_port, node, target in entries:
             node.x = target.x - _node_visual_width(node) - gap
             node.y = y
             y += _node_visual_height(node) + gap
+
+
+def _assign_virtual_hub_groups_to_endpoints(workflow: Workflow) -> None:
+    """Assign virtual hubs to the group of the real node they physically touch."""
+    if not workflow.groups:
+        return
+
+    endpoint_by_hub_id: dict[int, Node] = {}
+    for node in workflow.nodes.values():
+        if _is_set_node(node):
+            endpoint = _single_input_source(workflow, node)
+        elif _is_get_node(node):
+            endpoint = _single_output_target(workflow, node)
+        else:
+            endpoint = None
+        if endpoint is not None:
+            endpoint_by_hub_id[node.id] = endpoint
+
+    if not endpoint_by_hub_id:
+        return
+
+    group_by_node_id: dict[int, Group] = {}
+    for group in workflow.groups:
+        for node in group.nodes:
+            if node.id not in endpoint_by_hub_id:
+                group_by_node_id[node.id] = group
+
+    for group in workflow.groups:
+        group.nodes = [node for node in group.nodes if node.id not in endpoint_by_hub_id]
+    workflow.ungrouped_nodes = [
+        node for node in workflow.ungrouped_nodes if node.id not in endpoint_by_hub_id
+    ]
+
+    for hub_id, endpoint in endpoint_by_hub_id.items():
+        hub = workflow.nodes[hub_id]
+        endpoint_group = group_by_node_id.get(endpoint.id)
+        if endpoint_group is None:
+            workflow.ungrouped_nodes.append(hub)
+        else:
+            endpoint_group.nodes.append(hub)
 
 
 def _virtual_hub_gap(settings: LayoutSettings) -> float:
@@ -1027,6 +1076,27 @@ def _single_output_target(workflow: Workflow, node: Node) -> Node | None:
     if link is None:
         return None
     return workflow.nodes.get(link.target)
+
+
+def _node_input_port_y(node: Node, port_index: int) -> float:
+    return node.y + _node_input_port_offset(node, port_index)
+
+
+def _node_output_port_y(node: Node, port_index: int) -> float:
+    return node.y + _node_output_port_offset(node, port_index)
+
+
+def _node_input_port_offset(node: Node, port_index: int) -> float:
+    base_offset = 6.0 if _is_reroute_node(node) else NODE_SLOT_OFFSET
+    row_gap = 0.0 if _is_reroute_node(node) else NODE_ROW_GAP
+    return NODE_TITLE_HEIGHT + base_offset + NODE_ROW_HEIGHT / 2.0 + port_index * (
+        NODE_ROW_HEIGHT + row_gap
+    )
+
+
+def _node_output_port_offset(node: Node, port_index: int) -> float:
+    base_offset = 6.0 if _is_reroute_node(node) else NODE_SLOT_OFFSET
+    return NODE_TITLE_HEIGHT + base_offset + NODE_ROW_HEIGHT / 2.0 + port_index * NODE_ROW_HEIGHT
 
 
 def _order_ungrouped_nodes_by_flow(workflow: Workflow, nodes: list[Node]) -> list[Node]:

@@ -20,7 +20,7 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Compact saved node sizes before layout, keep long text/widget nodes tall enough for their visible content, and shrink group rectangles around optimized group-local node layouts.
 - Stack variable-height nodes cumulatively inside group-local layers so compact layouts do not overlap nodes in the same layer.
 - Use virtual Set/Get pairing without physical `SetNode -> GetNode` links when optimizing high-fanout wiring.
-- Keep optimized `SetNode` and `GetNode` hubs beside their physical source or consumer after layout.
+- Keep optimized `SetNode` and `GetNode` hubs beside their physical source/consumer ports and in the endpoint's group after layout.
 
 ### Fixed
 
