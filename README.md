@@ -10,7 +10,7 @@ Automatically rearranges nodes in a [ComfyUI](https://github.com/comfyanonymous/
 
 ComfyUI workflows grow organically. Nodes get added wherever there is space, moved around during iteration, and groups get reorganised. The result is a canvas where connection lines criss-cross in every direction — hard to read and hard to debug.
 
-FlowForge reads a workflow JSON, computes a clean left-to-right layout using a graph algorithm, and writes the result back. **Only node positions and group bounding boxes are changed.** Every connection, setting, model reference, and widget value is preserved exactly.
+FlowForge reads a workflow JSON, computes a clean left-to-right layout using a graph algorithm, and writes the result back. **Only node positions, compact node sizes, and group bounding boxes are changed.** Every connection, setting, model reference, and widget value is preserved exactly.
 
 ---
 
@@ -82,7 +82,7 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 
 ### Features
 
-- **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions
+- **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions, compact node sizes, and group bounds
 - **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
 - **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, group-aware dragging, resizable group containers, and group creation/deletion controls
 - **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus live X/Y spacing controls for layout density and toolbar buttons to create or clear groups
@@ -92,7 +92,11 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 
 ## How It Works
 
-FlowForge implements a six-phase pipeline:
+FlowForge implements a compact layout pipeline:
+
+### Phase 0 — Node Compaction
+
+Before any graph geometry is derived, layout shrinks nodes that have saved larger dimensions down to a conservative compact size. Reroutes, note-like decorative nodes, collapsed nodes, and regular nodes use separate minimum dimensions. Existing nodes that are already smaller are left unchanged.
 
 ### Phase 1 — Group Membership
 
@@ -112,16 +116,16 @@ Within each group, independently:
 
 ### Phase 4 — Global Positioning
 
-The content size of every group is known after Phase 3. Column widths are determined by the widest group in each column. Groups are placed left-to-right by column and top-to-bottom within each column. Existing group rectangles are treated as containers: manually enlarged groups keep their width and height, and smaller groups expand only as much as needed to contain their nodes with padding. Node positions are translated from group-local coordinates to global canvas coordinates.
+The content size of every group is known after Phase 3. Column widths are determined by the widest group in each column. Groups are placed left-to-right by column and top-to-bottom within each column. Group rectangles are compacted to their laid-out node contents plus padding before the global placement is finalized. Node positions are translated from group-local coordinates to global canvas coordinates.
 Linked ungrouped nodes are arranged in dataflow layers before being placed after the grouped layout, so source-to-target chains continue to move left-to-right instead of being packed only by original Y position. Unlinked ungrouped nodes keep compact vertical packing.
 
-### Phase 5 — Decorative Nodes
+### Decorative Nodes
 
 Comment nodes (`Note`, `MarkdownNote`, `Label`) carry no dataflow edges and are excluded from the graph algorithm. FlowForge now places them first as a left-side annotation column, ordered by their original Y position, before the rest of the workflow is optimized.
 
-### Phase 6 — Bounding Box Update
+### Phase 5 — Bounding Box Update
 
-Each group's `bounding` rectangle is reconciled with the final positions of its member nodes plus the group padding. Layout never shrinks a larger existing group rectangle; it only moves the group with its contents or expands it when node content would otherwise fall outside. Groups and ungrouped nodes are packed in vertical columns to use the Y axis before widening the workflow.
+Each group's `bounding` rectangle is reconciled with the final positions of its member nodes plus the group padding. Layout compacts larger existing group rectangles when the contained nodes fit into a smaller layout. Groups and ungrouped nodes are packed in vertical columns to use the Y axis before widening the workflow.
 
 ### Layout Spacing
 

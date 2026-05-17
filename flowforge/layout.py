@@ -27,6 +27,17 @@ LAYOUT_WIDE_WORKFLOW_RATIO = 1.35
 LAYOUT_TALL_WORKFLOW_RATIO = 0.75
 LAYOUT_DISTANCE_MIN = 20.0
 LAYOUT_DISTANCE_MAX = 240.0
+NODE_MIN_WIDTH = 200.0
+NODE_MIN_HEIGHT = 60.0
+NODE_TITLE_HEIGHT = 26.0
+NODE_SLOT_OFFSET = 8.0
+NODE_ROW_HEIGHT = 20.0
+NODE_ROW_GAP = 4.0
+NODE_BOTTOM_PADDING = 12.0
+REROUTE_NODE_MIN_WIDTH = 40.0
+REROUTE_NODE_MIN_HEIGHT = 40.0
+DECORATIVE_NODE_MIN_WIDTH = 220.0
+DECORATIVE_NODE_MIN_HEIGHT = 80.0
 DECORATIVE_START_X = 20.0
 DECORATIVE_START_Y = 50.0
 LAYOUT_SCORE_WIDTH_WEIGHT = 2.5
@@ -229,13 +240,17 @@ def _apply_layout_pass(
         workflow: The workflow to layout.
         
     Returns:
-        The workflow with updated node positions and group bounding boxes.
+        The workflow with compact node sizes, updated node positions, and group bounding boxes.
     """
     settings = settings or LayoutSettings()
     if log:
         logger.info("Starting layout algorithm")
     
     try:
+        # Phase 0: Compact nodes before any layout geometry is derived.
+        logger.debug("Phase 0: Node Size Minimization")
+        _shrink_nodes_to_minimum_size(workflow)
+
         # Phase 1: Group Membership
         logger.debug("Phase 1: Group Membership")
         _assign_groups(workflow)
@@ -479,6 +494,84 @@ def _node_in_group(node: Node, group: Group) -> bool:
     return (gx <= node.x <= gx + gw) and (gy <= node.y <= gy + gh)
 
 
+def _shrink_nodes_to_minimum_size(workflow: Workflow) -> None:
+    """Shrink node rectangles to their compact layout size without growing them."""
+    for node in workflow.nodes.values():
+        if not node.size or len(node.size) < 2:
+            continue
+
+        current_width = float(node.size[0])
+        current_height = float(node.size[1])
+        if current_width <= 0 or current_height <= 0:
+            continue
+
+        min_width, min_height = _minimum_node_size(node)
+        node.size = [
+            min(current_width, min_width),
+            min(current_height, min_height),
+        ]
+
+
+def _minimum_node_size(node: Node) -> tuple[float, float]:
+    """Return a conservative compact size for ComfyUI node geometry."""
+    if _is_reroute_node(node):
+        return REROUTE_NODE_MIN_WIDTH, REROUTE_NODE_MIN_HEIGHT
+
+    if _is_decorative_node(node):
+        return DECORATIVE_NODE_MIN_WIDTH, DECORATIVE_NODE_MIN_HEIGHT
+
+    row_count = max(
+        1,
+        node.input_count,
+        node.output_count,
+        len(node.input_links),
+        len(node.output_links),
+        len(node.widgets_values),
+    )
+    if node.collapsed:
+        min_height = NODE_MIN_HEIGHT
+    else:
+        row_height = max(
+            NODE_SLOT_OFFSET + row_count * NODE_ROW_HEIGHT,
+            _minimum_widget_rows_height(node.widgets_values),
+            NODE_SLOT_OFFSET + node.output_count * NODE_ROW_HEIGHT,
+        )
+        min_height = max(
+            NODE_MIN_HEIGHT,
+            NODE_TITLE_HEIGHT + row_height + NODE_BOTTOM_PADDING,
+        )
+    return NODE_MIN_WIDTH, min_height
+
+
+def _minimum_widget_rows_height(values: list) -> float:
+    if not values:
+        return NODE_SLOT_OFFSET
+
+    total = NODE_SLOT_OFFSET
+    for index, value in enumerate(values):
+        if index > 0:
+            total += NODE_ROW_GAP
+        total += _minimum_widget_row_height(value)
+    return total
+
+
+def _minimum_widget_row_height(value) -> float:
+    if _is_multiline_widget_value(value):
+        text = str(value)
+        line_count = max(3, len(text.splitlines()) if text else 1)
+        estimated_lines = math.ceil(len(text) / 54) if text else 1
+        return min(180.0, max(60.0, max(line_count, estimated_lines) * 18.0 + 10.0))
+    return NODE_ROW_HEIGHT
+
+
+def _is_multiline_widget_value(value) -> bool:
+    if isinstance(value, (dict, list)):
+        return True
+    if not isinstance(value, str):
+        return False
+    return "\n" in value or len(value) > 54
+
+
 # ---------------------------------------------------------------------------
 # Phase 2: Inter-Group Topology
 # ---------------------------------------------------------------------------
@@ -602,7 +695,7 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
             base_y = min(n.y for n in group.nodes) if group.nodes else 0
         
         # Maximum node width in this group (for NODE_H_GAP calculation)
-        max_node_w = max((n.size[0] for n in group.nodes), default=200)
+        max_node_w = max((_node_visual_width(n) for n in group.nodes), default=200.0)
         
         # Place nodes
         for layer in range(max_layer + 1):
@@ -614,14 +707,13 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
             bypassed = [nid for nid in nodes_in_layer if workflow.nodes[nid].mode == 4]
             ordered_nids = active + bypassed
             
-            for col, nid in enumerate(ordered_nids):
+            current_y = base_y
+            for nid in ordered_nids:
                 node = workflow.nodes[nid]
-                # X = base_x + layer * (max_node_w + NODE_H_GAP)
-                # Y = base_y + col * (max_node_height + NODE_V_GAP)
-                # Use average node height for column spacing, or node's own height
-                node_h = node.size[1] if node.size[1] > 0 else 60
+                node_h = _node_visual_height(node)
                 node.x = base_x + layer * (max_node_w + settings.node_h_gap)
-                node.y = base_y + col * (node_h + settings.node_v_gap)
+                node.y = current_y
+                current_y += node_h + settings.node_v_gap
 
 
 def _assign_longest_path_layers(
@@ -726,12 +818,8 @@ def _position_groups_globally(
         min_x, min_y, max_x, max_y = _group_content_bounds(group)
         required_width = (max_x - min_x) + 2 * settings.group_padding
         required_height = (max_y - min_y) + 2 * settings.group_padding
-        if _has_positive_bounding(group):
-            g_width = max(group.bounding[2], required_width)
-            g_height = max(group.bounding[3], required_height)
-        else:
-            g_width = required_width
-            g_height = required_height
+        g_width = required_width
+        g_height = required_height
 
         if current_y > start_y and current_y + g_height > start_y + column_budget:
             current_x += column_width + settings.group_h_gap
@@ -781,7 +869,7 @@ def _position_ungrouped_nodes(
         if _has_positive_bounding(group):
             max_right = max(max_right, group.bounding[0] + group.bounding[2])
         elif group.nodes:
-            group_max_x = max(n.x + n.size[0] for n in group.nodes)
+            group_max_x = max(n.x + _node_visual_width(n) for n in group.nodes)
             max_right = max(max_right, group_max_x)
     
     start_x = max(start_x_floor, max_right + settings.group_h_gap if max_right > 0 else 50)
@@ -927,11 +1015,7 @@ def _position_decorative_nodes_left(workflow: Workflow, settings: LayoutSettings
 
 def _update_bounding_boxes(workflow: Workflow, settings: LayoutSettings) -> None:
     """
-    Update all group bounding boxes without shrinking manually resized groups.
-
-    Existing group rectangles are treated as user-authored containers. Layout
-    may move them and expand them if needed, but it must not collapse a larger
-    group back to a tight node fit.
+    Update all group bounding boxes to the compact bounds of their contents.
     """
     logger.debug("Updating group bounding boxes")
     
@@ -945,25 +1029,11 @@ def _update_bounding_boxes(workflow: Workflow, settings: LayoutSettings) -> None
         content_right = max_x + settings.group_padding
         content_bottom = max_y + settings.group_padding
 
-        if _has_positive_bounding(group):
-            current_left, current_top, current_width, current_height = group.bounding
-            current_right = current_left + current_width
-            current_bottom = current_top + current_height
-            next_left = min(current_left, content_left)
-            next_top = min(current_top, content_top)
-            next_right = max(current_right, content_right)
-            next_bottom = max(current_bottom, content_bottom)
-        else:
-            next_left = content_left
-            next_top = content_top
-            next_right = content_right
-            next_bottom = content_bottom
-
         group.bounding = [
-            next_left,
-            next_top,
-            next_right - next_left,
-            next_bottom - next_top,
+            content_left,
+            content_top,
+            content_right - content_left,
+            content_bottom - content_top,
         ]
         
         logger.debug(f"Group {group.name} bounding box updated to {group.bounding}")
@@ -972,9 +1042,9 @@ def _update_bounding_boxes(workflow: Workflow, settings: LayoutSettings) -> None
 def _group_content_bounds(group: Group) -> tuple[float, float, float, float]:
     """Return [left, top, right, bottom] bounds for the group's node content."""
     min_x = min(n.x for n in group.nodes)
-    max_x = max(n.x + n.size[0] for n in group.nodes)
+    max_x = max(n.x + _node_visual_width(n) for n in group.nodes)
     min_y = min(n.y for n in group.nodes)
-    max_y = max(n.y + n.size[1] for n in group.nodes)
+    max_y = max(n.y + _node_visual_height(n) for n in group.nodes)
     return min_x, min_y, max_x, max_y
 
 
@@ -987,6 +1057,10 @@ def _is_decorative_node(node: Node) -> bool:
     return node.type in {"Note", "MarkdownNote", "Label"}
 
 
+def _is_reroute_node(node: Node) -> bool:
+    return "reroute" in node.type.lower()
+
+
 def _node_visual_width(node: Node) -> float:
     return node.size[0] if node.size[0] > 0 else 200.0
 
@@ -996,8 +1070,6 @@ def _node_visual_height(node: Node) -> float:
 
 
 def _group_visual_height(group: Group, settings: LayoutSettings) -> float:
-    if _has_positive_bounding(group):
-        return group.bounding[3]
     _, _, _, max_y = _group_content_bounds(group)
     min_y = min(n.y for n in group.nodes)
     return (max_y - min_y) + 2 * settings.group_padding

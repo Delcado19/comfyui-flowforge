@@ -46,7 +46,7 @@ For every non-trivial code or behavior change:
 
 ## FlowForge-Specific Documentation Rules
 
-- Never claim FlowForge changes only positions unless tests and serializer behavior preserve all other ComfyUI workflow fields.
+- Never claim FlowForge changes only positions; layout currently owns node positions, compact node sizes, and group bounding boxes.
 - Mention that layout should preserve unknown top-level fields, node metadata, widget values, properties, flags, colors, links, reroutes, models, and extra data when documenting roundtrip behavior.
 - Distinguish UI workflow JSON from API prompt JSON. FlowForge works on UI workflow layout JSON.
 - Keep optimizer documentation explicit that Set/Get nodes require compatible custom nodes in the target ComfyUI install.

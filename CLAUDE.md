@@ -23,7 +23,7 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - `order` is ComfyUI's computed execution order and must not be changed by layout.
 - Groups use `bounding: [x, y, width, height]`.
 - Group membership is inferred from node position and group bounding boxes.
-- Group rectangles are user-authored containers. Layout may move or expand a group to contain its nodes, but it should not shrink a manually enlarged group.
+- Layout compacts saved node sizes before computing graph geometry, then shrinks group rectangles to the laid-out node contents plus padding.
 - Decorative nodes (`Note`, `MarkdownNote`, `Label`) are placed first in a left-side annotation column and should not influence group assignment or graph layout.
 - Layout spacing is parameterized through `LayoutSettings(node_x_distance, node_y_distance)`. The GUI exposes live X and Y controls in the 20-240 px range. Horizontal gap, vertical gap, group spacing, and padding all derive from those axis values. The public layout pass evaluates a dynamic candidate count by workflow size: 3 for small graphs, 5 for medium graphs, and 7 for larger ones. It keeps the best compactness score, with extra penalties for layouts that stretch too far in X relative to Y or leave large horizontal gaps, and candidate search can stop early once the score stops improving. Candidate order is biased by the workflow aspect ratio. The API exposes the selected candidate through `X-FlowForge-Layout-Stats` for the UI.
 - The GUI exposes group CRUD controls: start drag-based group creation from the canvas, delete a single group from the canvas, and clear all groups from the toolbar. The toolbar no longer has a dedicated `+ Group` button.

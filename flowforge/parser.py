@@ -43,6 +43,9 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
             size = [size.get('width', 0.0), size.get('height', 0.0)]
         mode = node_data.get('mode', 0)
         order = node_data.get('order', 0)
+        inputs = node_data.get('inputs', [])
+        outputs = node_data.get('outputs', [])
+        flags = node_data.get('flags', {})
         widgets_values = deepcopy(node_data.get('widgets_values', []))
         
         node = Node(
@@ -53,6 +56,9 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
             size=[float(size[0]), float(size[1])],
             mode=mode,
             order=order,
+            input_count=len(inputs) if isinstance(inputs, list) else 0,
+            output_count=len(outputs) if isinstance(outputs, list) else 0,
+            collapsed=bool(flags.get('collapsed')) if isinstance(flags, dict) else False,
             widgets_values=widgets_values,
         )
         workflow.nodes[node_id] = node

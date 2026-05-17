@@ -15,6 +15,8 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Arrange linked ungrouped nodes by dataflow layers to reduce long right-to-left wires in real workflows.
 - Correct internal layout layer assignment to use the deepest dependency path.
 - Refine internal layer ordering with adjacent-layer barycenter sweeps to reduce grouped wire crossings.
+- Compact saved node sizes before layout, keep long text/widget nodes tall enough for their visible content, and shrink group rectangles around optimized group-local node layouts.
+- Stack variable-height nodes cumulatively inside group-local layers so compact layouts do not overlap nodes in the same layer.
 
 ## [0.2.0] - 2026-05-08
 
