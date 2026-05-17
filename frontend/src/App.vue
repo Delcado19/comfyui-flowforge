@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { useWorkflowStore, type ComfyNode, type NodeSize } from './stores/useWorkflowStore'
+import { useWorkflowStore, type ComfyNode, type ComfyWorkflow, type NodeSize } from './stores/useWorkflowStore'
 import ComfyCanvas from './components/ComfyCanvas.vue'
 
 const store = useWorkflowStore()
@@ -66,27 +66,14 @@ function scheduleLayout(immediate = false) {
 
   const run = async () => {
     if (requestId !== layoutRequestId) return
+    const currentWorkflow = store.workflow
+    if (!currentWorkflow) return
 
     try {
-      const response = await fetch('/layout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workflow: store.workflow,
-          layout: {
-            node_x_distance: nodeXDistance.value,
-            node_y_distance: nodeYDistance.value,
-          },
-        }),
-      })
-      const data = await response.json()
-      if (!response.ok) {
-        throw new Error(data.error || 'Layout request failed')
-      }
+      const { data, stats } = await requestLayout(currentWorkflow)
       if (requestId !== layoutRequestId) return
-      const layoutStats = parseLayoutStats(response.headers.get('X-FlowForge-Layout-Stats'))
-      layoutStatus.value = layoutStats
-        ? `Layout: ${layoutStats.selected_candidate}/${layoutStats.candidate_count} candidates, score ${layoutStats.score.total.toFixed(1)}`
+      layoutStatus.value = stats
+        ? `Layout Only: ${stats.selected_candidate}/${stats.candidate_count} candidates, score ${stats.score.total.toFixed(1)}`
         : 'Layout completed'
       store.loadWorkflow(data)
       comparisonNodes.value = beforeLayout
@@ -112,7 +99,7 @@ function layout() {
   scheduleLayout(true)
 }
 
-async function optimize() {
+async function optimizeAndLayout() {
   if (!store.workflow) return
 
   if (layoutTimer !== undefined) {
@@ -121,23 +108,58 @@ async function optimize() {
   }
   layoutRequestId += 1
 
+  const beforeLayout = captureComparisonNodes()
+
   try {
-    const response = await fetch('/optimize', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(store.workflow),
-    })
-    const data = await response.json()
-    if (!response.ok) {
-      throw new Error(data.error || 'Optimize request failed')
-    }
+    const currentWorkflow = store.workflow
+    if (!currentWorkflow) return
+    const optimized = await requestOptimize(currentWorkflow)
+    const { data, stats } = await requestLayout(optimized)
     store.loadWorkflow(data)
-    comparisonNodes.value = []
-    showComparison.value = false
-    layoutStatus.value = `Optimize: ${countNodesByType(data, 'SetNode')} Set, ${countNodesByType(data, 'GetNode')} Get`
+    comparisonNodes.value = beforeLayout
+    showComparison.value = beforeLayout.length > 0
+    const optimizeSummary = `${countNodesByType(data, 'SetNode')} Set, ${countNodesByType(data, 'GetNode')} Get`
+    layoutStatus.value = stats
+      ? `Optimize + Layout: ${optimizeSummary}, ${stats.selected_candidate}/${stats.candidate_count} candidates`
+      : `Optimize + Layout: ${optimizeSummary}`
   } catch (err) {
     layoutStatus.value = ''
-    alert('Optimize failed: ' + err)
+    alert('Optimize + Layout failed: ' + err)
+  }
+}
+
+async function requestOptimize(workflow: ComfyWorkflow): Promise<ComfyWorkflow> {
+  const response = await fetch('/optimize', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(workflow),
+  })
+  const data = await response.json()
+  if (!response.ok) {
+    throw new Error(data.error || 'Optimize request failed')
+  }
+  return data as ComfyWorkflow
+}
+
+async function requestLayout(workflow: ComfyWorkflow): Promise<{ data: ComfyWorkflow; stats: LayoutStats | null }> {
+  const response = await fetch('/layout', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      workflow,
+      layout: {
+        node_x_distance: nodeXDistance.value,
+        node_y_distance: nodeYDistance.value,
+      },
+    }),
+  })
+  const data = await response.json()
+  if (!response.ok) {
+    throw new Error(data.error || 'Layout request failed')
+  }
+  return {
+    data: data as ComfyWorkflow,
+    stats: parseLayoutStats(response.headers.get('X-FlowForge-Layout-Stats')),
   }
 }
 
@@ -215,8 +237,8 @@ watch([nodeXDistance, nodeYDistance], () => {
   <div class="app">
     <div class="toolbar">
       <button @click="openFile">Open</button>
-      <button :disabled="!store.workflow" @click="optimize">Optimize</button>
-      <button @click="layout">Layout</button>
+      <button :disabled="!store.workflow" @click="optimizeAndLayout">Optimize + Layout</button>
+      <button :disabled="!store.workflow" @click="layout">Layout Only</button>
       <button
         :class="{ active: showComparison }"
         :disabled="comparisonNodes.length === 0"
