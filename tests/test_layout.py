@@ -5,12 +5,15 @@ Tests for the layout algorithm.
 from copy import deepcopy
 
 from flowforge.model import Node, Link, Group, Workflow
+from flowforge.optimizer import optimize
 import pytest
 from flowforge.layout import (
     apply,
     apply_best_layout,
     LayoutSettings,
     LayoutScore,
+    VIRTUAL_HUB_MAX_GAP,
+    VIRTUAL_HUB_MIN_GAP,
     _assign_groups,
     _layout_groups_internal,
     _position_groups_globally,
@@ -422,6 +425,56 @@ def test_linked_ungrouped_nodes_clear_group_columns():
             f"ungrouped node {node_id} at x={node.x} overlaps group extent x<{group_right}"
         )
     logger.info("Linked ungrouped placement test passed")
+
+
+def test_virtual_set_get_hubs_stay_near_physical_endpoints():
+    logger.info("Testing virtual Set/Get hub endpoint anchoring")
+    wf = Workflow()
+    source = Node(id=1, type="UNETLoader", x=0, y=0, size=[200, 60])
+    wf.nodes[1] = source
+
+    consumers = []
+    for index in range(3):
+        consumer = Node(
+            id=2 + index,
+            type="KSampler",
+            x=900 + index * 220,
+            y=400 + index * 260,
+            size=[200, 100],
+        )
+        consumers.append(consumer)
+        wf.nodes[consumer.id] = consumer
+        link = Link(
+            id=100 + index,
+            source=1,
+            source_port=0,
+            target=consumer.id,
+            target_port=0,
+            type="MODEL",
+        )
+        wf.links[link.id] = link
+        source.output_links.append(link.id)
+        consumer.input_links.append(link.id)
+
+    result = apply(optimize(wf), LayoutSettings(node_x_distance=80, node_y_distance=80))
+    set_node = next(node for node in result.nodes.values() if node.type == "SetNode")
+    get_nodes = [node for node in result.nodes.values() if node.type == "GetNode"]
+    laid_out_source = result.nodes[1]
+
+    set_gap = set_node.x - (laid_out_source.x + laid_out_source.size[0])
+    assert VIRTUAL_HUB_MIN_GAP <= set_gap <= VIRTUAL_HUB_MAX_GAP
+    assert set_node.y + set_node.size[1] / 2 == pytest.approx(
+        laid_out_source.y + laid_out_source.size[1] / 2
+    )
+
+    for get_node in get_nodes:
+        link = result.links[get_node.output_links[0]]
+        target = result.nodes[link.target]
+        get_gap = target.x - (get_node.x + get_node.size[0])
+        assert VIRTUAL_HUB_MIN_GAP <= get_gap <= VIRTUAL_HUB_MAX_GAP
+        assert get_node.y + get_node.size[1] / 2 == pytest.approx(target.y + target.size[1] / 2)
+
+    logger.info("Virtual Set/Get hub endpoint anchoring test passed")
 
 
 def test_spacing_setting_expands_layout_and_group():

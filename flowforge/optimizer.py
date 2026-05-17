@@ -427,8 +427,8 @@ def _link_cost(workflow: Workflow, link: Link, node_group_index: Dict[int, int] 
 
 
 def _set_node_position(workflow: Workflow, src_node: Node, terminal_links: List[Link]) -> tuple[float, float]:
-    anchor_y = _fanout_anchor_y(workflow, terminal_links)
-    return src_node.x + _node_width(src_node) + HUB_NODE_GAP, anchor_y - HUB_NODE_HEIGHT / 2
+    del workflow, terminal_links
+    return src_node.x + _node_width(src_node) + HUB_NODE_GAP, _node_center(src_node)[1] - HUB_NODE_HEIGHT / 2
 
 
 def _get_node_position(target_node: Node) -> tuple[float, float]:
@@ -436,23 +436,6 @@ def _get_node_position(target_node: Node) -> tuple[float, float]:
         target_node.x - HUB_NODE_WIDTH - HUB_NODE_GAP,
         _node_center(target_node)[1] - HUB_NODE_HEIGHT / 2,
     )
-
-
-def _fanout_anchor_y(workflow: Workflow, terminal_links: List[Link]) -> float:
-    target_centers: List[float] = []
-    for terminal_link in terminal_links:
-        target_node = workflow.nodes.get(terminal_link.target)
-        if target_node is not None:
-            target_centers.append(_node_center(target_node)[1])
-
-    if not target_centers:
-        return 0.0
-
-    target_centers.sort()
-    middle = len(target_centers) // 2
-    if len(target_centers) % 2:
-        return target_centers[middle]
-    return (target_centers[middle - 1] + target_centers[middle]) / 2.0
 
 
 def _fanout_vertical_span(workflow: Workflow, terminal_links: List[Link]) -> float:

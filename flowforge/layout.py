@@ -40,6 +40,8 @@ DECORATIVE_NODE_MIN_WIDTH = 220.0
 DECORATIVE_NODE_MIN_HEIGHT = 80.0
 DECORATIVE_START_X = 20.0
 DECORATIVE_START_Y = 50.0
+VIRTUAL_HUB_MIN_GAP = 24.0
+VIRTUAL_HUB_MAX_GAP = 48.0
 LAYOUT_SCORE_WIDTH_WEIGHT = 2.5
 LAYOUT_SCORE_HEIGHT_WEIGHT = 1.0
 LAYOUT_SCORE_LINK_WEIGHT = 0.02
@@ -282,6 +284,12 @@ def _apply_layout_pass(
             settings,
             start_x_floor=decorative_right_edge + settings.group_h_gap,
         )
+
+        # Phase 4c: Virtual Set/Get hubs should stay next to the real node
+        # that owns their physical wire. The Set/Get relationship itself is
+        # virtual, so normal graph layering has no useful edge to preserve.
+        logger.debug("Phase 4c: Virtual Set/Get Hubs")
+        _position_virtual_set_get_nodes(workflow, settings)
         
         # Phase 5: Bounding Box Update
         logger.debug("Phase 5: Bounding Box Update")
@@ -958,6 +966,69 @@ def _position_linked_ungrouped_nodes(
     return current_right
 
 
+def _position_virtual_set_get_nodes(workflow: Workflow, settings: LayoutSettings) -> None:
+    """Keep KJNodes Set/Get hubs directly beside their physical endpoint."""
+    gap = _virtual_hub_gap(settings)
+
+    set_groups: dict[int, list[tuple[int, Node, Node]]] = {}
+    get_groups: dict[int, list[tuple[int, Node, Node]]] = {}
+    for node in workflow.nodes.values():
+        if _is_set_node(node):
+            source = _single_input_source(workflow, node)
+            if source is not None:
+                source_port = workflow.links[node.input_links[0]].source_port
+                set_groups.setdefault(source.id, []).append((source_port, node, source))
+        elif _is_get_node(node):
+            target = _single_output_target(workflow, node)
+            if target is not None:
+                target_port = workflow.links[node.output_links[0]].target_port
+                get_groups.setdefault(target.id, []).append((target_port, node, target))
+
+    for entries in set_groups.values():
+        entries.sort(key=lambda item: (item[0], item[1].id))
+        total_height = sum(_node_visual_height(node) for _, node, _ in entries)
+        total_gap = gap * max(0, len(entries) - 1)
+        source = entries[0][2]
+        y = _node_center(source)[1] - (total_height + total_gap) / 2.0
+        for _, node, source in entries:
+            node.x = source.x + _node_visual_width(source) + gap
+            node.y = y
+            y += _node_visual_height(node) + gap
+
+    for entries in get_groups.values():
+        entries.sort(key=lambda item: (item[0], item[1].id))
+        total_height = sum(_node_visual_height(node) for _, node, _ in entries)
+        total_gap = gap * max(0, len(entries) - 1)
+        target = entries[0][2]
+        y = _node_center(target)[1] - (total_height + total_gap) / 2.0
+        for _, node, target in entries:
+            node.x = target.x - _node_visual_width(node) - gap
+            node.y = y
+            y += _node_visual_height(node) + gap
+
+
+def _virtual_hub_gap(settings: LayoutSettings) -> float:
+    return max(VIRTUAL_HUB_MIN_GAP, min(VIRTUAL_HUB_MAX_GAP, settings.node_h_gap * 0.5))
+
+
+def _single_input_source(workflow: Workflow, node: Node) -> Node | None:
+    if len(node.input_links) != 1:
+        return None
+    link = workflow.links.get(node.input_links[0])
+    if link is None:
+        return None
+    return workflow.nodes.get(link.source)
+
+
+def _single_output_target(workflow: Workflow, node: Node) -> Node | None:
+    if len(node.output_links) != 1:
+        return None
+    link = workflow.links.get(node.output_links[0])
+    if link is None:
+        return None
+    return workflow.nodes.get(link.target)
+
+
 def _order_ungrouped_nodes_by_flow(workflow: Workflow, nodes: list[Node]) -> list[Node]:
     """Order ungrouped nodes by local dataflow layer, then original position."""
     layers = _ungrouped_flow_layers(workflow, nodes)
@@ -1086,6 +1157,14 @@ def _is_decorative_node(node: Node) -> bool:
     return node.type in {"Note", "MarkdownNote", "Label"}
 
 
+def _is_set_node(node: Node) -> bool:
+    return node.type == "SetNode"
+
+
+def _is_get_node(node: Node) -> bool:
+    return node.type == "GetNode"
+
+
 def _is_reroute_node(node: Node) -> bool:
     return "reroute" in node.type.lower()
 
@@ -1096,6 +1175,10 @@ def _node_visual_width(node: Node) -> float:
 
 def _node_visual_height(node: Node) -> float:
     return node.size[1] if node.size[1] > 0 else 60.0
+
+
+def _node_center(node: Node) -> tuple[float, float]:
+    return node.x + _node_visual_width(node) / 2.0, node.y + _node_visual_height(node) / 2.0
 
 
 def _group_visual_height(group: Group, settings: LayoutSettings) -> float:
