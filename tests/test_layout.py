@@ -16,6 +16,8 @@ from flowforge.layout import (
     VIRTUAL_HUB_MIN_GAP,
     _assign_groups,
     _layout_groups_internal,
+    _node_input_port_y,
+    _node_output_port_y,
     _position_groups_globally,
     _score_layout_candidate,
     _resolve_layout_candidate_count,
@@ -441,6 +443,7 @@ def test_virtual_set_get_hubs_stay_near_physical_endpoints():
             x=900 + index * 220,
             y=400 + index * 260,
             size=[200, 100],
+            input_count=2,
         )
         consumers.append(consumer)
         wf.nodes[consumer.id] = consumer
@@ -449,7 +452,7 @@ def test_virtual_set_get_hubs_stay_near_physical_endpoints():
             source=1,
             source_port=0,
             target=consumer.id,
-            target_port=0,
+            target_port=1,
             type="MODEL",
         )
         wf.links[link.id] = link
@@ -463,8 +466,9 @@ def test_virtual_set_get_hubs_stay_near_physical_endpoints():
 
     set_gap = set_node.x - (laid_out_source.x + laid_out_source.size[0])
     assert VIRTUAL_HUB_MIN_GAP <= set_gap <= VIRTUAL_HUB_MAX_GAP
-    assert set_node.y + set_node.size[1] / 2 == pytest.approx(
-        laid_out_source.y + laid_out_source.size[1] / 2
+    set_link = result.links[set_node.input_links[0]]
+    assert _node_input_port_y(set_node, set_link.target_port) == pytest.approx(
+        _node_output_port_y(laid_out_source, set_link.source_port)
     )
 
     for get_node in get_nodes:
@@ -472,9 +476,49 @@ def test_virtual_set_get_hubs_stay_near_physical_endpoints():
         target = result.nodes[link.target]
         get_gap = target.x - (get_node.x + get_node.size[0])
         assert VIRTUAL_HUB_MIN_GAP <= get_gap <= VIRTUAL_HUB_MAX_GAP
-        assert get_node.y + get_node.size[1] / 2 == pytest.approx(target.y + target.size[1] / 2)
+        assert _node_output_port_y(get_node, link.source_port) == pytest.approx(
+            _node_input_port_y(target, link.target_port)
+        )
 
     logger.info("Virtual Set/Get hub endpoint anchoring test passed")
+
+
+def test_virtual_hubs_follow_endpoint_group_membership():
+    logger.info("Testing virtual Set/Get hub group membership follows endpoints")
+    wf = Workflow()
+    source = Node(id=1, type="Power Lora Loader", x=100, y=100, size=[200, 100], output_count=1)
+    target = Node(id=2, type="VAEDecode", x=900, y=120, size=[200, 100], input_count=2)
+    group = Group(id=1, name="loaders", bounding=[0, 0, 500, 400], nodes=[source])
+    wf.nodes = {1: source, 2: target}
+    wf.groups = [group]
+    wf.ungrouped_nodes = [target]
+    for index in range(2):
+        consumer = target if index == 0 else Node(id=3, type="PreviewImage", x=900, y=420, size=[200, 80], input_count=1)
+        if consumer.id not in wf.nodes:
+            wf.nodes[consumer.id] = consumer
+            wf.ungrouped_nodes.append(consumer)
+        link = Link(
+            id=100 + index,
+            source=1,
+            source_port=0,
+            target=consumer.id,
+            target_port=1 if consumer.id == target.id else 0,
+            type="VAE",
+        )
+        wf.links[link.id] = link
+        source.output_links.append(link.id)
+        consumer.input_links.append(link.id)
+
+    result = apply(optimize(wf), LayoutSettings(node_x_distance=80, node_y_distance=80))
+    loader_group = next(group for group in result.groups if group.name == "loaders")
+    set_node = next(node for node in result.nodes.values() if node.type == "SetNode")
+    get_nodes = [node for node in result.nodes.values() if node.type == "GetNode"]
+
+    assert set_node in loader_group.nodes
+    assert all(get_node not in loader_group.nodes for get_node in get_nodes)
+    assert all(get_node in result.ungrouped_nodes for get_node in get_nodes)
+
+    logger.info("Virtual Set/Get hub endpoint group membership test passed")
 
 
 def test_spacing_setting_expands_layout_and_group():

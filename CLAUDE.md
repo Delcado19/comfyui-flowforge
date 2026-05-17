@@ -91,7 +91,7 @@ These connections are not represented directly in the `links` array and may requ
 | `GetNode` | comfyui-kjnodes | Reads a value name from `widgets_values[0]` |
 
 A `SetNode` named `"VAE"` and a `GetNode` named `"VAE"` are virtually connected.
-The optimizer is reroute-aware and cost-based: it should treat `Reroute` as a pass-through node when detecting high-fanout MODEL/CLIP/VAE paths, and it should only rewrite when the estimated routing cost goes down. Set/Get pairs are virtual connections keyed by matching widget values, so the optimizer should not add physical `SetNode -> GetNode` links. Cross-group links are weighted slightly higher so broad inter-group fanouts are prioritized. Candidate savings should be recomputed greedily after each rewrite so the best remaining candidate is always chosen on the current graph. Layout should keep virtual hubs beside their physical endpoints: `SetNode` next to the source and `GetNode` next to its consumer.
+The optimizer is reroute-aware and cost-based: it should treat `Reroute` as a pass-through node when detecting high-fanout MODEL/CLIP/VAE paths, and it should only rewrite when the estimated routing cost goes down. Set/Get pairs are virtual connections keyed by matching widget values, so the optimizer should not add physical `SetNode -> GetNode` links. Cross-group links are weighted slightly higher so broad inter-group fanouts are prioritized. Candidate savings should be recomputed greedily after each rewrite so the best remaining candidate is always chosen on the current graph. Layout should keep virtual hubs beside their physical port endpoints and in the endpoint's group: `SetNode` next to the source output and `GetNode` next to its consumer input.
 
 ### Reroute
 
