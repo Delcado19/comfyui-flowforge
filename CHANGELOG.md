@@ -21,6 +21,7 @@ All notable changes to ComfyUI FlowForge are documented here.
 ### Fixed
 
 - Match the compact node-height formula to the canvas renderer by stacking slot inputs and widget rows instead of taking their maximum, so laid-out nodes no longer overlap their neighbours when widgets push real render height past the reserved slot.
+- Place linked ungrouped nodes to the right of every positioned group instead of dropping them into the group's first column, eliminating systematic horizontal overlaps between ungrouped and grouped nodes.
 
 ## [0.2.0] - 2026-05-08
 

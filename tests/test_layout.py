@@ -390,6 +390,40 @@ def test_ungrouped_nodes_are_ordered_by_dataflow():
     logger.info("Ungrouped dataflow ordering test passed")
 
 
+def test_linked_ungrouped_nodes_clear_group_columns():
+    logger.info("Testing linked ungrouped placement clears group extent")
+    wf = Workflow()
+    # A group with two internal nodes that get laid out into a column.
+    group = Group(id=1, name="loader", bounding=[100, 100, 600, 400])
+    wf.groups = [group]
+    loader = Node(id=1, type="Loader", x=120, y=120, size=[200, 80])
+    refiner = Node(id=2, type="Refiner", x=380, y=120, size=[200, 80])
+    wf.nodes[1] = loader
+    wf.nodes[2] = refiner
+    wf.links[10] = Link(id=10, source=1, source_port=0, target=2, target_port=0, type="MODEL")
+    loader.output_links.append(10)
+    refiner.input_links.append(10)
+
+    # Linked ungrouped nodes — _has_internal_links() will be true.
+    src = Node(id=3, type="Source", x=0, y=0, size=[200, 80])
+    dst = Node(id=4, type="Sink", x=0, y=0, size=[200, 80])
+    wf.nodes[3] = src
+    wf.nodes[4] = dst
+    wf.links[11] = Link(id=11, source=3, source_port=0, target=4, target_port=0, type="DATA")
+    src.output_links.append(11)
+    dst.input_links.append(11)
+
+    result = apply(wf)
+
+    group_right = result.groups[0].bounding[0] + result.groups[0].bounding[2]
+    for node_id in (3, 4):
+        node = result.nodes[node_id]
+        assert node.x >= group_right, (
+            f"ungrouped node {node_id} at x={node.x} overlaps group extent x<{group_right}"
+        )
+    logger.info("Linked ungrouped placement test passed")
+
+
 def test_spacing_setting_expands_layout_and_group():
     logger.info("Testing configurable x/y spacing")
     wf = Workflow()

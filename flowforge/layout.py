@@ -871,24 +871,16 @@ def _position_ungrouped_nodes(
     nodes_to_position = workflow.ungrouped_nodes if nodes is None else nodes
     if not nodes_to_position:
         return start_x_floor
-    
+
     logger.debug(f"Positioning {len(nodes_to_position)} ungrouped nodes")
 
+    start_x = _ungrouped_start_x(workflow, settings, start_x_floor)
+
     if _has_internal_links(workflow, nodes_to_position):
-        return _position_linked_ungrouped_nodes(workflow, nodes_to_position, settings, start_x_floor)
-    
+        return _position_linked_ungrouped_nodes(workflow, nodes_to_position, settings, start_x)
+
     sorted_nodes = _order_ungrouped_nodes_by_flow(workflow, nodes_to_position)
-    
-    # Determine start position: if groups exist, start after the rightmost group extent
-    max_right = 0.0
-    for group in workflow.groups:
-        if _has_positive_bounding(group):
-            max_right = max(max_right, group.bounding[0] + group.bounding[2])
-        elif group.nodes:
-            group_max_x = max(n.x + _node_visual_width(n) for n in group.nodes)
-            max_right = max(max_right, group_max_x)
-    
-    start_x = max(start_x_floor, max_right + settings.group_h_gap if max_right > 0 else 50)
+
     start_y = 50.0
     current_x = start_x
     current_y = start_y
@@ -909,6 +901,27 @@ def _position_ungrouped_nodes(
         column_width = max(column_width, node_w)
 
     return current_x + column_width
+
+
+def _ungrouped_start_x(
+    workflow: Workflow, settings: LayoutSettings, start_x_floor: float
+) -> float:
+    """Return the leftmost x for ungrouped nodes that clears every placed group.
+
+    Without this clearance both the linked-layer placement and the vertical
+    column packing collapse into the group's first column, overlapping the
+    group's nodes horizontally.
+    """
+    max_right = 0.0
+    for group in workflow.groups:
+        if _has_positive_bounding(group):
+            max_right = max(max_right, group.bounding[0] + group.bounding[2])
+        elif group.nodes:
+            group_max_x = max(n.x + _node_visual_width(n) for n in group.nodes)
+            max_right = max(max_right, group_max_x)
+    if max_right <= 0.0:
+        return start_x_floor
+    return max(start_x_floor, max_right + settings.group_h_gap)
 
 
 def _has_internal_links(workflow: Workflow, nodes: list[Node]) -> bool:
