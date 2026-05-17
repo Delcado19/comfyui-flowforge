@@ -112,6 +112,35 @@ function layout() {
   scheduleLayout(true)
 }
 
+async function optimize() {
+  if (!store.workflow) return
+
+  if (layoutTimer !== undefined) {
+    clearTimeout(layoutTimer)
+    layoutTimer = undefined
+  }
+  layoutRequestId += 1
+
+  try {
+    const response = await fetch('/optimize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(store.workflow),
+    })
+    const data = await response.json()
+    if (!response.ok) {
+      throw new Error(data.error || 'Optimize request failed')
+    }
+    store.loadWorkflow(data)
+    comparisonNodes.value = []
+    showComparison.value = false
+    layoutStatus.value = `Optimize: ${countNodesByType(data, 'SetNode')} Set, ${countNodesByType(data, 'GetNode')} Get`
+  } catch (err) {
+    layoutStatus.value = ''
+    alert('Optimize failed: ' + err)
+  }
+}
+
 function toggleComparison() {
   if (comparisonNodes.value.length === 0) return
   showComparison.value = !showComparison.value
@@ -166,6 +195,15 @@ function copyNodeSize(size: NodeSize | undefined): NodeSize | undefined {
   return size
 }
 
+function countNodesByType(workflow: unknown, type: string): number {
+  if (!workflow || typeof workflow !== 'object' || !('nodes' in workflow)) return 0
+  const nodes = (workflow as { nodes?: unknown }).nodes
+  if (!Array.isArray(nodes)) return 0
+  return nodes.filter((node) => {
+    return Boolean(node && typeof node === 'object' && (node as { type?: unknown }).type === type)
+  }).length
+}
+
 watch([nodeXDistance, nodeYDistance], () => {
   if (Number.isFinite(nodeXDistance.value) && Number.isFinite(nodeYDistance.value)) {
     scheduleLayout()
@@ -177,6 +215,7 @@ watch([nodeXDistance, nodeYDistance], () => {
   <div class="app">
     <div class="toolbar">
       <button @click="openFile">Open</button>
+      <button :disabled="!store.workflow" @click="optimize">Optimize</button>
       <button @click="layout">Layout</button>
       <button
         :class="{ active: showComparison }"

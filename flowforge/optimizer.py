@@ -17,12 +17,10 @@ logger = setup_logger(__name__)
 OPTIMIZE_TYPES = {"MODEL", "CLIP", "VAE"}
 NODE_INSERTION_COST = 40.0
 LINK_INSERTION_COST = 4.0
-HUB_LINK_COST_FACTOR = 0.25
 HUB_NODE_WIDTH = 160.0
 HUB_NODE_HEIGHT = 40.0
 HUB_NODE_GAP = 80.0
 FANOUT_SPAN_COST_FACTOR = 0.2
-HUB_SPAN_COST_FACTOR = 0.05
 GROUP_CROSS_LINK_FACTOR = 1.15
 
 
@@ -205,7 +203,9 @@ def _replace_port_with_set_get(
     src_node.output_links.append(set_link_id)
     set_node.input_links.append(set_link_id)
     
-    # For each original terminal target, insert a GetNode.
+    # For each original terminal target, insert a GetNode. KJNodes Set/Get
+    # pairs communicate by matching widget value, so no physical Set->Get link
+    # is needed; omitting it is the point of the wire cleanup.
     for orig_link in terminal_links:
         target_id = orig_link.target
         target_node = workflow.nodes.get(target_id)
@@ -241,22 +241,6 @@ def _replace_port_with_set_get(
             orig_source_node.output_links.remove(old_link_id)
         if old_link_id in target_node.input_links:
             target_node.input_links.remove(old_link_id)
-        
-        # Connect SetNode -> GetNode
-        set_to_get_id = set_link_id + 500000 + get_node_id  # unique
-        while set_to_get_id in workflow.links:
-            set_to_get_id += 1
-        set_to_get_link = Link(
-            id=set_to_get_id,
-            source=set_node_id,
-            source_port=0,
-            target=get_node_id,
-            target_port=0,
-            type=link_type
-        )
-        workflow.links[set_to_get_id] = set_to_get_link
-        set_node.output_links.append(set_to_get_id)
-        get_node.input_links.append(set_to_get_id)
         
         # Connect GetNode -> original target (renamed link)
         new_link_id = old_link_id + 3000000 if old_link_id else max(workflow.links.keys()) + 1
@@ -379,7 +363,6 @@ def _estimated_rewrite_cost(workflow: Workflow, src_node: Node, terminal_links: 
     set_node = _synthetic_set_node(workflow, src_node, terminal_links)
     cost = NODE_INSERTION_COST
     cost += _point_distance(_node_center(src_node), _node_center(set_node)) + LINK_INSERTION_COST
-    cost += _fanout_vertical_span(workflow, terminal_links) * HUB_SPAN_COST_FACTOR
 
     for terminal_link in terminal_links:
         target_node = workflow.nodes.get(terminal_link.target)
@@ -388,7 +371,6 @@ def _estimated_rewrite_cost(workflow: Workflow, src_node: Node, terminal_links: 
 
         get_node = _synthetic_get_node(target_node)
         cost += NODE_INSERTION_COST
-        cost += _point_distance(_node_center(set_node), _node_center(get_node)) * HUB_LINK_COST_FACTOR + LINK_INSERTION_COST
         cost += _point_distance(_node_center(get_node), _node_center(target_node)) + LINK_INSERTION_COST
 
     return cost

@@ -121,10 +121,12 @@ def test_optimize_fanout():
     get_nodes = [n for n in optimized.nodes.values() if n.type == "GetNode"]
     assert len(set_nodes) == 1, f"Expected 1 SetNode, got {len(set_nodes)}"
     assert len(get_nodes) == 3, f"Expected 3 GetNodes, got {len(get_nodes)}"
+    assert len(optimized.links) == 4
     
     # SetNode should be connected to source
     set_node = set_nodes[0]
     assert len(set_node.input_links) == 1
+    assert len(set_node.output_links) == 0
     assert set_node.input_links[0] in optimized.links
     assert optimized.links[set_node.input_links[0]].source == 1
     assert set_node.x > optimized.nodes[1].x
@@ -138,6 +140,7 @@ def test_optimize_fanout():
     
     # Each GetNode connected to its consumer
     for get_node in get_nodes:
+        assert len(get_node.input_links) == 0
         assert len(get_node.output_links) == 1
         consumer_link = optimized.links[get_node.output_links[0]]
         assert consumer_link.target in {2,3,4}
@@ -161,6 +164,7 @@ def test_optimize_reroute_fanout():
 
     set_node = set_nodes[0]
     assert len(set_node.input_links) == 1
+    assert len(set_node.output_links) == 0
     assert optimized.links[set_node.input_links[0]].source == 1
 
     get_targets = {
@@ -168,6 +172,7 @@ def test_optimize_reroute_fanout():
         for get_node in get_nodes
     }
     assert get_targets == {3, 4, 5}
+    assert all(len(get_node.input_links) == 0 for get_node in get_nodes)
     logger.info("Reroute fanout optimization test passed")
 
 

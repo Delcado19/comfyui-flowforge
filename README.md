@@ -63,6 +63,7 @@ uv run flowforge-gui
 
 The GUI opens in your browser at the URL shown in the terminal. It starts at `http://127.0.0.1:5173` and automatically picks the next available frontend port when that port is unavailable.
 The launcher also auto-selects an available backend API port and passes it through to the frontend so the browser session stays connected even when local ports are already in use.
+Use **Optimize** in the toolbar to insert Set/Get hubs for eligible high-fanout `MODEL`, `CLIP`, and `VAE` wiring before running layout.
 
 ### One-Click Launchers
 
@@ -149,7 +150,7 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 - Eliminates the long wires entirely, which reduces crossing counts after layout.
 - Breaks inter-group cycles that loader fan-out would otherwise create, allowing the layout algorithm to produce a strictly left-to-right result.
 
-**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, FlowForge estimates the routing cost before and after a rewrite. Local `SetNode -> GetNode` hub links are discounted in that estimate because they behave like a compact distribution spine. Cross-group links are weighted slightly higher so broad inter-group fanouts are prioritized. Candidate savings are recomputed greedily after each rewrite so the optimizer always applies the best remaining candidate on the current graph. The inserted `SetNode` is anchored near the vertical center of its consumer cluster instead of being pinned to the source node's Y position. If the rewritten graph is cheaper, FlowForge inserts one `SetNode` immediately after the source and one `GetNode` before each target. `Reroute` chains are collapsed during detection, so fanout hidden behind reroute nodes is considered too. The original links are removed. The workflow runs identically in ComfyUI.
+**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, FlowForge estimates the routing cost before and after a rewrite. Cross-group links are weighted slightly higher so broad inter-group fanouts are prioritized. Candidate savings are recomputed greedily after each rewrite so the optimizer always applies the best remaining candidate on the current graph. The inserted `SetNode` is anchored near the vertical center of its consumer cluster instead of being pinned to the source node's Y position. If the rewritten graph is cheaper, FlowForge inserts one `SetNode` immediately after the source and one `GetNode` before each target. The Set/Get pair uses the same widget value as its virtual connection key, so no physical `SetNode -> GetNode` link is added. `Reroute` chains are collapsed during detection, so fanout hidden behind reroute nodes is considered too. The original links are removed. The workflow runs identically in ComfyUI.
 
 **Requirement:** comfyui-kjnodes must be installed in your ComfyUI instance, otherwise ComfyUI will show missing-node warnings on load.
 
@@ -173,7 +174,7 @@ Release history is tracked in [CHANGELOG.md](CHANGELOG.md). Release and deployme
 GitHub Actions CI runs backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build on `master`, pull requests, and version tags.
 For local maintainer validation against read-only ComfyUI UI workflows, run `uv run python tools/validate_local_workflows.py`.
 For release readiness, run `uv run python tools/check_release_ready.py`; add `--tag vX.Y.Z --github` after tagging and publishing to verify remote refs, the GitHub Release, and Actions.
-For read-only layout quality metrics across workflow folders, run `uv run python tools/report_layout_quality.py example-workflows`. The report includes aggregate crossing/right-to-left counts and link-category breakdowns for the laid-out result.
+For read-only layout quality metrics across workflow folders, run `uv run python tools/report_layout_quality.py example-workflows`. Add `--optimize` to measure the Set/Get optimizer before layout. The report includes aggregate crossing/right-to-left counts and link-category breakdowns for the laid-out result.
 
 ---
 

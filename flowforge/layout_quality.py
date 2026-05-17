@@ -10,6 +10,7 @@ from typing import Any
 
 from .api import _workflow_to_comfyui_json
 from .layout import LayoutReport, apply as apply_layout
+from .optimizer import optimize as optimize_workflow
 from .parser import parse_comfyui_workflow
 from .workflow_validation import discover_workflow_files
 
@@ -33,6 +34,8 @@ class WorkflowQualityReport:
     path: str
     node_count: int
     link_count: int
+    laid_out_node_count: int
+    laid_out_link_count: int
     group_count: int
     original: GeometryMetrics
     laid_out: GeometryMetrics
@@ -57,6 +60,7 @@ class WorkflowQualitySummary:
     """Aggregate layout quality report for a workflow root."""
 
     root: str
+    optimize_first: bool = False
     discovered_files: int = 0
     checked_workflows: int = 0
     skipped_files: int = 0
@@ -76,6 +80,7 @@ def build_quality_summary(
     root: Path,
     *,
     include_layouted: bool = False,
+    optimize_first: bool = False,
     limit: int | None = None,
 ) -> WorkflowQualitySummary:
     """Build read-only layout quality reports for UI workflow JSON files."""
@@ -95,7 +100,7 @@ def build_quality_summary(
             if not _looks_like_ui_workflow(data):
                 skipped += 1
                 continue
-            reports.append(build_workflow_quality_report(data, relative_path))
+            reports.append(build_workflow_quality_report(data, relative_path, optimize_first=optimize_first))
             checked += 1
         except Exception as exc:
             failures.append(
@@ -107,6 +112,7 @@ def build_quality_summary(
 
     return WorkflowQualitySummary(
         root=str(root),
+        optimize_first=optimize_first,
         discovered_files=len(files),
         checked_workflows=checked,
         skipped_files=skipped,
@@ -115,12 +121,20 @@ def build_quality_summary(
     )
 
 
-def build_workflow_quality_report(data: dict[str, Any], path: str = "<memory>") -> WorkflowQualityReport:
+def build_workflow_quality_report(
+    data: dict[str, Any],
+    path: str = "<memory>",
+    *,
+    optimize_first: bool = False,
+) -> WorkflowQualityReport:
     """Build a quality report for one parsed UI workflow dictionary."""
     workflow = parse_comfyui_workflow(data)
+    if optimize_first:
+        workflow = optimize_workflow(workflow)
     laid_out_workflow = apply_layout(workflow)
     laid_out_data = _workflow_to_comfyui_json(laid_out_workflow)
     layout_report = laid_out_workflow.layout_report
+    category_source = laid_out_data if optimize_first else data
 
     original_metrics = _geometry_metrics(data)
     laid_out_metrics = _geometry_metrics(laid_out_data)
@@ -128,12 +142,14 @@ def build_workflow_quality_report(data: dict[str, Any], path: str = "<memory>") 
         path=path,
         node_count=len(data.get("nodes", [])),
         link_count=len(data.get("links", [])),
+        laid_out_node_count=len(laid_out_data.get("nodes", [])),
+        laid_out_link_count=len(laid_out_data.get("links", [])),
         group_count=len(data.get("groups", [])) if isinstance(data.get("groups", []), list) else 0,
         original=original_metrics,
         laid_out=laid_out_metrics,
         moved_nodes=_count_moved_nodes(data, laid_out_data),
-        laid_out_crossing_categories=_count_crossing_categories(data, laid_out_data),
-        laid_out_right_to_left_categories=_count_right_to_left_categories(data, laid_out_data),
+        laid_out_crossing_categories=_count_crossing_categories(category_source, laid_out_data),
+        laid_out_right_to_left_categories=_count_right_to_left_categories(category_source, laid_out_data),
         layout_candidate_count=_layout_candidate_count(layout_report),
         selected_layout_candidate=_selected_layout_candidate(layout_report),
         layout_score=_layout_score(layout_report),
@@ -144,6 +160,7 @@ def summarize_quality_text(summary: WorkflowQualitySummary, *, top: int = 10) ->
     """Format a compact text summary for terminal output."""
     lines = [
         f"Root: {summary.root}",
+        f"Optimization: {'enabled' if summary.optimize_first else 'disabled'}",
         f"Discovered JSON files: {summary.discovered_files}",
         f"Checked UI workflows: {summary.checked_workflows}",
         f"Skipped non-workflow files: {summary.skipped_files}",
@@ -152,6 +169,8 @@ def summarize_quality_text(summary: WorkflowQualitySummary, *, top: int = 10) ->
     if summary.reports:
         total_nodes = sum(report.node_count for report in summary.reports)
         total_links = sum(report.link_count for report in summary.reports)
+        laid_out_nodes = sum(report.laid_out_node_count for report in summary.reports)
+        laid_out_links = sum(report.laid_out_link_count for report in summary.reports)
         original_crossings = sum(report.original.link_crossings for report in summary.reports)
         laid_out_crossings = sum(report.laid_out.link_crossings for report in summary.reports)
         original_rtl = sum(report.original.right_to_left_links for report in summary.reports)
@@ -164,8 +183,8 @@ def summarize_quality_text(summary: WorkflowQualitySummary, *, top: int = 10) ->
         )
         lines.extend(
             [
-                f"Total nodes: {total_nodes}",
-                f"Total links: {total_links}",
+                _format_count_change("Total nodes", total_nodes, laid_out_nodes),
+                _format_count_change("Total links", total_links, laid_out_links),
                 f"Straight-line crossings: {original_crossings} -> {laid_out_crossings}",
                 f"Right-to-left links: {original_rtl} -> {laid_out_rtl}",
             ]
@@ -204,6 +223,12 @@ def _geometry_metrics(data: dict[str, Any]) -> GeometryMetrics:
         right_to_left_links=_count_right_to_left_links(data, centers),
         link_crossings=_count_link_crossings(data, centers),
     )
+
+
+def _format_count_change(label: str, original: int, laid_out: int) -> str:
+    if original == laid_out:
+        return f"{label}: {original}"
+    return f"{label}: {original} -> {laid_out}"
 
 
 def _node_centers(data: dict[str, Any]) -> dict[int, tuple[float, float]]:
