@@ -18,6 +18,10 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Compact saved node sizes before layout, keep long text/widget nodes tall enough for their visible content, and shrink group rectangles around optimized group-local node layouts.
 - Stack variable-height nodes cumulatively inside group-local layers so compact layouts do not overlap nodes in the same layer.
 
+### Fixed
+
+- Match the compact node-height formula to the canvas renderer by stacking slot inputs and widget rows instead of taking their maximum, so laid-out nodes no longer overlap their neighbours when widgets push real render height past the reserved slot.
+
 ## [0.2.0] - 2026-05-08
 
 ### Added

@@ -513,46 +513,62 @@ def _shrink_nodes_to_minimum_size(workflow: Workflow) -> None:
 
 
 def _minimum_node_size(node: Node) -> tuple[float, float]:
-    """Return a conservative compact size for ComfyUI node geometry."""
+    """Return a conservative compact size for ComfyUI node geometry.
+
+    Mirrors the frontend renderer in ``frontend/src/utils/nodeGeometry.ts``:
+    inputs/widgets stack vertically below the title, outputs occupy the
+    right-hand slot column, and the returned height must be at least the
+    content height the renderer derives from the same node.
+    """
     if _is_reroute_node(node):
         return REROUTE_NODE_MIN_WIDTH, REROUTE_NODE_MIN_HEIGHT
 
     if _is_decorative_node(node):
         return DECORATIVE_NODE_MIN_WIDTH, DECORATIVE_NODE_MIN_HEIGHT
 
-    row_count = max(
-        1,
-        node.input_count,
-        node.output_count,
-        len(node.input_links),
-        len(node.output_links),
-        len(node.widgets_values),
-    )
     if node.collapsed:
-        min_height = NODE_MIN_HEIGHT
-    else:
-        row_height = max(
-            NODE_SLOT_OFFSET + row_count * NODE_ROW_HEIGHT,
-            _minimum_widget_rows_height(node.widgets_values),
-            NODE_SLOT_OFFSET + node.output_count * NODE_ROW_HEIGHT,
-        )
-        min_height = max(
-            NODE_MIN_HEIGHT,
-            NODE_TITLE_HEIGHT + row_height + NODE_BOTTOM_PADDING,
-        )
+        return NODE_MIN_WIDTH, NODE_MIN_HEIGHT
+
+    slot_rows = max(0, node.input_count - node.widget_input_count)
+    widget_heights = _widget_row_heights(
+        node.widgets_values, node.widget_input_count
+    )
+
+    content_height = _stacked_rows_height(slot_rows, widget_heights)
+    output_height = NODE_SLOT_OFFSET + node.output_count * NODE_ROW_HEIGHT
+
+    min_height = max(
+        NODE_MIN_HEIGHT,
+        NODE_TITLE_HEIGHT
+        + max(content_height, output_height)
+        + NODE_BOTTOM_PADDING,
+    )
     return NODE_MIN_WIDTH, min_height
 
 
-def _minimum_widget_rows_height(values: list) -> float:
-    if not values:
-        return NODE_SLOT_OFFSET
+def _widget_row_heights(values: list, widget_input_count: int) -> list[float]:
+    """Heights of widget rows in render order.
 
-    total = NODE_SLOT_OFFSET
-    for index, value in enumerate(values):
-        if index > 0:
-            total += NODE_ROW_GAP
-        total += _minimum_widget_row_height(value)
-    return total
+    Saved ``widgets_values`` drive multiline-aware row heights. When the node
+    declares more widget-inputs than it has saved values (common when widgets
+    were never edited), the extra rows fall back to the single-row height.
+    """
+    heights = [_minimum_widget_row_height(value) for value in values]
+    extra = max(0, widget_input_count - len(heights))
+    heights.extend([NODE_ROW_HEIGHT] * extra)
+    return heights
+
+
+def _stacked_rows_height(slot_rows: int, widget_heights: list[float]) -> float:
+    """Total height of stacked input/widget rows, matching the frontend."""
+    row_heights: list[float] = [NODE_ROW_HEIGHT] * slot_rows + list(widget_heights)
+    if not row_heights:
+        return NODE_SLOT_OFFSET
+    return (
+        NODE_SLOT_OFFSET
+        + sum(row_heights)
+        + (len(row_heights) - 1) * NODE_ROW_GAP
+    )
 
 
 def _minimum_widget_row_height(value) -> float:

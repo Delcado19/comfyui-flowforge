@@ -149,6 +149,9 @@ def test_internal_layout_stacks_variable_height_nodes_without_overlap():
 def test_nodes_shrink_to_compact_size_before_layout():
     logger.info("Testing compact node size preprocessing")
     wf = Workflow()
+    # Real ComfyUI SaveImageClean: 1 slot input + 10 widget-inputs, 13 saved
+    # widget values. Stacked rows = 1 + 13 = 14 single-line rows.
+    # min_height = TITLE 26 + SLOT_OFFSET 8 + 14*20 + 13*4 + BOTTOM 12 = 378.
     large = Node(
         id=1,
         type="SaveImageClean",
@@ -156,6 +159,7 @@ def test_nodes_shrink_to_compact_size_before_layout():
         y=0,
         size=[960, 1100],
         input_count=11,
+        widget_input_count=10,
         output_count=0,
         widgets_values=[""] * 13,
     )
@@ -165,15 +169,44 @@ def test_nodes_shrink_to_compact_size_before_layout():
 
     _shrink_nodes_to_minimum_size(wf)
 
-    assert large.size == [200.0, 354.0]
+    assert large.size == [200.0, 378.0]
     assert already_small.size == [140.0, 60.0]
     assert reroute.size == [40.0, 40.0]
     logger.info("Compact node size preprocessing test passed")
 
 
+def test_node_compaction_stacks_slot_and_widget_rows_for_ksampler():
+    logger.info("Testing KSampler stacked compaction matches renderer")
+    wf = Workflow()
+    # Real modern KSampler: 4 slot inputs (model, positive, negative,
+    # latent_image) + 6 widget-inputs (seed, steps, cfg, sampler_name,
+    # scheduler, denoise), with 7 saved values (extra control_after_generate).
+    # Stacked rows = 4 + 7 = 11 single-line rows.
+    # min_height = 26 + 8 + 11*20 + 10*4 + 12 = 306.
+    ksampler = Node(
+        id=1,
+        type="KSampler",
+        x=0,
+        y=0,
+        size=[300, 720],
+        input_count=10,
+        widget_input_count=6,
+        output_count=1,
+        widgets_values=[957297162658210, "fixed", 5, 1, "euler", "simple", 1],
+    )
+    wf.nodes = {1: ksampler}
+
+    _shrink_nodes_to_minimum_size(wf)
+
+    assert ksampler.size == [200.0, 306.0]
+    logger.info("KSampler stacked compaction test passed")
+
+
 def test_node_compaction_preserves_long_text_widget_height():
     logger.info("Testing long text widget compact height")
     wf = Workflow()
+    # Modern CLIPTextEncode: 1 slot input (clip) + 1 widget-input (text).
+    # The long prompt forces the widget row to multiline height.
     node = Node(
         id=1,
         type="CLIPTextEncode",
@@ -181,6 +214,7 @@ def test_node_compaction_preserves_long_text_widget_height():
         y=0,
         size=[440, 580],
         input_count=2,
+        widget_input_count=1,
         output_count=1,
         widgets_values=["long prompt " * 40],
     )
@@ -189,7 +223,9 @@ def test_node_compaction_preserves_long_text_widget_height():
     _shrink_nodes_to_minimum_size(wf)
 
     assert node.size[0] == 200.0
-    assert node.size[1] >= 218.0
+    # Multiline widget contributes at least 60 px; height must clearly exceed
+    # the single-line stacked result (1 slot row + 1 widget row = 76 px content).
+    assert node.size[1] >= 200.0
     logger.info("Long text widget compact height test passed")
 
 
