@@ -63,7 +63,7 @@ uv run flowforge-gui
 
 The GUI opens in your browser at the URL shown in the terminal. It starts at `http://127.0.0.1:5173` and automatically picks the next available frontend port when that port is unavailable.
 The launcher also auto-selects an available backend API port and passes it through to the frontend so the browser session stays connected even when local ports are already in use.
-Use **Optimize** in the toolbar to insert Set/Get hubs for eligible high-fanout `MODEL`, `CLIP`, and `VAE` wiring before running layout.
+Use **Optimize + Layout** in the toolbar for the normal cleanup flow: insert Set/Get hubs for eligible high-fanout `MODEL`, `CLIP`, and `VAE` wiring, then run layout. Use **Layout Only** when the workflow should keep its original node graph.
 
 ### One-Click Launchers
 

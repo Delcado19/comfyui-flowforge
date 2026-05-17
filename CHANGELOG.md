@@ -9,7 +9,7 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Release-readiness checker for local gates, workflow validation, tags, GitHub Releases, and GitHub Actions.
 - Read-only layout quality report for real workflow folders.
 - Link-category breakdowns in read-only layout quality reports.
-- Frontend toolbar action for running the Set/Get optimizer on the loaded workflow.
+- Frontend toolbar action for running the Set/Get optimizer and layout as one cleanup flow.
 - Optional Set/Get optimizer mode for read-only layout quality reports.
 
 ### Changed
