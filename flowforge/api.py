@@ -201,6 +201,7 @@ def _merge_nodes(
             node_data = _new_node_json(node, workflow)
         else:
             node_data["pos"] = [node.x, node.y]
+            node_data["size"] = node.size
             if node.widgets_values or "widgets_values" in node_data:
                 node_data["widgets_values"] = deepcopy(node.widgets_values)
             if sync_link_refs:

@@ -15,6 +15,9 @@ class Node:
     size: List[float] = field(default_factory=lambda: [0.0, 0.0])
     mode: int = 0
     order: int = 0
+    input_count: int = 0
+    output_count: int = 0
+    collapsed: bool = False
     input_links: List[int] = field(default_factory=list)
     output_links: List[int] = field(default_factory=list)
     widgets_values: List[Any] = field(default_factory=list)  # For SetNode/GetNode

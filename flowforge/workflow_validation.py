@@ -99,7 +99,7 @@ def validate_layout_roundtrip(data: dict[str, Any]) -> None:
         "top-level fields changed outside nodes/groups",
     )
     _assert_equal(data.get("links", []), result.get("links", []), "links changed")
-    _assert_equal(_nodes_without_positions(data), _nodes_without_positions(result), "node metadata changed")
+    _assert_equal(_nodes_without_layout_fields(data), _nodes_without_layout_fields(result), "node metadata changed")
     _assert_equal(_groups_without_bounding(data), _groups_without_bounding(result), "group metadata changed")
 
 
@@ -117,12 +117,12 @@ def _top_level_without_layout_fields(data: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in data.items() if key not in {"nodes", "groups"}}
 
 
-def _nodes_without_positions(data: dict[str, Any]) -> list[dict[str, Any]]:
+def _nodes_without_layout_fields(data: dict[str, Any]) -> list[dict[str, Any]]:
     nodes = data.get("nodes", [])
     if not isinstance(nodes, list):
         return []
     return [
-        {key: value for key, value in node.items() if key != "pos"}
+        {key: value for key, value in node.items() if key not in {"pos", "size"}}
         for node in nodes
         if isinstance(node, dict)
     ]

@@ -18,6 +18,7 @@ from flowforge.layout import (
     _resolve_layout_candidate_count,
     _assign_longest_path_layers,
     _minimize_layer_crossings,
+    _shrink_nodes_to_minimum_size,
     _update_bounding_boxes,
 )
 from flowforge.logger import setup_logger
@@ -124,6 +125,74 @@ def test_internal_layout_stages():
     logger.info("Internal layout test passed")
 
 
+def test_internal_layout_stacks_variable_height_nodes_without_overlap():
+    logger.info("Testing variable-height internal layer packing")
+    wf = Workflow()
+    tall = Node(id=1, type="Tall", x=0, y=0, size=[200, 260])
+    short = Node(id=2, type="Short", x=0, y=20, size=[200, 60])
+    target = Node(id=3, type="Target", x=400, y=0, size=[200, 60])
+    wf.nodes = {1: tall, 2: short, 3: target}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=3, target_port=0, type="DATA"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=1, type="DATA"),
+    }
+    wf.groups = [Group(id=1, name="packed", bounding=[0, 0, 900, 700], nodes=[tall, short, target])]
+
+    _layout_groups_internal(wf, LayoutSettings(node_x_distance=40, node_y_distance=40))
+
+    same_layer_nodes = sorted([wf.nodes[1], wf.nodes[2]], key=lambda node: node.y)
+    first, second = same_layer_nodes
+    assert first.y + first.size[1] + 40 <= second.y
+    logger.info("Variable-height internal layer packing test passed")
+
+
+def test_nodes_shrink_to_compact_size_before_layout():
+    logger.info("Testing compact node size preprocessing")
+    wf = Workflow()
+    large = Node(
+        id=1,
+        type="SaveImageClean",
+        x=0,
+        y=0,
+        size=[960, 1100],
+        input_count=11,
+        output_count=0,
+        widgets_values=[""] * 13,
+    )
+    already_small = Node(id=2, type="VAELoader", x=0, y=0, size=[140, 60], input_count=1, output_count=1)
+    reroute = Node(id=3, type="Reroute", x=0, y=0, size=[100, 80], input_count=1, output_count=1)
+    wf.nodes = {1: large, 2: already_small, 3: reroute}
+
+    _shrink_nodes_to_minimum_size(wf)
+
+    assert large.size == [200.0, 354.0]
+    assert already_small.size == [140.0, 60.0]
+    assert reroute.size == [40.0, 40.0]
+    logger.info("Compact node size preprocessing test passed")
+
+
+def test_node_compaction_preserves_long_text_widget_height():
+    logger.info("Testing long text widget compact height")
+    wf = Workflow()
+    node = Node(
+        id=1,
+        type="CLIPTextEncode",
+        x=0,
+        y=0,
+        size=[440, 580],
+        input_count=2,
+        output_count=1,
+        widgets_values=["long prompt " * 40],
+    )
+    wf.nodes = {1: node}
+
+    _shrink_nodes_to_minimum_size(wf)
+
+    assert node.size[0] == 200.0
+    assert node.size[1] >= 218.0
+    logger.info("Long text widget compact height test passed")
+
+
 def test_longest_path_layer_assignment_uses_deepest_dependency():
     logger.info("Testing longest-path layer assignment")
     node_ids = {1, 2, 3, 4, 5}
@@ -216,8 +285,8 @@ def test_bounding_box_update():
     logger.info("Bounding box update test passed")
 
 
-def test_layout_preserves_resized_group_container():
-    logger.info("Testing resized group container preservation")
+def test_layout_compacts_resized_group_container():
+    logger.info("Testing resized group container compaction")
     wf = Workflow()
     group = Group(id=1, name="Load Model", bounding=[0, 0, 900, 500])
     wf.groups = [group]
@@ -233,8 +302,8 @@ def test_layout_preserves_resized_group_container():
 
     result = apply(wf)
 
-    assert result.groups[0].bounding[2] >= 900
-    assert result.groups[0].bounding[3] >= 500
+    assert result.groups[0].bounding[2] < 900
+    assert result.groups[0].bounding[3] < 500
     gx, gy, gw, gh = result.groups[0].bounding
     for node in result.groups[0].nodes:
         assert gx <= node.x
@@ -242,7 +311,7 @@ def test_layout_preserves_resized_group_container():
         assert node.x + node.size[0] <= gx + gw
         assert node.y + node.size[1] <= gy + gh
 
-    logger.info("Resized group container preservation test passed")
+    logger.info("Resized group container compaction test passed")
 
 
 def test_decorative_nodes_move_to_left_column():
