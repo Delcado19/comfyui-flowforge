@@ -16,6 +16,7 @@ class Node:
     mode: int = 0
     order: int = 0
     input_count: int = 0
+    widget_input_count: int = 0
     output_count: int = 0
     collapsed: bool = False
     input_links: List[int] = field(default_factory=list)
