@@ -30,6 +30,11 @@ def main() -> int:
         action="store_true",
         help="Include generated *_layouted.json files.",
     )
+    parser.add_argument(
+        "--optimize",
+        action="store_true",
+        help="Run the Set/Get optimizer before layout metrics are measured.",
+    )
     parser.add_argument("--limit", type=int, help="Report only the first N discovered JSON files.")
     parser.add_argument("--top", type=int, default=10, help="Number of largest workflows to print.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
@@ -39,6 +44,7 @@ def main() -> int:
     summary = build_quality_summary(
         args.root,
         include_layouted=args.include_layouted,
+        optimize_first=args.optimize,
         limit=args.limit,
     )
 

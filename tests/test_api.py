@@ -224,6 +224,9 @@ async def test_optimize_endpoint(client):
     # Count GetNode instances in the nodes list
     get_count = sum(1 for n in data['nodes'] if n['type'] == 'GetNode')
     assert get_count >= 3
+    set_node_ids = {n['id'] for n in data['nodes'] if n['type'] == 'SetNode'}
+    get_node_ids = {n['id'] for n in data['nodes'] if n['type'] == 'GetNode'}
+    assert not any(link[1] in set_node_ids and link[3] in get_node_ids for link in data['links'])
     logger.info("Optimize endpoint OK – Set/Get nodes inserted")
 
 

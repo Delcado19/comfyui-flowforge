@@ -22,6 +22,7 @@ Python package builds can stage the built frontend into `flowforge/frontend_dist
 - **ComfyNode.vue** - ComfyUI-like node component using workflow dimensions, colors, slots, and widget controls. Widget-backed inputs render on their widget rows, while unconnected widget inputs are not duplicated as separate free sockets.
 - **ComfyConnection.vue** - SVG Bezier curves connecting ports
 - **useWorkflowStore.ts** - Pinia store for full ComfyUI workflow JSON state
+- **Toolbar Optimize Action** - Calls `/optimize` to insert Set/Get hubs for eligible high-fanout `MODEL`, `CLIP`, and `VAE` wiring before layout
 - **Group and Minimap Layers** - Background group regions, draggable group titles, per-group delete buttons, resize handles, and a minimap for navigation
 - **Toolbar Spacing Control** - Live X/Y sliders plus numeric fields that re-run `/layout` with the current spacing values; the backend compacts saved node sizes, evaluates multiple spacing candidates, keeps the most compact result, and reports the selected candidate in a response header
 - **Toolbar Group Actions** - Button to clear all groups in the workflow; drag-based group creation starts from the canvas overlay controls
@@ -30,6 +31,7 @@ Python package builds can stage the built frontend into `flowforge/frontend_dist
 ## Usage
 
 - **Open** - Load a workflow JSON file
+- **Optimize** - POST the full workflow JSON to `/optimize` and replace eligible fanout wiring with Set/Get hubs
 - **Layout** - POST the full workflow JSON to `/layout` for auto-layout; the response may compact node sizes and group bounds
 - **Before/After** - Toggle the previous node positions after a layout run
 - **Save** - Download the current full workflow JSON

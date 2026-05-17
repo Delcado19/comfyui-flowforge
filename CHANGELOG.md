@@ -9,6 +9,8 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Release-readiness checker for local gates, workflow validation, tags, GitHub Releases, and GitHub Actions.
 - Read-only layout quality report for real workflow folders.
 - Link-category breakdowns in read-only layout quality reports.
+- Frontend toolbar action for running the Set/Get optimizer on the loaded workflow.
+- Optional Set/Get optimizer mode for read-only layout quality reports.
 
 ### Changed
 
@@ -17,6 +19,7 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Refine internal layer ordering with adjacent-layer barycenter sweeps to reduce grouped wire crossings.
 - Compact saved node sizes before layout, keep long text/widget nodes tall enough for their visible content, and shrink group rectangles around optimized group-local node layouts.
 - Stack variable-height nodes cumulatively inside group-local layers so compact layouts do not overlap nodes in the same layer.
+- Use virtual Set/Get pairing without physical `SetNode -> GetNode` links when optimizing high-fanout wiring.
 
 ### Fixed
 

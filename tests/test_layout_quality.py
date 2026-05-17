@@ -36,6 +36,8 @@ def test_build_workflow_quality_report_counts_geometry_and_layout_metrics():
     assert report.path == "crossing.json"
     assert report.node_count == 4
     assert report.link_count == 2
+    assert report.laid_out_node_count == 4
+    assert report.laid_out_link_count == 2
     assert report.group_count == 1
     assert report.original.width == 560
     assert report.original.link_crossings == 1
@@ -44,6 +46,33 @@ def test_build_workflow_quality_report_counts_geometry_and_layout_metrics():
     assert sum(report.laid_out_right_to_left_categories.values()) == report.laid_out.right_to_left_links
     assert report.layout_candidate_count is not None
     assert report.layout_score is not None
+
+
+def test_build_workflow_quality_report_can_optimize_before_layout():
+    workflow = {
+        "nodes": [
+            {"id": 1, "type": "UNETLoader", "pos": [0, 0], "size": [200, 60], "outputs": [{"links": [10, 11, 12]}]},
+            {"id": 2, "type": "KSampler", "pos": [900, 0], "size": [200, 100], "inputs": [{"link": 10}]},
+            {"id": 3, "type": "KSampler", "pos": [1100, 300], "size": [200, 100], "inputs": [{"link": 11}]},
+            {"id": 4, "type": "KSampler", "pos": [1300, 600], "size": [200, 100], "inputs": [{"link": 12}]},
+        ],
+        "links": [
+            [10, 1, 0, 2, 0, "MODEL"],
+            [11, 1, 0, 3, 0, "MODEL"],
+            [12, 1, 0, 4, 0, "MODEL"],
+        ],
+        "groups": [],
+        "last_node_id": 4,
+        "last_link_id": 12,
+    }
+
+    report = build_workflow_quality_report(workflow, "fanout.json", optimize_first=True)
+
+    assert report.node_count == 4
+    assert report.laid_out_node_count > report.node_count
+    assert report.laid_out_link_count > report.link_count
+    assert report.moved_nodes >= 4
+    assert report.layout_candidate_count is not None
 
 
 def test_build_quality_summary_skips_non_workflow_files(tmp_path):
@@ -67,8 +96,18 @@ def test_summarize_quality_text_includes_aggregate_metrics(tmp_path):
     text = summarize_quality_text(summary)
 
     assert "Checked UI workflows: 1" in text
+    assert "Optimization: disabled" in text
     assert "Straight-line crossings:" in text
     assert "Largest laid-out workflows" in text
+
+
+def test_summarize_quality_text_mentions_optimizer_mode(tmp_path):
+    (tmp_path / "workflow.json").write_text(json.dumps(WORKFLOW), encoding="utf-8")
+    summary = build_quality_summary(tmp_path, optimize_first=True)
+
+    text = summarize_quality_text(summary)
+
+    assert "Optimization: enabled" in text
 
 
 def test_summarize_quality_text_includes_category_breakdowns(tmp_path):
