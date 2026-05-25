@@ -52,6 +52,7 @@ uv run python tools/check_release_ready.py
 When a release changes workflow parsing, layout, optimizer behavior, or serialization, also run a read-only sanity check against local ComfyUI workflow JSON before tagging.
 
 ```powershell
+uv run pytest tests/test_example_workflows.py
 uv run python tools/validate_local_workflows.py
 ```
 

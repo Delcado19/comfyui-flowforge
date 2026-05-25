@@ -347,6 +347,18 @@ function deleteGroup(groupId: number | string) {
   store.deleteGroup(groupId)
 }
 
+function isGroupPinned(group: ComfyGroup): boolean {
+  return Boolean(group.flags && group.flags.pinned === true)
+}
+
+function toggleGroupPinned(group: ComfyGroup) {
+  store.toggleGroupPinned(group.id)
+}
+
+function unpinAll() {
+  store.unpinAll()
+}
+
 function getPortPosition(node: WorkflowNode, portIndex: number, isOutput: boolean): [number, number] {
   const nodeLeft = node.pos[0]
   const baseOffset = typeof node.type === 'string' && node.type.toLowerCase().includes('reroute') ? REROUTE_SLOT_OFFSET : SLOT_ROW_OFFSET
@@ -794,6 +806,22 @@ watch(
       </button>
       <button
         type="button"
+        class="toolbar-pin-button"
+        title="Unpin all nodes and groups"
+        :disabled="!store.hasPinnedItems"
+        @pointerdown.stop
+        @click="unpinAll"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path class="pin-shadow" d="M8.2 15.3 3.6 20c-.4.4-.4 1 0 1.4s1 .4 1.4 0l4.7-4.6z" />
+          <path class="pin-needle" d="M8.2 15.3 3.6 20c-.4.4-.4 1 0 1.4s1 .4 1.4 0l4.7-4.6z" />
+          <path class="pin-body" d="M7.2 6.5c-.9 0-1.6.7-1.6 1.6 0 .4.2.8.5 1.1l2.4 2.4-2.3 2.3c-.5.5-.5 1.4 0 1.9l2 2c.5.5 1.4.5 1.9 0l2.3-2.3 2.4 2.4c.3.3.7.5 1.1.5.9 0 1.6-.7 1.6-1.6v-4.1l3.2-3.2c.5-.5.5-1.4 0-1.9l-4.3-4.3c-.5-.5-1.4-.5-1.9 0l-3.2 3.2z" />
+          <path class="pin-highlight" d="M7.4 7.8c-.3 0-.5.2-.5.5 0 .1.1.2.1.3l1.9 1.9h6.7l3.2-3.2-2.9-2.9-3.2 3.2z" />
+          <path class="pin-slash" d="M4 4l16 16" />
+        </svg>
+      </button>
+      <button
+        type="button"
         title="Delete all groups"
         :disabled="groups.length === 0"
         @pointerdown.stop
@@ -817,6 +845,7 @@ watch(
         v-for="group in groups"
         :key="`group-${group.id}`"
         class="workflow-group"
+        :class="{ 'is-pinned': isGroupPinned(group) }"
         :style="getGroupStyle(group)"
       >
         <div
@@ -825,6 +854,21 @@ watch(
           @pointerdown="onGroupPointerDown($event, group)"
       >
           <span class="workflow-group-title-text">{{ group.title }}</span>
+          <button
+            type="button"
+            class="workflow-group-pin-button"
+            :class="{ active: isGroupPinned(group) }"
+            :title="isGroupPinned(group) ? 'Unpin group' : 'Pin group'"
+            @pointerdown.stop
+            @click.stop="toggleGroupPinned(group)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path class="pin-shadow" d="M8.2 15.3 3.6 20c-.4.4-.4 1 0 1.4s1 .4 1.4 0l4.7-4.6z" />
+              <path class="pin-needle" d="M8.2 15.3 3.6 20c-.4.4-.4 1 0 1.4s1 .4 1.4 0l4.7-4.6z" />
+              <path class="pin-body" d="M7.2 6.5c-.9 0-1.6.7-1.6 1.6 0 .4.2.8.5 1.1l2.4 2.4-2.3 2.3c-.5.5-.5 1.4 0 1.9l2 2c.5.5 1.4.5 1.9 0l2.3-2.3 2.4 2.4c.3.3.7.5 1.1.5.9 0 1.6-.7 1.6-1.6v-4.1l3.2-3.2c.5-.5.5-1.4 0-1.9l-4.3-4.3c-.5-.5-1.4-.5-1.9 0l-3.2 3.2z" />
+              <path class="pin-highlight" d="M7.4 7.8c-.3 0-.5.2-.5.5 0 .1.1.2.1.3l1.9 1.9h6.7l3.2-3.2-2.9-2.9-3.2 3.2z" />
+            </svg>
+          </button>
           <button
             type="button"
             class="workflow-group-delete-button"
@@ -958,7 +1002,8 @@ watch(
   pointer-events: auto;
 }
 .group-toolbar button,
-.workflow-group-delete-button {
+.workflow-group-delete-button,
+.workflow-group-pin-button {
   width: 28px;
   height: 28px;
   padding: 0;
@@ -969,8 +1014,55 @@ watch(
   cursor: pointer;
 }
 .group-toolbar button:hover:not(:disabled),
-.workflow-group-delete-button:hover {
+.workflow-group-delete-button:hover,
+.workflow-group-pin-button:hover,
+.workflow-group-pin-button.active {
   background: #3a3a3a;
+}
+.toolbar-pin-button svg,
+.workflow-group-pin-button svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  margin: 4px auto;
+  transform: rotate(-42deg);
+}
+.toolbar-pin-button .pin-slash {
+  fill: none;
+  stroke: #f0f0f0;
+  stroke-linecap: round;
+  stroke-width: 2.4;
+}
+.pin-body {
+  fill: #8a8a8a;
+}
+.pin-highlight {
+  fill: #b8b8b8;
+}
+.pin-needle {
+  fill: #9a9a9a;
+}
+.pin-shadow {
+  fill: rgb(0 0 0 / 45%);
+  transform: translate(1px, 1px);
+}
+.workflow-group-pin-button {
+  flex: 0 0 auto;
+}
+.workflow-group-pin-button.active {
+  border-color: rgb(255 92 140 / 65%);
+}
+.workflow-group-pin-button.active .pin-body,
+.toolbar-pin-button:not(:disabled) .pin-body {
+  fill: #e92866;
+}
+.workflow-group-pin-button.active .pin-highlight,
+.toolbar-pin-button:not(:disabled) .pin-highlight {
+  fill: #ff5f8d;
+}
+.workflow-group-pin-button.active .pin-needle,
+.toolbar-pin-button:not(:disabled) .pin-needle {
+  fill: #b8b8b8;
 }
 .group-toolbar button:disabled {
   cursor: default;
@@ -989,7 +1081,7 @@ watch(
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 1;
+  z-index: 3;
 }
 .groups-layer {
   position: absolute;
@@ -1019,6 +1111,11 @@ watch(
   border: 1px solid rgb(63 120 158 / 45%);
   border-radius: 2px;
   background: rgb(63 120 158 / 10%);
+}
+.workflow-group.is-pinned {
+  box-shadow:
+    inset 0 0 0 1px rgb(255 209 102 / 45%),
+    0 0 0 1px rgb(255 209 102 / 18%);
 }
 .workflow-group-title {
   position: absolute;
@@ -1115,13 +1212,13 @@ watch(
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 2;
+  z-index: 1;
 }
 .ports-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  z-index: 3;
+  z-index: 4;
 }
 :deep(.comfy-node) {
   pointer-events: auto;

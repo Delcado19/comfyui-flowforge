@@ -186,6 +186,98 @@ def test_optimize_skips_low_value_fanout():
     logger.info("Low-value fanout correctly skipped")
 
 
+def test_optimize_skips_upstream_transformer_fanout():
+    logger.info("Testing optimizer skips fanout into pass-through transformer nodes")
+    wf = Workflow()
+    clip = Node(id=1, type="CLIPLoaderGGUF", x=0, y=0, size=[220, 80])
+    lora = Node(id=2, type="Power Lora Loader (rgthree)", x=320, y=0, size=[260, 220])
+    text = Node(id=3, type="TextEncodeQwenImageEditPlus", x=900, y=160, size=[260, 180])
+    negative = Node(id=4, type="CLIPTextEncode", x=1500, y=220, size=[220, 120])
+    wf.nodes = {1: clip, 2: lora, 3: text, 4: negative}
+    wf.groups = [
+        Group(id=1, name="models", nodes=[clip, lora], bounding=[-40, -40, 700, 340]),
+        Group(id=2, name="core", nodes=[text, negative], bounding=[860, 120, 960, 380]),
+    ]
+
+    links = [
+        Link(id=10, source=clip.id, source_port=0, target=lora.id, target_port=1, type="CLIP"),
+        Link(id=11, source=clip.id, source_port=0, target=text.id, target_port=0, type="CLIP"),
+        Link(id=12, source=lora.id, source_port=1, target=negative.id, target_port=0, type="CLIP"),
+    ]
+    for link in links:
+        wf.links[link.id] = link
+        wf.nodes[link.source].output_links.append(link.id)
+        wf.nodes[link.target].input_links.append(link.id)
+
+    optimized = optimize(wf)
+
+    set_sources = {
+        optimized.links[node.input_links[0]].source
+        for node in optimized.nodes.values()
+        if node.type == "SetNode"
+    }
+    assert clip.id not in set_sources
+    assert lora.id in set_sources
+    logger.info("Upstream transformer fanout skip test passed")
+
+
+def test_optimize_long_single_cross_group_model_link():
+    logger.info("Testing optimizer rewrites long single cross-group links")
+    wf = Workflow()
+    lora = Node(id=1, type="Power Lora Loader (rgthree)", x=0, y=0, size=[260, 220])
+    sampler = Node(id=2, type="KSampler", x=1600, y=120, size=[320, 360])
+    wf.nodes = {1: lora, 2: sampler}
+    wf.groups = [
+        Group(id=1, name="models", nodes=[lora], bounding=[-40, -40, 360, 320]),
+        Group(id=2, name="core", nodes=[sampler], bounding=[1560, 80, 420, 460]),
+    ]
+    link = Link(id=10, source=lora.id, source_port=0, target=sampler.id, target_port=0, type="MODEL")
+    wf.links[link.id] = link
+    lora.output_links.append(link.id)
+    sampler.input_links.append(link.id)
+
+    optimized = optimize(wf)
+
+    set_nodes = [node for node in optimized.nodes.values() if node.type == "SetNode"]
+    get_nodes = [node for node in optimized.nodes.values() if node.type == "GetNode"]
+    assert len(set_nodes) == 1
+    assert len(get_nodes) == 1
+    assert optimized.links[set_nodes[0].input_links[0]].source == lora.id
+    assert optimized.links[get_nodes[0].output_links[0]].target == sampler.id
+    logger.info("Long single cross-group link optimization test passed")
+
+
+def test_optimize_skips_fanout_touching_pinned_group():
+    logger.info("Testing optimizer skips fanout that touches pinned geometry")
+    wf = Workflow()
+    source = Node(id=1, type="UNETLoader", x=100, y=100, size=[200, 60])
+    target_a = Node(id=2, type="KSampler", x=900, y=100, size=[200, 100])
+    target_b = Node(id=3, type="KSampler", x=1200, y=420, size=[200, 100])
+    pinned_group = Group(id=1, name="control", bounding=[40, 40, 1480, 640], pinned=True)
+    wf.nodes = {1: source, 2: target_a, 3: target_b}
+    wf.groups = [pinned_group]
+
+    for index, target in enumerate((target_a, target_b), start=10):
+        link = Link(
+            id=index,
+            source=source.id,
+            source_port=0,
+            target=target.id,
+            target_port=0,
+            type="MODEL",
+        )
+        wf.links[link.id] = link
+        source.output_links.append(link.id)
+        target.input_links.append(link.id)
+
+    optimized = optimize(wf)
+
+    assert [node.type for node in optimized.nodes.values()].count("SetNode") == 0
+    assert [node.type for node in optimized.nodes.values()].count("GetNode") == 0
+    assert len(optimized.links) == len(wf.links)
+    logger.info("Pinned geometry fanout skip test passed")
+
+
 def test_optimize_preserves_other_types():
     logger.info("Testing that non-MODEL/CLIP/VAE types are not optimized")
     wf = Workflow()

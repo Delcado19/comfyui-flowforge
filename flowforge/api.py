@@ -151,6 +151,7 @@ def _workflow_to_minimal_json(workflow: Workflow) -> Dict[str, Any]:
                 "id": group.id,
                 "name": group.name,
                 "bounding": group.bounding,
+                **({"flags": {"pinned": True}} if group.pinned else {}),
             }
             for group in workflow.groups
         ],
@@ -276,6 +277,8 @@ def _new_node_json(node: Node, workflow: Workflow) -> Dict[str, Any]:
     }
     if node.widgets_values:
         node_data["widgets_values"] = deepcopy(node.widgets_values)
+    if node.pinned:
+        node_data["flags"] = {"pinned": True}
     return node_data
 
 

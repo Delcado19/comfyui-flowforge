@@ -23,6 +23,7 @@ export interface ComfyNode {
   pos: [number, number]
   size?: NodeSize
   title?: string
+  flags?: Record<string, unknown>
   inputs?: ComfyPort[]
   outputs?: ComfyPort[]
   [key: string]: unknown
@@ -63,6 +64,12 @@ export const useWorkflowStore = defineStore('workflow', {
   }),
   getters: {
     nodes: (state): ComfyNode[] => state.workflow?.nodes ?? [],
+    hasPinnedItems: (state): boolean => {
+      return Boolean(
+        state.workflow?.nodes.some((node) => isPinned(node)) ||
+        state.workflow?.groups?.some((group) => isPinned(group)),
+      )
+    },
     connections: (state): Connection[] => {
       return (state.workflow?.links ?? []).map((link) => ({
         id: link[0],
@@ -106,6 +113,25 @@ export const useWorkflowStore = defineStore('workflow', {
       if (!group) return
       group.bounding = bounding
     },
+    toggleNodePinned(nodeId: NodeId) {
+      const node = this.workflow?.nodes.find((item) => item.id === nodeId)
+      if (!node) return
+      setPinned(node, !isPinned(node))
+    },
+    toggleGroupPinned(groupId: number | string) {
+      const group = this.workflow?.groups?.find((item) => item.id === groupId)
+      if (!group) return
+      setPinned(group, !isPinned(group))
+    },
+    unpinAll() {
+      if (!this.workflow) return
+      for (const node of this.workflow.nodes) {
+        setPinned(node, false)
+      }
+      for (const group of this.workflow.groups ?? []) {
+        setPinned(group, false)
+      }
+    },
     createGroup(bounding: [number, number, number, number], title?: string) {
       if (!this.workflow) return
 
@@ -138,3 +164,20 @@ export const useWorkflowStore = defineStore('workflow', {
     }
   }
 })
+
+function isPinned(item: { flags?: Record<string, unknown> }): boolean {
+  return Boolean(item.flags && item.flags.pinned === true)
+}
+
+function setPinned(item: { flags?: Record<string, unknown> }, pinned: boolean): void {
+  if (pinned) {
+    item.flags = { ...(item.flags ?? {}), pinned: true }
+    return
+  }
+
+  if (!item.flags || !('pinned' in item.flags)) return
+
+  const flags = { ...item.flags }
+  delete flags.pinned
+  item.flags = Object.keys(flags).length > 0 ? flags : undefined
+}

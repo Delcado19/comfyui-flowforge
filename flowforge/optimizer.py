@@ -8,7 +8,7 @@ from copy import deepcopy
 import math
 from typing import Dict, List
 
-from .model import Node, Link, Workflow
+from .model import Node, Link, Group, Workflow
 from .logger import setup_logger
 
 logger = setup_logger(__name__)
@@ -22,6 +22,7 @@ HUB_NODE_HEIGHT = 40.0
 HUB_NODE_GAP = 80.0
 FANOUT_SPAN_COST_FACTOR = 0.2
 GROUP_CROSS_LINK_FACTOR = 1.15
+LONG_SINGLE_LINK_MIN_DISTANCE = 900.0
 
 
 def optimize(workflow: Workflow) -> Workflow:
@@ -54,7 +55,9 @@ def optimize(workflow: Workflow) -> Workflow:
             src_port,
             links,
         )
-        if len(terminal_links) < 2:
+        if not _is_rewrite_candidate(new_workflow, terminal_links, node_group_index):
+            continue
+        if _fanout_touches_pinned_geometry(new_workflow, src_node, terminal_links):
             continue
 
         # Check that at least one traversed link has an optimizable type.
@@ -90,7 +93,9 @@ def optimize(workflow: Workflow) -> Workflow:
                 src_port,
                 current_links,
             )
-            if len(current_terminals) < 2:
+            if not _is_rewrite_candidate(new_workflow, current_terminals, node_group_index):
+                continue
+            if _fanout_touches_pinned_geometry(new_workflow, src_node, current_terminals):
                 continue
             if not any(
                 new_workflow.links[link_id].type in OPTIMIZE_TYPES
@@ -261,6 +266,48 @@ def _replace_port_with_set_get(
         logger.debug(f"Rewired: {src_node.id}:{src_port} -> SetNode -> GetNode -> {target_id}")
 
     _remove_traversed_links_and_cleanup_reroutes(workflow, traversed_link_ids)
+
+
+def _is_rewrite_candidate(
+    workflow: Workflow,
+    terminal_links: List[Link],
+    node_group_index: Dict[int, int],
+) -> bool:
+    """Return True when Set/Get is useful without hiding local transformers."""
+    optimizable_links = [link for link in terminal_links if link.type in OPTIMIZE_TYPES]
+    if not optimizable_links:
+        return False
+
+    # LoRA and similar pass-through transformer nodes should stay physically
+    # visible in the producer chain. Rewriting before them creates local Get
+    # nodes in source panels instead of placing Set nodes on the transformed
+    # output, which is visually misleading in ComfyUI workflows.
+    if any(_is_transformer_target(workflow, link) for link in optimizable_links):
+        return False
+
+    if len(optimizable_links) >= 2:
+        return True
+
+    link = optimizable_links[0]
+    source_group = node_group_index.get(link.source)
+    target_group = node_group_index.get(link.target)
+    if source_group is None or target_group is None or source_group == target_group:
+        return False
+    return _link_cost(workflow, link, node_group_index) >= LONG_SINGLE_LINK_MIN_DISTANCE
+
+
+def _is_transformer_target(workflow: Workflow, link: Link) -> bool:
+    target = workflow.nodes.get(link.target)
+    if target is None:
+        return False
+    link_type = str(link.type or "").upper()
+    node_type = target.type.lower()
+    if "lora" in node_type:
+        return True
+    return any(
+        output_link is not None and str(output_link.type or "").upper() == link_type
+        for output_link in (workflow.links.get(link_id) for link_id in target.output_links)
+    )
 
 
 def _collect_effective_fanout(
@@ -466,6 +513,30 @@ def _terminal_group_span(node_group_index: Dict[int, int], terminal_links: List[
         if group_index is not None:
             groups.add(group_index)
     return len(groups)
+
+
+def _fanout_touches_pinned_geometry(workflow: Workflow, src_node: Node, terminal_links: List[Link]) -> bool:
+    if _is_pinned_node(workflow, src_node):
+        return True
+
+    for terminal_link in terminal_links:
+        target_node = workflow.nodes.get(terminal_link.target)
+        if target_node is not None and _is_pinned_node(workflow, target_node):
+            return True
+    return False
+
+
+def _is_pinned_node(workflow: Workflow, node: Node) -> bool:
+    if node.pinned:
+        return True
+    return any(group.pinned and _node_in_group(node, group) for group in workflow.groups)
+
+
+def _node_in_group(node: Node, group: Group) -> bool:
+    if not group.bounding or len(group.bounding) < 4:
+        return False
+    gx, gy, gw, gh = group.bounding
+    return gx <= node.x <= gx + gw and gy <= node.y <= gy + gh
 
 
 def _node_width(node: Node) -> float:

@@ -54,6 +54,12 @@ const isCollapsed = computed(() => {
   const flags = props.node.flags
   return typeof flags === 'object' && flags !== null && 'collapsed' in flags && Boolean(flags.collapsed)
 })
+const isPinned = computed(() => {
+  if (isVirtualHub.value) return false
+  const flags = props.node.flags
+  return typeof flags === 'object' && flags !== null && flags.pinned === true
+})
+const isVirtualHub = computed(() => props.node.type === 'SetNode' || props.node.type === 'GetNode')
 
 const bodyStyle = computed(() => ({
   position: 'absolute' as const,
@@ -141,7 +147,7 @@ function shadeColor(color: string, amount: number): string {
 function onTitlePointerDown(e: PointerEvent) {
   if (e.button !== 0) return
   const target = e.target as HTMLElement
-  if (target.closest('.title-dot')) return
+  if (target.closest('.title-dot') || target.closest('.pin-button')) return
 
   e.preventDefault()
   e.stopPropagation()
@@ -150,6 +156,10 @@ function onTitlePointerDown(e: PointerEvent) {
   dragStart.value = { x: e.clientX, y: e.clientY }
   nodeStart.value = { x: props.node.pos[0], y: props.node.pos[1] }
   titleRef.value?.setPointerCapture(e.pointerId)
+}
+
+function togglePinned() {
+  store.toggleNodePinned(props.node.id)
 }
 
 function onPointerMove(e: PointerEvent) {
@@ -186,11 +196,27 @@ onUnmounted(() => {
   <div
     :style="bodyStyle"
     class="comfy-node"
-    :class="{ 'is-bypassed': isBypassed, 'is-collapsed': isCollapsed, 'is-reroute': isReroute }"
+    :class="{ 'is-bypassed': isBypassed, 'is-collapsed': isCollapsed, 'is-reroute': isReroute, 'is-pinned': isPinned }"
   >
     <div ref="titleRef" :style="titleStyle" class="node-title" @pointerdown="onTitlePointerDown">
       <span class="title-dot" :style="{ backgroundColor: titleColor }"></span>
       <span class="title-text">{{ title }}</span>
+      <button
+        v-if="!isVirtualHub"
+        type="button"
+        class="pin-button node-pin-button"
+        :class="{ active: isPinned }"
+        :title="isPinned ? 'Unpin node' : 'Pin node'"
+        @pointerdown.stop
+        @click.stop="togglePinned"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path class="pin-shadow" d="M8.2 15.3 3.6 20c-.4.4-.4 1 0 1.4s1 .4 1.4 0l4.7-4.6z" />
+          <path class="pin-needle" d="M8.2 15.3 3.6 20c-.4.4-.4 1 0 1.4s1 .4 1.4 0l4.7-4.6z" />
+          <path class="pin-body" d="M7.2 6.5c-.9 0-1.6.7-1.6 1.6 0 .4.2.8.5 1.1l2.4 2.4-2.3 2.3c-.5.5-.5 1.4 0 1.9l2 2c.5.5 1.4.5 1.9 0l2.3-2.3 2.4 2.4c.3.3.7.5 1.1.5.9 0 1.6-.7 1.6-1.6v-4.1l3.2-3.2c.5-.5.5-1.4 0-1.9l-4.3-4.3c-.5-.5-1.4-.5-1.9 0l-3.2 3.2z" />
+          <path class="pin-highlight" d="M7.4 7.8c-.3 0-.5.2-.5.5 0 .1.1.2.1.3l1.9 1.9h6.7l3.2-3.2-2.9-2.9-3.2 3.2z" />
+        </svg>
+      </button>
     </div>
     <div class="node-body" :style="{ height: contentHeight + 'px' }">
       <div
@@ -247,14 +273,21 @@ onUnmounted(() => {
   font-family: Arial, Helvetica, sans-serif;
   font-size: 11px;
 }
+.comfy-node.is-pinned {
+  border-color: #d7ac4d !important;
+  box-shadow:
+    0 0 0 1px rgb(215 172 77 / 45%),
+    0 2px 7px rgb(0 0 0 / 45%);
+}
 .node-title {
+  position: relative;
   cursor: move;
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   overflow: hidden;
-  justify-content: center;
+  justify-content: flex-start;
   border-radius: 5px 5px 0 0;
   border-bottom: 1px solid rgb(0 0 0 / 45%);
   color: #fff;
@@ -268,7 +301,7 @@ onUnmounted(() => {
   flex: 0 0 auto;
   width: 8px;
   height: 8px;
-  margin-left: 10px;
+  margin-left: 8px;
   border-radius: 50%;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 55%);
 }
@@ -276,9 +309,57 @@ onUnmounted(() => {
   flex: 1 1 auto;
   display: block;
   overflow: hidden;
-  padding: 0 9px;
+  padding: 0 28px 0 4px;
   text-overflow: ellipsis;
   text-align: center;
+}
+.pin-button {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  z-index: 6;
+  width: 21px;
+  height: 21px;
+  padding: 3px;
+  border: 1px solid rgb(255 255 255 / 16%);
+  border-radius: 4px;
+  background: rgb(0 0 0 / 48%);
+  cursor: pointer;
+  opacity: 0.86;
+}
+.pin-button:hover,
+.pin-button.active {
+  background: rgb(255 56 116 / 16%);
+  border-color: rgb(255 92 140 / 72%);
+  opacity: 1;
+}
+.pin-button svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-42deg);
+}
+.pin-body {
+  fill: #8a8a8a;
+}
+.pin-highlight {
+  fill: #b8b8b8;
+}
+.pin-needle {
+  fill: #9a9a9a;
+}
+.pin-shadow {
+  fill: rgb(0 0 0 / 45%);
+  transform: translate(1px, 1px);
+}
+.pin-button.active .pin-body {
+  fill: #e92866;
+}
+.pin-button.active .pin-highlight {
+  fill: #ff5f8d;
+}
+.pin-button.active .pin-needle {
+  fill: #b8b8b8;
 }
 .node-body {
   position: relative;
