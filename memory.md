@@ -40,7 +40,7 @@
 - Corrected internal layout layer assignment to use deepest dependency paths, reducing right-to-left links in grouped real workflows.
 - Refined internal grouped layer ordering with adjacent-layer barycenter sweeps, reducing real-workflow straight-line crossings.
 
-## Open Work
+## Future Improvements
 
 - Use the layout-quality report to identify extreme real-workflow layout cases.
 - Expand documentation when behavior stabilizes.
