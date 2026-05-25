@@ -92,9 +92,9 @@ Read-only layout quality reporting:
 uv run python tools/report_layout_quality.py example-workflows
 ```
 
-The bundled example workflow pytest is the default corpus regression guard: it parses the repository's `example-workflows`, validates layout roundtrips, and asserts Optimize + Layout keeps aggregate crossings and right-to-left links no worse than the saved source workflows.
+The local example workflow pytest is the default maintainer corpus regression guard when `example-workflows` is present: it parses the local workflow corpus, validates layout roundtrips, and asserts Optimize + Layout keeps aggregate crossings and right-to-left links no worse than the saved source workflows. It is skipped in checkouts where the local corpus is absent.
 
-GitHub Actions CI mirrors the repository gates with backend tests, Ruff, Mypy, bundled example workflow regression coverage, frontend typecheck, and frontend build. The private local ComfyUI workflow scan remains a local-only release gate.
+GitHub Actions CI mirrors the repository gates with backend tests, Ruff, Mypy, frontend typecheck, and frontend build. The local example workflow corpus and private local ComfyUI workflow scan remain local-only release gates.
 
 ## Handoff Format
 

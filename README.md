@@ -175,8 +175,8 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 Repository-local agent rules live in [AGENTS.md](AGENTS.md). Documentation synchronization is handled by the Documentation Maintenance Agent policy in [docs/DOCUMENTATION_MAINTENANCE.md](docs/DOCUMENTATION_MAINTENANCE.md).
 
 Release history is tracked in [CHANGELOG.md](CHANGELOG.md). Release and deployment expectations are tracked in [docs/RELEASE.md](docs/RELEASE.md), with frontend asset packaging details in [docs/PACKAGING.md](docs/PACKAGING.md). FlowForge currently supports source-checkout deployment with `uv`; broader distribution targets are still deferred.
-GitHub Actions CI runs backend tests, Ruff, Mypy, bundled example workflow regression coverage, frontend typecheck, and frontend build on `master`, pull requests, and version tags.
-Run `uv run pytest tests/test_example_workflows.py` to exercise the read-only `example-workflows` corpus through layout roundtrip checks plus layout-only and Optimize + Layout quality reports.
+GitHub Actions CI runs backend tests, Ruff, Mypy, frontend typecheck, and frontend build on `master`, pull requests, and version tags.
+Run `uv run pytest tests/test_example_workflows.py` to exercise the read-only local `example-workflows` corpus through layout roundtrip checks plus layout-only and Optimize + Layout quality reports. The corpus is a local maintainer artifact and the test is skipped when the folder is absent.
 For local maintainer validation against read-only ComfyUI UI workflows, run `uv run python tools/validate_local_workflows.py`.
 For release readiness, run `uv run python tools/check_release_ready.py`; add `--tag vX.Y.Z --github` after tagging and publishing to verify remote refs, the GitHub Release, and Actions.
 For read-only layout quality metrics across workflow folders, run `uv run python tools/report_layout_quality.py example-workflows`. Add `--optimize` to measure the Set/Get optimizer before layout. The report includes aggregate crossing/right-to-left counts and link-category breakdowns for the laid-out result.

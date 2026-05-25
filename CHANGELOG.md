@@ -12,7 +12,7 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Frontend toolbar action for running the Set/Get optimizer and layout as one cleanup flow.
 - Pin buttons for nodes and groups plus a canvas toolbar action to unpin every pinned node and group.
 - Optional Set/Get optimizer mode for read-only layout quality reports.
-- Regression coverage for the bundled `example-workflows` corpus, including layout roundtrip checks and Optimize + Layout aggregate quality budgets.
+- Local regression coverage for the `example-workflows` corpus, including layout roundtrip checks and Optimize + Layout aggregate quality budgets when the corpus is present.
 
 ### Changed
 

@@ -15,17 +15,18 @@ pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 
 def test_example_workflows_roundtrip_layout_safely():
-    summary = validate_workflow_files(EXAMPLE_WORKFLOW_ROOT)
+    root = _require_example_workflow_root()
+    summary = validate_workflow_files(root)
 
-    assert EXAMPLE_WORKFLOW_ROOT.exists(), f"Missing workflow corpus: {EXAMPLE_WORKFLOW_ROOT}"
     assert summary.discovered_files >= MINIMUM_EXAMPLE_WORKFLOWS
     assert summary.checked_workflows == summary.discovered_files
     assert summary.ok, _format_validation_failures(summary)
 
 
 def test_example_workflow_quality_reports_cover_layout_only_and_optimizer():
-    layout_only = build_quality_summary(EXAMPLE_WORKFLOW_ROOT)
-    optimized = build_quality_summary(EXAMPLE_WORKFLOW_ROOT, optimize_first=True)
+    root = _require_example_workflow_root()
+    layout_only = build_quality_summary(root)
+    optimized = build_quality_summary(root, optimize_first=True)
 
     assert layout_only.ok, _format_quality_failures(layout_only)
     assert optimized.ok, _format_quality_failures(optimized)
@@ -37,6 +38,12 @@ def test_example_workflow_quality_reports_cover_layout_only_and_optimizer():
     # than the saved source workflows.
     assert _total_laid_out_crossings(optimized) <= _total_original_crossings(optimized)
     assert _total_laid_out_right_to_left_links(optimized) <= _total_original_right_to_left_links(optimized)
+
+
+def _require_example_workflow_root() -> Path:
+    if not EXAMPLE_WORKFLOW_ROOT.exists():
+        pytest.skip(f"Local workflow corpus is not present: {EXAMPLE_WORKFLOW_ROOT}")
+    return EXAMPLE_WORKFLOW_ROOT
 
 
 def _total_original_crossings(summary: WorkflowQualitySummary) -> int:
