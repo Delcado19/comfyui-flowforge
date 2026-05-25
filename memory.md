@@ -44,6 +44,9 @@
 
 - Use the layout-quality report to identify extreme real-workflow layout cases.
 - Expand documentation when behavior stabilizes.
+- Improve crossing-aware group placement by scoring alternate group orders and column breaks against expected inter-group crossings.
+- Add a group-internal aspect-ratio optimizer so large groups can try compact, wide, and tall internal profiles before the final score is chosen.
+- Introduce a stable layout mode that keeps existing node positions as much as possible and only moves nodes enough to resolve overlaps and severe outliers.
 - Respect native ComfyUI pin state during layout: nodes with `flags.pinned: true`, groups with `flags.pinned: true`, and nodes inside pinned groups should keep their saved geometry. The frontend can toggle node/group pins and clear all pins through classic pin-icon buttons.
 - Primitive control nodes such as seed, CFG, string controls, and sampler setup sources such as `EmptyLatentImage` should stay near their downstream consumer or sampler cluster instead of being left in distant source columns. Virtual Set/Get hubs are endpoint adornments, not regular graph nodes: exclude them from group/dataflow placement, keep them near their physical endpoint, prefer side placement when clear, then same-side vertical slots, then above/below placement, then sideways fallback. This applies even if they are inside a pinned group or carry their own pin flag.
 - Sampler control stacks must not overlay context nodes. Treat pinned node geometry as a hard obstacle, clear unpinned nodes away from it, and run a final local-anchor pass after clearance so controls and virtual hubs follow the final endpoint positions.
