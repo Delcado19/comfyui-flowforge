@@ -318,5 +318,38 @@ async def test_layout_preserves_comfyui_metadata(client):
     assert group["bounding"][3] < 1000
 
 
+@pytest.mark.asyncio
+async def test_layout_respects_comfyui_pinned_flags(client):
+    logger.info("Testing ComfyUI pinned flag layout preservation")
+    workflow = deepcopy(SIMPLE_WORKFLOW)
+    workflow["groups"] = [
+        {
+            "id": 7,
+            "title": "Controls",
+            "bounding": [40, 40, 720, 360],
+            "flags": {"pinned": True},
+        }
+    ]
+    workflow["nodes"][0]["pos"] = [100, 100]
+    workflow["nodes"][0]["size"] = [420, 260]
+    workflow["nodes"][0]["flags"] = {"pinned": True}
+    workflow["nodes"][1]["pos"] = [500, 180]
+    workflow["nodes"][1]["size"] = [280, 140]
+
+    resp = await client.post("/layout", json=workflow)
+    assert resp.status == 200
+    data = await resp.json()
+
+    load_node = next(node for node in data["nodes"] if node["id"] == 1)
+    preview_node = next(node for node in data["nodes"] if node["id"] == 2)
+    assert load_node["pos"] == [100, 100]
+    assert load_node["size"] == [420, 260]
+    assert load_node["flags"] == {"pinned": True}
+    assert preview_node["pos"] == [500, 180]
+    assert preview_node["size"] == [280, 140]
+    assert data["groups"][0]["bounding"] == [40, 40, 720, 360]
+    assert data["groups"][0]["flags"] == {"pinned": True}
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

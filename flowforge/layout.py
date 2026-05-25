@@ -4,6 +4,7 @@ Implements the six-phase pipeline as described in the README.
 """
 
 from copy import deepcopy
+from collections.abc import Iterable
 from dataclasses import dataclass
 import math
 
@@ -42,6 +43,7 @@ DECORATIVE_START_X = 20.0
 DECORATIVE_START_Y = 50.0
 VIRTUAL_HUB_MIN_GAP = 24.0
 VIRTUAL_HUB_MAX_GAP = 48.0
+VIRTUAL_HUB_VERTICAL_FALLBACK_STEPS = 8
 LAYOUT_SCORE_WIDTH_WEIGHT = 2.5
 LAYOUT_SCORE_HEIGHT_WEIGHT = 1.0
 LAYOUT_SCORE_LINK_WEIGHT = 0.02
@@ -49,6 +51,7 @@ LAYOUT_SCORE_ASPECT_WEIGHT = 120.0
 LAYOUT_SCORE_ASPECT_RATIO = 1.35
 LAYOUT_SCORE_GAP_WEIGHT = 0.12
 LAYOUT_SCORE_GAP_THRESHOLD = 160.0
+LAYOUT_WIDE_GROUP_COLUMN_RATIO = 1.5
 LAYOUT_CANDIDATE_PROFILES = (
     (1.0, 1.0),
     (0.8, 1.0),
@@ -291,10 +294,30 @@ def _apply_layout_pass(
         logger.debug("Phase 4c: Virtual Set/Get Hubs")
         _position_virtual_set_get_nodes(workflow, settings)
         _assign_virtual_hub_groups_to_endpoints(workflow)
+
+        # Phase 4d: Pinned nodes are hard layout constraints. Move unpinned
+        # nodes out from under them instead of allowing visual overlap.
+        logger.debug("Phase 4d: Pinned Geometry Clearance")
+        _separate_unpinned_nodes_from_pinned_geometry(workflow, settings)
+
+        # Phase 4e: Clearance can move endpoints. Re-anchor local controls and
+        # virtual hubs after that movement so they remain attached to the final
+        # source/destination geometry.
+        logger.debug("Phase 4e: Final Local Anchors")
+        _position_control_nodes_near_targets(workflow, list(workflow.nodes.values()), settings)
+        _position_text_previews_near_sources(workflow, settings)
+        _position_virtual_set_get_nodes(workflow, settings)
+        _assign_virtual_hub_groups_to_endpoints(workflow)
         
         # Phase 5: Bounding Box Update
         logger.debug("Phase 5: Bounding Box Update")
         _update_bounding_boxes(workflow, settings)
+
+        # Phase 5b: Group rectangles are user-visible layout surfaces. Keep
+        # nodes inside their own group, but move whole movable groups away from
+        # other groups or foreign nodes when compact bounds collide.
+        logger.debug("Phase 5b: Group Geometry Clearance")
+        _resolve_group_geometry_overlaps(workflow, settings)
         
         if log:
             logger.info("Layout algorithm completed successfully")
@@ -473,9 +496,10 @@ def _assign_groups(workflow: Workflow) -> None:
     for group in workflow.groups:
         group.nodes.clear()
     
-    # For each node, find the first group that contains it (by original position)
+    # Virtual Set/Get hubs are endpoint anchors, not regular graph content.
+    # Assign them only after their physical endpoint has its final position.
     for node in workflow.nodes.values():
-        if _is_decorative_node(node):
+        if _is_decorative_node(node) or _is_virtual_hub_node(node):
             continue
         assigned = False
         for group in workflow.groups:
@@ -506,6 +530,8 @@ def _node_in_group(node: Node, group: Group) -> bool:
 def _shrink_nodes_to_minimum_size(workflow: Workflow) -> None:
     """Shrink node rectangles to their compact layout size without growing them."""
     for node in workflow.nodes.values():
+        if _is_pinned_node(workflow, node):
+            continue
         if not node.size or len(node.size) < 2:
             continue
 
@@ -682,7 +708,7 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
     logger.debug("Laying out nodes within groups (Sugiyama)")
     
     for group in workflow.groups:
-        if len(group.nodes) < 2:
+        if group.pinned or len(group.nodes) < 2:
             continue
         
         # Build adjacency within this group only
@@ -698,6 +724,7 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
         # --- 1. Layer assignment (longest path from sources) ---
         # Sources: nodes with no incoming edges within the group
         layers = _assign_longest_path_layers(node_ids, adj, rev_adj)
+        _compress_debug_sidecar_layers(layers, adj, rev_adj, workflow)
         max_layer = max(layers.values()) if layers else 0
         
         # --- 2. Crossing minimisation (Barycenter heuristic) ---
@@ -736,8 +763,9 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
             for nid in ordered_nids:
                 node = workflow.nodes[nid]
                 node_h = _node_visual_height(node)
-                node.x = base_x + layer * (max_node_w + settings.node_h_gap)
-                node.y = current_y
+                if not _is_pinned_node(workflow, node):
+                    node.x = base_x + layer * (max_node_w + settings.node_h_gap)
+                    node.y = current_y
                 current_y += node_h + settings.node_v_gap
 
 
@@ -765,6 +793,76 @@ def _assign_longest_path_layers(
         layers[node_id] = 0
 
     return layers
+
+
+def _compress_debug_sidecar_layers(
+    layers: dict[int, int],
+    adj: dict[int, list[int]],
+    rev_adj: dict[int, list[int]],
+    workflow: Workflow,
+) -> None:
+    """Keep preview/debug/control side branches from dictating group width."""
+    for _ in range(max(1, len(layers))):
+        changed = False
+        for node_id, predecessors in rev_adj.items():
+            if not predecessors or node_id not in layers:
+                continue
+
+            new_layer = max(
+                layers.get(predecessor, 0)
+                + _internal_edge_layer_cost(workflow, predecessor, node_id, adj)
+                for predecessor in predecessors
+            )
+            if new_layer < layers[node_id]:
+                layers[node_id] = new_layer
+                changed = True
+        if not changed:
+            break
+
+    for node_id, targets in adj.items():
+        node = workflow.nodes[node_id]
+        if rev_adj.get(node_id) or len(targets) != 1 or not _is_source_control_sidecar_node(node):
+            continue
+        target_id = targets[0]
+        if target_id in layers:
+            layers[node_id] = layers[target_id]
+
+
+def _internal_edge_layer_cost(
+    workflow: Workflow,
+    source_id: int,
+    target_id: int,
+    adj: dict[int, list[int]],
+) -> int:
+    source = workflow.nodes[source_id]
+    target = workflow.nodes[target_id]
+    if _is_debug_sidecar_node(workflow, target, adj) or _is_switch_sidecar_node(target):
+        return 0
+    if _is_source_control_sidecar_node(source):
+        return 0
+    return 1
+
+
+def _is_debug_sidecar_node(
+    workflow: Workflow,
+    node: Node,
+    adj: dict[int, list[int]],
+) -> bool:
+    """Return True for display-only helper chains that should sit beside data."""
+    if node.type in {"PreviewImage", "ShowText|pysssss"}:
+        return True
+    if node.type != "MaskToImage":
+        return False
+    targets = [workflow.nodes[target_id] for target_id in adj.get(node.id, []) if target_id in workflow.nodes]
+    return bool(targets) and all(target.type == "PreviewImage" for target in targets)
+
+
+def _is_switch_sidecar_node(node: Node) -> bool:
+    return "switch" in node.type.lower()
+
+
+def _is_source_control_sidecar_node(node: Node) -> bool:
+    return node.type in {"Text Multiline"}
 
 
 def _minimize_layer_crossings(
@@ -822,7 +920,7 @@ def _position_groups_globally(
     Groups that come earlier in the flow are placed to the left.
     """
     logger.debug("Positioning groups globally")
-    
+
     if not workflow.groups:
         return
     
@@ -831,30 +929,37 @@ def _position_groups_globally(
     current_y = start_y
     column_width = 0.0
     column_budget = _estimate_vertical_packing_budget(
-        [group for group in workflow.groups if group.nodes],
+        [group for group in workflow.groups if group.nodes and not group.pinned],
         lambda group: _group_visual_height(group, settings),
         settings.group_v_gap,
     )
-    
+
     for group in workflow.groups:
-        if not group.nodes:
+        if not group.nodes or group.pinned:
             continue
-        
+
         min_x, min_y, max_x, max_y = _group_content_bounds(group)
         required_width = (max_x - min_x) + 2 * settings.group_padding
         required_height = (max_y - min_y) + 2 * settings.group_padding
         g_width = required_width
         g_height = required_height
 
-        if current_y > start_y and current_y + g_height > start_y + column_budget:
+        starts_wide_column = (
+            current_y > start_y
+            and column_width > 0
+            and g_width > column_width * LAYOUT_WIDE_GROUP_COLUMN_RATIO
+        )
+        if current_y > start_y and (current_y + g_height > start_y + column_budget or starts_wide_column):
             current_x += column_width + settings.group_h_gap
             current_y = start_y
             column_width = 0.0
         
         offset_x = (current_x + settings.group_padding) - min_x
         offset_y = (current_y + settings.group_padding) - min_y
-        
+
         for node in group.nodes:
+            if _is_pinned_node(workflow, node):
+                continue
             node.x += offset_x
             node.y += offset_y
         
@@ -878,6 +983,7 @@ def _position_ungrouped_nodes(
     This keeps the workflow narrower by using the Y axis first.
     """
     nodes_to_position = workflow.ungrouped_nodes if nodes is None else nodes
+    nodes_to_position = [node for node in nodes_to_position if not _is_pinned_node(workflow, node)]
     if not nodes_to_position:
         return start_x_floor
 
@@ -909,7 +1015,10 @@ def _position_ungrouped_nodes(
         current_y += node_h + settings.node_v_gap
         column_width = max(column_width, node_w)
 
-    return current_x + column_width
+    return max(
+        current_x + column_width,
+        _position_control_nodes_near_targets(workflow, nodes_to_position, settings),
+    )
 
 
 def _ungrouped_start_x(
@@ -964,12 +1073,347 @@ def _position_linked_ungrouped_nodes(
             column_width = max(column_width, _node_visual_width(node))
         current_right = max(current_right, x + column_width)
 
+    return max(current_right, _position_control_nodes_near_targets(workflow, nodes, settings))
+
+
+def _position_control_nodes_near_targets(
+    workflow: Workflow,
+    nodes: list[Node],
+    settings: LayoutSettings,
+) -> float:
+    """Place small primitive control nodes beside their downstream consumers."""
+    node_ids = {node.id for node in nodes}
+    group_by_node_id = _group_by_node_id(workflow)
+    controls_by_anchor: dict[tuple[int, ...], list[tuple[Node, list[tuple[int, Node, Link]]]]] = {}
+
+    for node in nodes:
+        if not _is_control_source_node(workflow, node):
+            continue
+        if _is_pinned_node(workflow, node):
+            continue
+
+        target_links = _control_target_links(workflow, node, node_ids)
+        target_links = _local_control_target_links(node, target_links, group_by_node_id)
+        if not target_links:
+            continue
+
+        sampler_links = [
+            (target_port, target, link)
+            for target_port, target, link in target_links
+            if _is_sampler_node(target)
+        ]
+        anchor_links = sampler_links or target_links
+        anchor_key = tuple(sorted({target.id for _, target, _ in anchor_links}))
+        controls_by_anchor.setdefault(anchor_key, []).append((node, anchor_links))
+
+    current_right = 0.0
+    gap = max(24.0, settings.node_h_gap * 0.5)
+    stack_gap = max(12.0, settings.node_v_gap * 0.25)
+
+    for entries in controls_by_anchor.values():
+        targets = {target.id: target for _, target_links in entries for _, target, _ in target_links}
+        if not targets:
+            continue
+
+        entries.sort(key=lambda item: (_control_desired_center(item[1]), item[0].y, item[0].id))
+        control_width = max(_node_visual_width(node) for node, _ in entries)
+        total_height = sum(_node_visual_height(node) for node, _ in entries)
+        total_height += stack_gap * max(0, len(entries) - 1)
+        x, y = _resolve_control_stack_position(
+            workflow,
+            entries,
+            targets,
+            control_width,
+            total_height,
+            gap,
+            stack_gap,
+        )
+
+        for node, _ in entries:
+            node.x = x
+            node.y = y
+            y += _node_visual_height(node) + stack_gap
+            current_right = max(current_right, node.x + _node_visual_width(node))
+
     return current_right
+
+
+def _local_control_target_links(
+    node: Node,
+    target_links: list[tuple[int, Node, Link]],
+    group_by_node_id: dict[int, Group],
+) -> list[tuple[int, Node, Link]]:
+    """Keep grouped control nodes from stretching their group toward external consumers."""
+    source_group = group_by_node_id.get(node.id)
+    if source_group is None:
+        return target_links
+    return [
+        (target_port, target, link)
+        for target_port, target, link in target_links
+        if group_by_node_id.get(target.id) is source_group
+    ]
+
+
+def _resolve_control_stack_position(
+    workflow: Workflow,
+    entries: list[tuple[Node, list[tuple[int, Node, Link]]]],
+    targets: dict[int, Node],
+    control_width: float,
+    total_height: float,
+    gap: float,
+    stack_gap: float,
+) -> tuple[float, float]:
+    left, top, right, bottom = _control_anchor_bounds(workflow, targets.values())
+    center_x = left + max(0.0, (right - left - control_width) / 2.0)
+    desired_y = _control_stack_top(entries, stack_gap)
+    candidates = [
+        (left - control_width - gap, desired_y),
+        (center_x, top - total_height - gap),
+        (center_x, bottom + gap),
+        (right + gap, desired_y),
+    ]
+    ignored_node_ids = {node.id for node, _ in entries}
+
+    for x, y in candidates:
+        if not _control_stack_collides(
+            workflow,
+            entries,
+            x,
+            y,
+            control_width,
+            stack_gap,
+            ignored_node_ids,
+        ):
+            return x, y
+
+    return left - control_width - gap, desired_y
+
+
+def _control_anchor_bounds(workflow: Workflow, targets: Iterable[Node]) -> tuple[float, float, float, float]:
+    left = math.inf
+    top = math.inf
+    right = -math.inf
+    bottom = -math.inf
+    for target in targets:
+        target_left = _control_target_left_edge(workflow, target)
+        target_top = _control_target_top_edge(workflow, target)
+        target_right = _control_target_right_edge(workflow, target)
+        target_bottom = _control_target_bottom_edge(workflow, target)
+        left = min(left, target_left)
+        top = min(top, target_top)
+        right = max(right, target_right)
+        bottom = max(bottom, target_bottom)
+    return left, top, right, bottom
+
+
+def _control_stack_collides(
+    workflow: Workflow,
+    entries: list[tuple[Node, list[tuple[int, Node, Link]]]],
+    x: float,
+    y: float,
+    control_width: float,
+    stack_gap: float,
+    ignored_node_ids: set[int],
+) -> bool:
+    current_y = y
+    for node, _ in entries:
+        if _first_node_collision(
+            workflow,
+            x,
+            current_y,
+            control_width,
+            _node_visual_height(node),
+            ignored_node_ids,
+        ) is not None:
+            return True
+        current_y += _node_visual_height(node) + stack_gap
+    return False
+
+
+def _control_target_links(
+    workflow: Workflow,
+    node: Node,
+    _movable_node_ids: set[int],
+) -> list[tuple[int, Node, Link]]:
+    target_links: list[tuple[int, Node, Link]] = []
+    for link_id in node.output_links:
+        link = workflow.links.get(link_id)
+        if link is None or not _is_control_link_for_node(workflow, node, link):
+            continue
+        target = workflow.nodes.get(link.target)
+        if target is None:
+            continue
+        target_links.append((link.target_port, target, link))
+    return target_links
+
+
+def _control_target_left_edge(workflow: Workflow, target: Node) -> float:
+    pinned_groups = [
+        group for group in workflow.groups if group.pinned and _node_in_group(target, group)
+    ]
+    if pinned_groups:
+        return min(group.bounding[0] for group in pinned_groups)
+    return target.x
+
+
+def _control_target_top_edge(workflow: Workflow, target: Node) -> float:
+    pinned_groups = [
+        group for group in workflow.groups if group.pinned and _node_in_group(target, group)
+    ]
+    if pinned_groups:
+        return min(group.bounding[1] for group in pinned_groups)
+    return target.y
+
+
+def _control_target_right_edge(workflow: Workflow, target: Node) -> float:
+    pinned_groups = [
+        group for group in workflow.groups if group.pinned and _node_in_group(target, group)
+    ]
+    if pinned_groups:
+        return max(group.bounding[0] + group.bounding[2] for group in pinned_groups)
+    return target.x + _node_visual_width(target)
+
+
+def _control_target_bottom_edge(workflow: Workflow, target: Node) -> float:
+    pinned_groups = [
+        group for group in workflow.groups if group.pinned and _node_in_group(target, group)
+    ]
+    if pinned_groups:
+        return max(group.bounding[1] + group.bounding[3] for group in pinned_groups)
+    return target.y + _node_visual_height(target)
+
+
+def _control_stack_top(
+    entries: list[tuple[Node, list[tuple[int, Node, Link]]]],
+    stack_gap: float,
+) -> float:
+    total_height = sum(_node_visual_height(node) for node, _ in entries)
+    total_gap = stack_gap * max(0, len(entries) - 1)
+    desired_centers = [_control_desired_center(target_links) for _, target_links in entries]
+    if not desired_centers:
+        return 0.0
+    center = sum(desired_centers) / len(desired_centers)
+    return center - (total_height + total_gap) / 2.0
+
+
+def _control_desired_center(target_links: list[tuple[int, Node, Link]]) -> float:
+    if not target_links:
+        return 0.0
+    centers = [
+        _node_input_port_y(target, target_port)
+        for target_port, target, _ in target_links
+    ]
+    return sum(centers) / len(centers)
+
+
+def _is_control_source_node(workflow: Workflow, node: Node) -> bool:
+    if (
+        node.input_links
+        or not node.output_links
+        or _is_decorative_node(node)
+        or _is_reroute_node(node)
+        or _is_set_node(node)
+        or _is_get_node(node)
+    ):
+        return False
+
+    links = [workflow.links.get(link_id) for link_id in node.output_links]
+    existing_links = [link for link in links if link is not None]
+    if not existing_links:
+        return False
+
+    return all(_is_control_link_for_node(workflow, node, link) for link in existing_links)
+
+
+def _is_primitive_control_link(link: Link) -> bool:
+    return str(link.type or "").upper() in {
+        "BOOLEAN",
+        "COMBO",
+        "FLOAT",
+        "INT",
+        "SEED",
+        "STRING",
+    }
+
+
+def _is_control_link_for_node(workflow: Workflow, node: Node, link: Link) -> bool:
+    if _is_primitive_control_link(link):
+        return True
+    if not _is_sampler_control_source(node):
+        return False
+    target = workflow.nodes.get(link.target)
+    return target is not None and _is_sampler_node(target)
+
+
+def _is_sampler_control_source(node: Node) -> bool:
+    node_type = node.type.lower()
+    return any(
+        token in node_type
+        for token in ("seed", "emptylatent", "empty latent", "latentimage", "latent image")
+    )
+
+
+def _is_sampler_node(node: Node) -> bool:
+    return "sampler" in node.type.lower()
+
+
+def _position_text_previews_near_sources(workflow: Workflow, settings: LayoutSettings) -> None:
+    """Keep terminal text preview nodes near the output they display."""
+    gap = max(24.0, settings.node_h_gap * 0.5)
+    for node in sorted(workflow.nodes.values(), key=lambda item: (item.y, item.x, item.id)):
+        if not _is_terminal_text_preview_node(node) or _is_pinned_node(workflow, node):
+            continue
+        source = _single_input_source(workflow, node)
+        if source is None:
+            continue
+        link = workflow.links.get(node.input_links[0])
+        if link is None:
+            continue
+        desired_y = _node_output_port_y(source, link.source_port) - _node_input_port_offset(node, link.target_port)
+        node.x, node.y = _resolve_text_preview_position(workflow, node, source, desired_y, gap)
+
+
+def _resolve_text_preview_position(
+    workflow: Workflow,
+    node: Node,
+    source: Node,
+    desired_y: float,
+    gap: float,
+) -> tuple[float, float]:
+    node_w = _node_visual_width(node)
+    node_h = _node_visual_height(node)
+    source_w = _node_visual_width(source)
+    source_h = _node_visual_height(source)
+    centered_x = source.x + max(0.0, (source_w - node_w) / 2.0)
+    candidates = [
+        (source.x + source_w + gap, desired_y),
+        (source.x + source_w + gap, source.y + max(0.0, (source_h - node_h) / 2.0)),
+        (centered_x, source.y - node_h - gap),
+        (centered_x, source.y + source_h + gap),
+        (source.x - node_w - gap, desired_y),
+    ]
+    ignored_node_ids = {node.id, source.id}
+    for x, y in candidates:
+        if _first_node_collision(
+            workflow,
+            x,
+            y,
+            node_w,
+            node_h,
+            ignored_node_ids,
+        ) is None:
+            return x, y
+    return node.x, node.y
+
+
+def _is_terminal_text_preview_node(node: Node) -> bool:
+    return node.type == "ShowText|pysssss" and bool(node.input_links) and not node.output_links
 
 
 def _position_virtual_set_get_nodes(workflow: Workflow, settings: LayoutSettings) -> None:
     """Keep KJNodes Set/Get hubs directly beside their physical endpoint."""
     gap = _virtual_hub_gap(settings)
+    placed_hub_ids: set[int] = set()
 
     set_groups: dict[int, list[tuple[int, Node, Node]]] = {}
     get_groups: dict[int, list[tuple[int, Node, Node]]] = {}
@@ -996,8 +1440,18 @@ def _position_virtual_set_get_nodes(workflow: Workflow, settings: LayoutSettings
         ]
         y = (sum(desired_centers) / len(desired_centers)) - (total_height + total_gap) / 2.0
         for source_port, node, source in entries:
-            node.x = source.x + _node_visual_width(source) + gap
-            node.y = y
+            preferred_x = source.x + _node_visual_width(source) + gap
+            node.x, node.y = _resolve_virtual_hub_position(
+                workflow,
+                node,
+                preferred_x,
+                y,
+                direction=1,
+                gap=gap,
+                endpoint=source,
+                placed_hub_ids=placed_hub_ids,
+            )
+            placed_hub_ids.add(node.id)
             y += _node_visual_height(node) + gap
 
     for entries in get_groups.values():
@@ -1011,9 +1465,205 @@ def _position_virtual_set_get_nodes(workflow: Workflow, settings: LayoutSettings
         ]
         y = (sum(desired_centers) / len(desired_centers)) - (total_height + total_gap) / 2.0
         for target_port, node, target in entries:
-            node.x = target.x - _node_visual_width(node) - gap
-            node.y = y
+            preferred_x = target.x - _node_visual_width(node) - gap
+            node.x, node.y = _resolve_virtual_hub_position(
+                workflow,
+                node,
+                preferred_x,
+                y,
+                direction=-1,
+                gap=gap,
+                endpoint=target,
+                placed_hub_ids=placed_hub_ids,
+            )
+            placed_hub_ids.add(node.id)
             y += _node_visual_height(node) + gap
+
+
+def _resolve_virtual_hub_position(
+    workflow: Workflow,
+    node: Node,
+    preferred_x: float,
+    preferred_y: float,
+    *,
+    direction: int,
+    gap: float,
+    endpoint: Node,
+    placed_hub_ids: set[int],
+) -> tuple[float, float]:
+    """Choose a local endpoint-adjacent hub position before falling back sideways."""
+    endpoint_w = _node_visual_width(endpoint)
+    endpoint_h = _node_visual_height(endpoint)
+    node_w = _node_visual_width(node)
+    node_h = _node_visual_height(node)
+    centered_x = endpoint.x + max(0.0, (endpoint_w - node_w) / 2.0)
+    candidates = [
+        (preferred_x, preferred_y),
+        (centered_x, endpoint.y - node_h - gap),
+        (centered_x, endpoint.y + endpoint_h + gap),
+    ]
+    ignored_node_ids = {node.id, endpoint.id}
+    for x, y in candidates:
+        if _first_virtual_hub_collision(
+            workflow,
+            node,
+            x,
+            y,
+            ignored_node_ids,
+            placed_hub_ids,
+        ) is None:
+            return x, y
+
+    for x, y in _virtual_hub_vertical_fallback_candidates(
+        preferred_x,
+        preferred_y,
+        node_h,
+        gap,
+    ):
+        if _first_virtual_hub_collision(
+            workflow,
+            node,
+            x,
+            y,
+            ignored_node_ids,
+            placed_hub_ids,
+        ) is None:
+            return x, y
+
+    return (
+        _resolve_virtual_hub_x(
+            workflow,
+            node,
+            preferred_x,
+            preferred_y,
+            direction=direction,
+            gap=gap,
+            endpoint=endpoint,
+            placed_hub_ids=placed_hub_ids,
+        ),
+        preferred_y,
+    )
+
+
+def _virtual_hub_vertical_fallback_candidates(
+    x: float,
+    preferred_y: float,
+    node_height: float,
+    gap: float,
+) -> list[tuple[float, float]]:
+    """Try same-side vertical slots before allowing a virtual hub to drift sideways."""
+    step = max(node_height + gap, gap)
+    candidates: list[tuple[float, float]] = []
+    for index in range(1, VIRTUAL_HUB_VERTICAL_FALLBACK_STEPS + 1):
+        candidates.append((x, preferred_y + step * index))
+        candidates.append((x, preferred_y - step * index))
+    return candidates
+
+
+def _resolve_virtual_hub_x(
+    workflow: Workflow,
+    node: Node,
+    preferred_x: float,
+    y: float,
+    *,
+    direction: int,
+    gap: float,
+    endpoint: Node,
+    placed_hub_ids: set[int],
+) -> float:
+    """Move a virtual hub sideways until it no longer covers a visible node."""
+    x = preferred_x
+    ignored_node_ids = {node.id, endpoint.id}
+    for _ in range(len(workflow.nodes) + 1):
+        collision = _first_virtual_hub_collision(
+            workflow,
+            node,
+            x,
+            y,
+            ignored_node_ids,
+            placed_hub_ids,
+        )
+        if collision is None:
+            return x
+        if direction < 0:
+            x = min(x, collision.x - _node_visual_width(node) - gap)
+        else:
+            x = max(x, collision.x + _node_visual_width(collision) + gap)
+    return x
+
+
+def _first_virtual_hub_collision(
+    workflow: Workflow,
+    node: Node,
+    x: float,
+    y: float,
+    ignored_node_ids: set[int],
+    placed_hub_ids: set[int],
+) -> Node | None:
+    for other in workflow.nodes.values():
+        if other.id in ignored_node_ids:
+            continue
+        if (_is_set_node(other) or _is_get_node(other)) and other.id not in placed_hub_ids:
+            continue
+        if _rectangles_overlap(
+            x,
+            y,
+            _node_visual_width(node),
+            _node_visual_height(node),
+            other.x,
+            other.y,
+            _node_visual_width(other),
+            _node_visual_height(other),
+            padding=6.0,
+        ):
+            return other
+    return None
+
+
+def _first_node_collision(
+    workflow: Workflow,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    ignored_node_ids: set[int],
+) -> Node | None:
+    for other in workflow.nodes.values():
+        if other.id in ignored_node_ids:
+            continue
+        if _rectangles_overlap(
+            x,
+            y,
+            width,
+            height,
+            other.x,
+            other.y,
+            _node_visual_width(other),
+            _node_visual_height(other),
+            padding=6.0,
+        ):
+            return other
+    return None
+
+
+def _rectangles_overlap(
+    left_a: float,
+    top_a: float,
+    width_a: float,
+    height_a: float,
+    left_b: float,
+    top_b: float,
+    width_b: float,
+    height_b: float,
+    *,
+    padding: float = 0.0,
+) -> bool:
+    return not (
+        left_a + width_a + padding <= left_b
+        or left_b + width_b + padding <= left_a
+        or top_a + height_a + padding <= top_b
+        or top_b + height_b + padding <= top_a
+    )
 
 
 def _assign_virtual_hub_groups_to_endpoints(workflow: Workflow) -> None:
@@ -1054,6 +1704,47 @@ def _assign_virtual_hub_groups_to_endpoints(workflow: Workflow) -> None:
             workflow.ungrouped_nodes.append(hub)
         else:
             endpoint_group.nodes.append(hub)
+
+
+def _separate_unpinned_nodes_from_pinned_geometry(workflow: Workflow, settings: LayoutSettings) -> None:
+    pinned_nodes = [
+        node for node in workflow.nodes.values()
+        if _is_pinned_node(workflow, node) and not _is_virtual_hub_node(node)
+    ]
+    if not pinned_nodes:
+        return
+
+    movable_nodes = [
+        node for node in workflow.nodes.values()
+        if not _is_pinned_node(workflow, node) and not _is_virtual_hub_node(node)
+    ]
+    gap = max(12.0, settings.node_v_gap * 0.25)
+
+    for node in sorted(movable_nodes, key=lambda item: (item.y, item.x, item.id)):
+        for _ in range(len(pinned_nodes) + 1):
+            collision = _first_overlap_with_nodes(node, pinned_nodes)
+            if collision is None:
+                break
+            node.y = collision.y + _node_visual_height(collision) + gap
+
+
+def _first_overlap_with_nodes(node: Node, candidates: list[Node]) -> Node | None:
+    for other in candidates:
+        if other.id == node.id:
+            continue
+        if _rectangles_overlap(
+            node.x,
+            node.y,
+            _node_visual_width(node),
+            _node_visual_height(node),
+            other.x,
+            other.y,
+            _node_visual_width(other),
+            _node_visual_height(other),
+            padding=6.0,
+        ):
+            return other
+    return None
 
 
 def _virtual_hub_gap(settings: LayoutSettings) -> float:
@@ -1161,7 +1852,11 @@ def _position_decorative_nodes_left(workflow: Workflow, settings: LayoutSettings
     """
     logger.debug("Positioning decorative nodes on the left edge")
 
-    decorative = [n for n in workflow.nodes.values() if _is_decorative_node(n)]
+    decorative = [
+        n
+        for n in workflow.nodes.values()
+        if _is_decorative_node(n) and not _is_pinned_node(workflow, n)
+    ]
     if not decorative:
         return DECORATIVE_START_X
 
@@ -1190,7 +1885,7 @@ def _update_bounding_boxes(workflow: Workflow, settings: LayoutSettings) -> None
     logger.debug("Updating group bounding boxes")
     
     for group in workflow.groups:
-        if not group.nodes:
+        if not group.nodes or group.pinned:
             continue
         
         min_x, min_y, max_x, max_y = _group_content_bounds(group)
@@ -1209,6 +1904,88 @@ def _update_bounding_boxes(workflow: Workflow, settings: LayoutSettings) -> None
         logger.debug(f"Group {group.name} bounding box updated to {group.bounding}")
 
 
+def _resolve_group_geometry_overlaps(workflow: Workflow, settings: LayoutSettings) -> None:
+    """Move whole movable groups until group surfaces no longer overlap."""
+    groups = [group for group in workflow.groups if _has_positive_bounding(group)]
+    groups.sort(key=lambda group: (group.bounding[1], group.bounding[0], group.id))
+    grouped_node_ids = {node.id for group in workflow.groups for node in group.nodes}
+    fixed_node_obstacles = [
+        _node_rect(node)
+        for node in workflow.nodes.values()
+        if node.id not in grouped_node_ids
+    ]
+    placed_groups: list[Group] = []
+
+    for group in groups:
+        if _group_has_fixed_geometry(group):
+            placed_groups.append(group)
+            continue
+
+        member_ids = {node.id for node in group.nodes}
+        for _ in range(len(workflow.groups) + len(workflow.nodes) + 1):
+            group_rect = _group_rect(group)
+            obstacles = [
+                _group_rect(other)
+                for other in placed_groups
+                if _rects_overlap(group_rect, _group_rect(other))
+            ]
+            obstacles.extend(rect for rect in fixed_node_obstacles if _rects_overlap(group_rect, rect))
+            obstacles.extend(
+                _node_rect(node)
+                for other in placed_groups
+                for node in other.nodes
+                if node.id not in member_ids and _rects_overlap(group_rect, _node_rect(node))
+            )
+
+            if not obstacles:
+                break
+
+            lowest_obstacle_bottom = max(rect[3] for rect in obstacles)
+            delta_y = (lowest_obstacle_bottom + settings.group_v_gap) - group.bounding[1]
+            _move_group_geometry(group, 0.0, max(delta_y, settings.group_v_gap))
+
+        placed_groups.append(group)
+
+
+def _group_has_fixed_geometry(group: Group) -> bool:
+    """Return True when moving the group would violate a pin contract."""
+    return group.pinned or any(node.pinned for node in group.nodes)
+
+
+def _group_by_node_id(workflow: Workflow) -> dict[int, Group]:
+    return {node.id: group for group in workflow.groups for node in group.nodes}
+
+
+def _move_group_geometry(group: Group, delta_x: float, delta_y: float) -> None:
+    """Move a group rectangle and all member nodes as one visual unit."""
+    group.bounding[0] += delta_x
+    group.bounding[1] += delta_y
+    for node in group.nodes:
+        node.x += delta_x
+        node.y += delta_y
+
+
+def _group_rect(group: Group) -> tuple[float, float, float, float]:
+    x, y, width, height = group.bounding
+    return x, y, x + width, y + height
+
+
+def _node_rect(node: Node) -> tuple[float, float, float, float]:
+    return (
+        node.x,
+        node.y,
+        node.x + _node_visual_width(node),
+        node.y + _node_visual_height(node),
+    )
+
+
+def _rects_overlap(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
 def _group_content_bounds(group: Group) -> tuple[float, float, float, float]:
     """Return [left, top, right, bottom] bounds for the group's node content."""
     min_x = min(n.x for n in group.nodes)
@@ -1223,6 +2000,13 @@ def _has_positive_bounding(group: Group) -> bool:
     return bool(group.bounding and len(group.bounding) >= 4 and group.bounding[2] > 0 and group.bounding[3] > 0)
 
 
+def _is_pinned_node(workflow: Workflow, node: Node) -> bool:
+    """Return True when ComfyUI pin flags should keep a node in place."""
+    if node.pinned:
+        return True
+    return any(group.pinned and _node_in_group(node, group) for group in workflow.groups)
+
+
 def _is_decorative_node(node: Node) -> bool:
     return node.type in {"Note", "MarkdownNote", "Label"}
 
@@ -1233,6 +2017,10 @@ def _is_set_node(node: Node) -> bool:
 
 def _is_get_node(node: Node) -> bool:
     return node.type == "GetNode"
+
+
+def _is_virtual_hub_node(node: Node) -> bool:
+    return _is_set_node(node) or _is_get_node(node)
 
 
 def _is_reroute_node(node: Node) -> bool:

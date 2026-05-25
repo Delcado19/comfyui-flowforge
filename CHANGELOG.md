@@ -10,13 +10,30 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Read-only layout quality report for real workflow folders.
 - Link-category breakdowns in read-only layout quality reports.
 - Frontend toolbar action for running the Set/Get optimizer and layout as one cleanup flow.
+- Pin buttons for nodes and groups plus a canvas toolbar action to unpin every pinned node and group.
 - Optional Set/Get optimizer mode for read-only layout quality reports.
+- Regression coverage for the bundled `example-workflows` corpus, including layout roundtrip checks and Optimize + Layout aggregate quality budgets.
 
 ### Changed
 
 - Arrange linked ungrouped nodes by dataflow layers to reduce long right-to-left wires in real workflows.
 - Correct internal layout layer assignment to use the deepest dependency path.
 - Refine internal layer ordering with adjacent-layer barycenter sweeps to reduce grouped wire crossings.
+- Respect ComfyUI `flags.pinned: true` on nodes and groups so pinned control areas keep their saved position and size during layout.
+- Keep primitive control nodes such as seed, CFG, and text/string controls beside their downstream consumer or sampler cluster instead of leaving them in distant source columns.
+- Keep sampler setup sources such as `EmptyLatentImage` close to the sampler input they feed.
+- Move virtual Set/Get hubs sideways when their ideal port-adjacent position would cover an existing node.
+- Prefer same-side vertical fallback slots for virtual Set/Get hubs before moving them horizontally across the workflow.
+- Let unpinned virtual Set/Get hubs follow their physical endpoint even if their old position placed them inside a pinned group.
+- Treat virtual Set/Get hubs as endpoint anchors during layout even when their own ComfyUI pin flag is set.
+- Exclude virtual Set/Get hubs from regular group and dataflow placement so they behave as local source/destination adornments instead of graph nodes.
+- Place sampler control stacks, such as seed/CFG/latent setup nodes, in collision-free local slots around their endpoint instead of blindly overlaying nearby context nodes.
+- Move unpinned nodes out from under pinned node geometry and re-anchor local controls and virtual hubs after that clearance pass.
+- Keep grouped control nodes inside their own group when their consumers are external, preventing loader/control groups from stretching across the workflow.
+- Start a new group column for very wide groups instead of stacking them under narrow groups.
+- Skip Set/Get fanout rewrites when the source or any terminal consumer is pinned or inside a pinned group, keeping pinned control areas visually stable.
+- Skip upstream Set/Get rewrites into LoRA or same-type pass-through transformer nodes and rewrite long single cross-group `MODEL`/`CLIP`/`VAE` links when the Set/Get pair is cheaper.
+- Keep debug previews and prompt switch/control side branches from forcing extra group-layout columns.
 - Compact saved node sizes before layout, keep long text/widget nodes tall enough for their visible content, and shrink group rectangles around optimized group-local node layouts.
 - Stack variable-height nodes cumulatively inside group-local layers so compact layouts do not overlap nodes in the same layer.
 - Use virtual Set/Get pairing without physical `SetNode -> GetNode` links when optimizing high-fanout wiring.
@@ -24,6 +41,7 @@ All notable changes to ComfyUI FlowForge are documented here.
 
 ### Fixed
 
+- Move whole unpinned groups after compact bounding-box updates when group surfaces would overlap another group or a node outside the group.
 - Match the compact node-height formula to the canvas renderer by stacking slot inputs and widget rows instead of taking their maximum, so laid-out nodes no longer overlap their neighbours when widgets push real render height past the reserved slot.
 - Place linked ungrouped nodes to the right of every positioned group instead of dropping them into the group's first column, eliminating systematic horizontal overlaps between ungrouped and grouped nodes.
 

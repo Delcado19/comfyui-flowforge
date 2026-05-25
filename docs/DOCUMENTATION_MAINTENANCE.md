@@ -60,6 +60,7 @@ Backend:
 
 ```powershell
 uv run pytest
+uv run pytest tests/test_example_workflows.py
 uv run ruff check .
 uv run mypy flowforge
 uv run python tools/check_release_ready.py
@@ -91,7 +92,9 @@ Read-only layout quality reporting:
 uv run python tools/report_layout_quality.py example-workflows
 ```
 
-GitHub Actions CI mirrors the repository gates with backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build. The private local ComfyUI workflow scan remains a local-only release gate.
+The bundled example workflow pytest is the default corpus regression guard: it parses the repository's `example-workflows`, validates layout roundtrips, and asserts Optimize + Layout keeps aggregate crossings and right-to-left links no worse than the saved source workflows.
+
+GitHub Actions CI mirrors the repository gates with backend tests, Ruff, Mypy, bundled example workflow regression coverage, frontend typecheck, and frontend build. The private local ComfyUI workflow scan remains a local-only release gate.
 
 ## Handoff Format
 

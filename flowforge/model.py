@@ -19,6 +19,7 @@ class Node:
     widget_input_count: int = 0
     output_count: int = 0
     collapsed: bool = False
+    pinned: bool = False
     input_links: List[int] = field(default_factory=list)
     output_links: List[int] = field(default_factory=list)
     widgets_values: List[Any] = field(default_factory=list)  # For SetNode/GetNode
@@ -41,6 +42,7 @@ class Group:
     nodes: List[Node] = field(default_factory=list)
     # Bounding box: [x, y, width, height]
     bounding: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
+    pinned: bool = False
 
 
 @dataclass

@@ -19,12 +19,15 @@ from flowforge.layout import (
     _node_input_port_y,
     _node_output_port_y,
     _position_groups_globally,
+    _position_text_previews_near_sources,
     _score_layout_candidate,
     _resolve_layout_candidate_count,
     _assign_longest_path_layers,
+    _compress_debug_sidecar_layers,
     _minimize_layer_crossings,
     _shrink_nodes_to_minimum_size,
     _update_bounding_boxes,
+    _resolve_group_geometry_overlaps,
 )
 from flowforge.logger import setup_logger
 
@@ -262,6 +265,95 @@ def test_longest_path_layer_assignment_uses_deepest_dependency():
     logger.info("Longest-path layer assignment test passed")
 
 
+def test_debug_sidecars_do_not_extend_group_layer_depth():
+    logger.info("Testing debug sidecar layer compression")
+    wf = Workflow()
+    source = Node(id=1, type="MaskSource", x=0, y=0, size=[200, 80])
+    composite = Node(id=2, type="MaskComposite", x=300, y=0, size=[220, 100])
+    mask_image = Node(id=3, type="MaskToImage", x=600, y=0, size=[180, 60])
+    preview = Node(id=4, type="PreviewImage", x=900, y=0, size=[260, 220])
+    wf.nodes = {node.id: node for node in (source, composite, mask_image, preview)}
+    adj = {1: [2], 2: [3], 3: [4], 4: []}
+    rev_adj = {1: [], 2: [1], 3: [2], 4: [3]}
+
+    layers = _assign_longest_path_layers(set(wf.nodes), adj, rev_adj)
+    assert layers[4] == 3
+
+    _compress_debug_sidecar_layers(layers, adj, rev_adj, wf)
+
+    assert layers[2] == 1
+    assert layers[3] == 1
+    assert layers[4] == 1
+    logger.info("Debug sidecar layer compression test passed")
+
+
+def test_prompt_control_sidecars_stay_with_target_block():
+    logger.info("Testing prompt control sidecar layer placement")
+    wf = Workflow()
+    resize = Node(id=1, type="ImageResize+", x=0, y=0, size=[200, 200])
+    vl = Node(id=2, type="AILab_QwenVL_Advanced", x=300, y=0, size=[240, 400])
+    manual = Node(id=3, type="Text Multiline", x=0, y=500, size=[220, 120])
+    switch = Node(id=4, type="Any Switch (rgthree)", x=600, y=0, size=[220, 120])
+    prefix = Node(id=5, type="Text Multiline", x=0, y=650, size=[220, 120])
+    suffix = Node(id=6, type="Text Multiline", x=0, y=800, size=[220, 120])
+    concat = Node(id=7, type="Text Concatenate", x=900, y=0, size=[220, 160])
+    wf.nodes = {node.id: node for node in (resize, vl, manual, switch, prefix, suffix, concat)}
+    adj = {
+        1: [2],
+        2: [4],
+        3: [4],
+        4: [7],
+        5: [7],
+        6: [7],
+        7: [],
+    }
+    rev_adj = {
+        1: [],
+        2: [1],
+        3: [],
+        4: [2, 3],
+        5: [],
+        6: [],
+        7: [4, 5, 6],
+    }
+
+    layers = _assign_longest_path_layers(set(wf.nodes), adj, rev_adj)
+    assert layers[7] == 3
+
+    _compress_debug_sidecar_layers(layers, adj, rev_adj, wf)
+
+    assert layers[2] == 1
+    assert layers[3] == layers[4] == 1
+    assert layers[5] == layers[6] == layers[7] == 2
+    logger.info("Prompt control sidecar layer placement test passed")
+
+
+def test_text_preview_stays_near_source_output():
+    logger.info("Testing text preview source anchoring")
+    wf = Workflow()
+    qwen = Node(id=1, type="AILab_QwenVL_Advanced", x=300, y=200, size=[200, 540])
+    switch = Node(id=2, type="Any Switch (rgthree)", x=300, y=812, size=[200, 110])
+    concat = Node(id=3, type="Text Concatenate", x=556, y=200, size=[200, 180])
+    preview = Node(id=4, type="ShowText|pysssss", x=300, y=1000, size=[200, 134])
+    wf.nodes = {node.id: node for node in (qwen, switch, concat, preview)}
+    links = [
+        Link(id=10, source=qwen.id, source_port=0, target=preview.id, target_port=0, type="STRING"),
+        Link(id=11, source=qwen.id, source_port=1, target=switch.id, target_port=0, type="STRING"),
+    ]
+    for link in links:
+        wf.links[link.id] = link
+        wf.nodes[link.source].output_links.append(link.id)
+        wf.nodes[link.target].input_links.append(link.id)
+
+    _position_text_previews_near_sources(wf, LayoutSettings())
+
+    assert preview.x > qwen.x + qwen.size[0]
+    assert qwen.y < preview.y < qwen.y + qwen.size[1]
+    assert not _test_rectangles_overlap(preview, concat)
+    assert not _test_rectangles_overlap(preview, switch)
+    logger.info("Text preview source anchoring test passed")
+
+
 def test_layer_crossing_minimization_uses_adjacent_layer_order():
     logger.info("Testing internal layer crossing minimization")
     wf = Workflow()
@@ -301,6 +393,30 @@ def test_global_positioning():
     logger.info("Global positioning test passed")
 
 
+def test_wide_group_starts_new_column_after_narrow_group():
+    logger.info("Testing wide group column break")
+    wf = Workflow()
+    narrow = Group(id=1, name="narrow", bounding=[0, 0, 400, 400])
+    wide = Group(id=2, name="wide", bounding=[500, 0, 1400, 260])
+    wf.groups = [narrow, wide]
+    narrow_node = Node(id=1, type="Sampler", x=20, y=20, size=[220, 620])
+    wide_nodes = [
+        Node(id=2, type="UpscaleModelLoader", x=520, y=20, size=[220, 80]),
+        Node(id=3, type="ImageUpscaleWithModel", x=820, y=20, size=[220, 80]),
+        Node(id=4, type="ImageScaleBy", x=1120, y=20, size=[220, 80]),
+    ]
+    narrow.nodes = [narrow_node]
+    wide.nodes = wide_nodes
+    wf.nodes = {node.id: node for node in [narrow_node, *wide_nodes]}
+
+    _position_groups_globally(wf, LayoutSettings())
+
+    narrow_right = narrow.bounding[0] + narrow.bounding[2]
+    assert wide.bounding[0] > narrow_right
+    assert wide.bounding[1] == narrow.bounding[1]
+    logger.info("Wide group column break test passed")
+
+
 def test_bounding_box_update():
     logger.info("Testing bounding box update")
     wf = Workflow()
@@ -324,6 +440,35 @@ def test_bounding_box_update():
     assert abs(b[2] - expected_w) < 1
     assert abs(b[3] - expected_h) < 1
     logger.info("Bounding box update test passed")
+
+
+def test_group_geometry_clearance_moves_whole_groups():
+    logger.info("Testing group geometry clearance")
+    wf = Workflow()
+    first = Group(id=1, name="mask", bounding=[100, 100, 420, 320])
+    second = Group(id=2, name="prompt", bounding=[140, 260, 480, 340])
+    wf.groups = [first, second]
+
+    first.nodes = [
+        Node(id=1, type="MaskSource", x=150, y=150, size=[160, 90]),
+        Node(id=2, type="MaskPreview", x=150, y=270, size=[180, 90]),
+    ]
+    second.nodes = [
+        Node(id=3, type="Prompt", x=190, y=310, size=[200, 100]),
+        Node(id=4, type="TextEncode", x=430, y=310, size=[160, 100]),
+    ]
+    wf.nodes = {node.id: node for group in wf.groups for node in group.nodes}
+
+    _resolve_group_geometry_overlaps(wf, LayoutSettings())
+
+    assert not _test_rectangles_overlap_groups(first, second)
+    assert second.bounding[1] > 260
+    for node in second.nodes:
+        assert second.bounding[0] <= node.x
+        assert second.bounding[1] <= node.y
+        assert node.x + node.size[0] <= second.bounding[0] + second.bounding[2]
+        assert node.y + node.size[1] <= second.bounding[1] + second.bounding[3]
+    logger.info("Group geometry clearance test passed")
 
 
 def test_layout_compacts_resized_group_container():
@@ -353,6 +498,72 @@ def test_layout_compacts_resized_group_container():
         assert node.y + node.size[1] <= gy + gh
 
     logger.info("Resized group container compaction test passed")
+
+
+def test_pinned_group_preserves_group_and_member_geometry():
+    logger.info("Testing pinned group preservation")
+    wf = Workflow()
+    group = Group(id=1, name="controls", bounding=[600, 400, 760, 420], pinned=True)
+    wf.groups = [group]
+    prompt = Node(id=1, type="CLIPTextEncode", x=640, y=460, size=[420, 260], pinned=True)
+    sampler = Node(id=2, type="KSampler", x=1080, y=500, size=[320, 340])
+    outside = Node(id=3, type="PreviewImage", x=0, y=0, size=[240, 120])
+    wf.nodes = {1: prompt, 2: sampler, 3: outside}
+    wf.links[10] = Link(id=10, source=1, source_port=0, target=2, target_port=0, type="CONDITIONING")
+    prompt.output_links.append(10)
+    sampler.input_links.append(10)
+
+    result = apply(wf)
+
+    assert result.groups[0].bounding == [600, 400, 760, 420]
+    assert result.nodes[1].x == 640
+    assert result.nodes[1].y == 460
+    assert result.nodes[1].size == [420, 260]
+    assert result.nodes[2].x == 1080
+    assert result.nodes[2].y == 500
+    assert result.nodes[2].size == [320, 340]
+    assert result.nodes[3].x != 0 or result.nodes[3].y != 0
+    logger.info("Pinned group preservation test passed")
+
+
+def test_pinned_ungrouped_node_preserves_position_and_size():
+    logger.info("Testing pinned ungrouped node preservation")
+    wf = Workflow()
+    pinned = Node(id=1, type="PrimitiveNode", x=-300, y=900, size=[520, 380], pinned=True)
+    movable = Node(id=2, type="PreviewImage", x=800, y=200, size=[280, 140])
+    wf.nodes = {1: pinned, 2: movable}
+    wf.links[10] = Link(id=10, source=1, source_port=0, target=2, target_port=0, type="IMAGE")
+    pinned.output_links.append(10)
+    movable.input_links.append(10)
+
+    result = apply(wf)
+
+    assert result.nodes[1].x == -300
+    assert result.nodes[1].y == 900
+    assert result.nodes[1].size == [520, 380]
+    assert result.nodes[2].x != 800 or result.nodes[2].y != 200
+    logger.info("Pinned ungrouped node preservation test passed")
+
+
+def test_unpinned_nodes_clear_pinned_node_geometry():
+    logger.info("Testing unpinned nodes clear pinned node geometry")
+    wf = Workflow()
+    pinned = Node(id=1, type="Seed (rgthree)", x=400, y=160, size=[260, 180], pinned=True)
+    movable = Node(id=2, type="Context (Load Model)", x=400, y=180, size=[260, 260])
+    target = Node(id=3, type="KSampler", x=900, y=160, size=[260, 300], input_count=1)
+    wf.nodes = {1: pinned, 2: movable, 3: target}
+    link = Link(id=10, source=2, source_port=0, target=3, target_port=0, type="MODEL")
+    wf.links[link.id] = link
+    movable.output_links.append(link.id)
+    target.input_links.append(link.id)
+
+    result = apply(wf)
+    pinned = result.nodes[1]
+    movable = result.nodes[2]
+
+    assert (pinned.x, pinned.y) == (400, 160)
+    assert not _test_rectangles_overlap(pinned, movable)
+    logger.info("Pinned geometry clearance test passed")
 
 
 def test_decorative_nodes_move_to_left_column():
@@ -429,6 +640,319 @@ def test_linked_ungrouped_nodes_clear_group_columns():
     logger.info("Linked ungrouped placement test passed")
 
 
+def test_primitive_control_nodes_stay_near_single_consumer():
+    logger.info("Testing primitive control nodes stay near their consumer")
+    wf = Workflow()
+    sampler = Node(id=1, type="KSampler", x=900, y=400, size=[260, 300], input_count=8)
+    seed = Node(id=2, type="Seed (rgthree)", x=-700, y=1200, size=[220, 120])
+    cfg = Node(id=3, type="PrimitiveFloat", x=-500, y=1500, size=[180, 80])
+    loader = Node(id=4, type="VAELoader", x=-900, y=100, size=[220, 80])
+    wf.nodes = {1: sampler, 2: seed, 3: cfg, 4: loader}
+
+    links = [
+        Link(id=10, source=2, source_port=0, target=1, target_port=6, type="SEED"),
+        Link(id=11, source=3, source_port=0, target=1, target_port=5, type="FLOAT"),
+        Link(id=12, source=4, source_port=0, target=1, target_port=4, type="VAE"),
+    ]
+    for link in links:
+        wf.links[link.id] = link
+        wf.nodes[link.source].output_links.append(link.id)
+        wf.nodes[link.target].input_links.append(link.id)
+
+    result = apply(wf)
+    sampler = result.nodes[1]
+    seed = result.nodes[2]
+    cfg = result.nodes[3]
+    loader = result.nodes[4]
+
+    assert seed.x < sampler.x
+    assert cfg.x < sampler.x
+    assert sampler.x - (seed.x + seed.size[0]) <= 80
+    assert sampler.x - (cfg.x + cfg.size[0]) <= 80
+    assert abs((seed.y + seed.size[1] / 2) - _node_input_port_y(sampler, 6)) < sampler.size[1]
+    assert abs((cfg.y + cfg.size[1] / 2) - _node_input_port_y(sampler, 5)) < sampler.size[1]
+    assert loader.x < sampler.x
+    logger.info("Primitive control node proximity test passed")
+
+
+def test_multi_output_control_nodes_stay_near_sampler_cluster():
+    logger.info("Testing multi-output primitive controls stay near sampler clusters")
+    wf = Workflow()
+    seed = Node(id=1, type="PrimitiveInt", x=-900, y=2000, size=[280, 100])
+    sampler_a = Node(id=2, type="SamplerCustom", x=900, y=100, size=[260, 360], input_count=8)
+    sampler_b = Node(id=3, type="KSamplerAdvanced", x=1200, y=620, size=[300, 340], input_count=8)
+    wf.nodes = {1: seed, 2: sampler_a, 3: sampler_b}
+
+    links = [
+        Link(id=10, source=1, source_port=0, target=2, target_port=7, type="INT"),
+        Link(id=11, source=1, source_port=0, target=3, target_port=5, type="INT"),
+    ]
+    for link in links:
+        wf.links[link.id] = link
+        wf.nodes[link.source].output_links.append(link.id)
+        wf.nodes[link.target].input_links.append(link.id)
+
+    result = apply(wf)
+    seed = result.nodes[1]
+    sampler_a = result.nodes[2]
+    sampler_b = result.nodes[3]
+
+    sampler_left = min(sampler_a.x, sampler_b.x)
+    sampler_port_mid = (
+        _node_input_port_y(sampler_a, 7) + _node_input_port_y(sampler_b, 5)
+    ) / 2
+
+    assert seed.x < sampler_left
+    assert sampler_left - (seed.x + seed.size[0]) <= 80
+    assert abs((seed.y + seed.size[1] / 2) - sampler_port_mid) < 180
+    logger.info("Multi-output control node proximity test passed")
+
+
+def test_control_stack_avoids_existing_nodes_near_sampler():
+    logger.info("Testing control stack avoids existing nodes near sampler")
+    wf = Workflow()
+    sampler = Node(id=1, type="KSampler", x=900, y=220, size=[260, 300], input_count=8)
+    seed = Node(id=2, type="Seed (rgthree)", x=-700, y=1200, size=[220, 120])
+    context = Node(id=3, type="Context (Load Model)", x=640, y=250, size=[260, 260], pinned=True)
+    wf.nodes = {1: sampler, 2: seed, 3: context}
+
+    link = Link(id=10, source=2, source_port=0, target=1, target_port=6, type="SEED")
+    wf.links[link.id] = link
+    seed.output_links.append(link.id)
+    sampler.input_links.append(link.id)
+
+    result = apply(wf)
+    seed = result.nodes[2]
+    context = result.nodes[3]
+    sampler = result.nodes[1]
+
+    assert _test_node_is_local_to_endpoint(seed, sampler)
+    assert not _test_rectangles_overlap(seed, context)
+    logger.info("Control stack collision avoidance test passed")
+
+
+def test_control_nodes_can_anchor_to_pinned_target_group_edge():
+    logger.info("Testing controls anchor outside pinned target groups")
+    wf = Workflow()
+    seed = Node(id=1, type="PrimitiveInt", x=-900, y=1400, size=[280, 100])
+    sampler = Node(id=2, type="KSamplerAdvanced", x=900, y=220, size=[300, 340], input_count=8)
+    wf.nodes = {1: seed, 2: sampler}
+    wf.groups = [Group(id=1, name="Sampler Control", bounding=[820, 160, 520, 500], pinned=True)]
+
+    link = Link(id=10, source=1, source_port=0, target=2, target_port=5, type="INT")
+    wf.links[link.id] = link
+    seed.output_links.append(link.id)
+    sampler.input_links.append(link.id)
+
+    result = apply(wf)
+    seed = result.nodes[1]
+    sampler = result.nodes[2]
+    group = result.groups[0]
+
+    assert group.bounding == [820, 160, 520, 500]
+    assert (sampler.x, sampler.y) == (900, 220)
+    assert seed.x < group.bounding[0]
+    assert group.bounding[0] - (seed.x + seed.size[0]) <= 80
+    logger.info("Pinned target group control anchor test passed")
+
+
+def test_empty_latent_image_stays_near_sampler_input():
+    logger.info("Testing EmptyLatentImage stays near sampler latent input")
+    wf = Workflow()
+    latent = Node(id=1, type="EmptyLatentImage", x=-900, y=1600, size=[220, 120])
+    sampler = Node(id=2, type="KSampler", x=900, y=260, size=[260, 300], input_count=4)
+    wf.nodes = {1: latent, 2: sampler}
+
+    link = Link(id=10, source=1, source_port=0, target=2, target_port=3, type="LATENT")
+    wf.links[link.id] = link
+    latent.output_links.append(link.id)
+    sampler.input_links.append(link.id)
+
+    result = apply(wf)
+    latent = result.nodes[1]
+    sampler = result.nodes[2]
+
+    assert latent.x < sampler.x
+    assert sampler.x - (latent.x + latent.size[0]) <= 80
+    assert abs((latent.y + latent.size[1] / 2) - _node_input_port_y(sampler, 3)) < sampler.size[1]
+    logger.info("EmptyLatentImage sampler proximity test passed")
+
+
+def test_grouped_control_node_does_not_stretch_group_to_external_sampler():
+    logger.info("Testing grouped control nodes stay in their source group")
+    wf = Workflow()
+    load_group = Group(id=1, name="LOAD", bounding=[0, 0, 320, 260])
+    sampler_group = Group(id=2, name="GO", bounding=[700, 0, 360, 420])
+    latent = Node(id=1, type="EmptyLatentImageCustom", x=40, y=60, size=[220, 120])
+    sampler = Node(id=2, type="KSampler", x=760, y=80, size=[260, 320], input_count=4)
+    wf.nodes = {1: latent, 2: sampler}
+    wf.groups = [load_group, sampler_group]
+    link = Link(id=10, source=latent.id, source_port=0, target=sampler.id, target_port=3, type="LATENT")
+    wf.links[link.id] = link
+    latent.output_links.append(link.id)
+    sampler.input_links.append(link.id)
+
+    result = apply(wf)
+    latent = result.nodes[1]
+    load_group = next(group for group in result.groups if group.name == "LOAD")
+
+    assert latent in load_group.nodes
+    assert latent.x + latent.size[0] <= load_group.bounding[0] + load_group.bounding[2]
+    assert load_group.bounding[2] < 500
+    logger.info("Grouped control node source-group test passed")
+
+
+def test_virtual_hubs_shift_sideways_to_avoid_covering_nodes():
+    logger.info("Testing virtual Set/Get hubs avoid covering existing nodes")
+    wf = Workflow()
+    source = Node(id=1, type="UNETLoader", x=100, y=100, size=[200, 100], pinned=True)
+    target = Node(id=2, type="KSampler", x=900, y=100, size=[260, 300], input_count=1, pinned=True)
+    set_node = Node(id=3, type="SetNode", x=0, y=0, size=[200, 60])
+    get_node = Node(id=4, type="GetNode", x=0, y=0, size=[200, 60])
+    set_blocker = Node(id=5, type="CLIPSetLastLayer", x=340, y=100, size=[200, 60], pinned=True)
+    get_blocker = Node(id=6, type="CLIPTextEncode", x=660, y=100, size=[200, 80], pinned=True)
+    wf.nodes = {
+        1: source,
+        2: target,
+        3: set_node,
+        4: get_node,
+        5: set_blocker,
+        6: get_blocker,
+    }
+
+    links = [
+        Link(id=10, source=1, source_port=0, target=3, target_port=0, type="MODEL"),
+        Link(id=11, source=4, source_port=0, target=2, target_port=0, type="MODEL"),
+    ]
+    for link in links:
+        wf.links[link.id] = link
+        wf.nodes[link.source].output_links.append(link.id)
+        wf.nodes[link.target].input_links.append(link.id)
+
+    result = apply(wf, LayoutSettings(node_x_distance=80, node_y_distance=80))
+    set_node = result.nodes[3]
+    get_node = result.nodes[4]
+    set_blocker = result.nodes[5]
+    get_blocker = result.nodes[6]
+
+    assert not _test_rectangles_overlap(set_node, set_blocker)
+    assert not _test_rectangles_overlap(get_node, get_blocker)
+    assert _test_node_is_local_to_endpoint(set_node, result.nodes[1])
+    assert _test_node_is_local_to_endpoint(get_node, result.nodes[2])
+    logger.info("Virtual hub overlap avoidance test passed")
+
+
+def test_virtual_set_hub_uses_vertical_slot_before_far_horizontal_shift():
+    logger.info("Testing virtual Set hubs prefer local vertical fallback slots")
+    wf = Workflow()
+    source = Node(
+        id=1,
+        type="Power Lora Loader",
+        x=100,
+        y=200,
+        size=[200, 120],
+        output_count=1,
+        pinned=True,
+    )
+    set_node = Node(id=2, type="SetNode", x=1800, y=200, size=[200, 60])
+    blockers = [
+        Node(id=3, type="CLIPSetLastLayer", x=340, y=200, size=[200, 60], pinned=True),
+        Node(id=4, type="CLIPSetLastLayer", x=100, y=100, size=[200, 60], pinned=True),
+        Node(id=5, type="CLIPSetLastLayer", x=100, y=360, size=[200, 60], pinned=True),
+    ]
+    wf.nodes = {1: source, 2: set_node, **{node.id: node for node in blockers}}
+    link = Link(id=10, source=source.id, source_port=0, target=set_node.id, target_port=0, type="MODEL")
+    wf.links[link.id] = link
+    source.output_links.append(link.id)
+    set_node.input_links.append(link.id)
+
+    result = apply(wf, LayoutSettings(node_x_distance=80, node_y_distance=80))
+    set_node = result.nodes[2]
+    source = result.nodes[1]
+
+    assert set_node.x - (source.x + source.size[0]) <= VIRTUAL_HUB_MAX_GAP
+    assert set_node.x < 600
+    assert set_node.y != 200
+    for blocker in blockers:
+        assert not _test_rectangles_overlap(set_node, result.nodes[blocker.id])
+    logger.info("Virtual Set hub local vertical fallback test passed")
+
+
+def test_virtual_hubs_escape_pinned_group_when_endpoint_is_elsewhere():
+    logger.info("Testing virtual hubs inside pinned groups still follow their endpoint")
+    wf = Workflow()
+    get_node = Node(id=1, type="GetNode", x=120, y=130, size=[200, 60])
+    loader = Node(id=2, type="UNETLoaderGGUF", x=160, y=90, size=[220, 80], pinned=True)
+    target = Node(id=3, type="Power Lora Loader", x=980, y=120, size=[260, 140], input_count=1)
+    pinned_group = Group(id=1, name="Load Model", bounding=[80, 60, 420, 260], pinned=True)
+    wf.nodes = {1: get_node, 2: loader, 3: target}
+    wf.groups = [pinned_group]
+
+    link = Link(id=10, source=get_node.id, source_port=0, target=target.id, target_port=0, type="MODEL")
+    wf.links[link.id] = link
+    get_node.output_links.append(link.id)
+    target.input_links.append(link.id)
+
+    result = apply(wf, LayoutSettings(node_x_distance=80, node_y_distance=80))
+    get_node = result.nodes[1]
+    loader = result.nodes[2]
+    target = result.nodes[3]
+    pinned_group = result.groups[0]
+
+    assert pinned_group.bounding == [80, 60, 420, 260]
+    assert (loader.x, loader.y) == (160, 90)
+    assert _test_node_is_local_to_endpoint(get_node, target)
+    assert get_node not in pinned_group.nodes
+    logger.info("Pinned-group virtual hub escape test passed")
+
+
+def test_virtual_hubs_do_not_influence_regular_group_layout():
+    logger.info("Testing virtual hubs are excluded from regular group layout")
+    wf = Workflow()
+    source = Node(id=1, type="UNETLoaderGGUF", x=120, y=120, size=[220, 80])
+    target = Node(id=2, type="Power Lora Loader", x=900, y=120, size=[260, 140], input_count=1)
+    get_node = Node(id=3, type="GetNode", x=130, y=320, size=[200, 60])
+    group = Group(id=1, name="Load Model", bounding=[80, 80, 420, 420])
+    wf.nodes = {1: source, 2: target, 3: get_node}
+    wf.groups = [group]
+
+    link = Link(id=10, source=get_node.id, source_port=0, target=target.id, target_port=0, type="MODEL")
+    wf.links[link.id] = link
+    get_node.output_links.append(link.id)
+    target.input_links.append(link.id)
+
+    result = apply(wf, LayoutSettings(node_x_distance=80, node_y_distance=80))
+    group = result.groups[0]
+    get_node = result.nodes[3]
+    target = result.nodes[2]
+
+    assert source in group.nodes
+    assert get_node not in group.nodes
+    assert target.x - (get_node.x + get_node.size[0]) <= VIRTUAL_HUB_MAX_GAP
+    logger.info("Virtual hub group-layout exclusion test passed")
+
+
+def test_pinned_virtual_hub_still_follows_endpoint():
+    logger.info("Testing pinned virtual hubs still follow their endpoint")
+    wf = Workflow()
+    get_node = Node(id=1, type="GetNode", x=120, y=130, size=[200, 60], pinned=True)
+    target = Node(id=2, type="KSampler", x=980, y=120, size=[260, 220], input_count=1)
+    wf.nodes = {1: get_node, 2: target}
+
+    link = Link(id=10, source=get_node.id, source_port=0, target=target.id, target_port=0, type="MODEL")
+    wf.links[link.id] = link
+    get_node.output_links.append(link.id)
+    target.input_links.append(link.id)
+
+    result = apply(wf, LayoutSettings(node_x_distance=80, node_y_distance=80))
+    get_node = result.nodes[1]
+    target = result.nodes[2]
+
+    assert get_node.x < target.x
+    assert target.x - (get_node.x + get_node.size[0]) <= VIRTUAL_HUB_MAX_GAP
+    logger.info("Pinned virtual hub endpoint-following test passed")
+
+
 def test_virtual_set_get_hubs_stay_near_physical_endpoints():
     logger.info("Testing virtual Set/Get hub endpoint anchoring")
     wf = Workflow()
@@ -464,21 +988,31 @@ def test_virtual_set_get_hubs_stay_near_physical_endpoints():
     get_nodes = [node for node in result.nodes.values() if node.type == "GetNode"]
     laid_out_source = result.nodes[1]
 
-    set_gap = set_node.x - (laid_out_source.x + laid_out_source.size[0])
-    assert VIRTUAL_HUB_MIN_GAP <= set_gap <= VIRTUAL_HUB_MAX_GAP
     set_link = result.links[set_node.input_links[0]]
-    assert _node_input_port_y(set_node, set_link.target_port) == pytest.approx(
-        _node_output_port_y(laid_out_source, set_link.source_port)
-    )
+    set_is_local = (
+        VIRTUAL_HUB_MIN_GAP
+        <= set_node.x - (laid_out_source.x + laid_out_source.size[0])
+        <= VIRTUAL_HUB_MAX_GAP
+    ) or abs((set_node.x + set_node.size[0] / 2) - (laid_out_source.x + laid_out_source.size[0] / 2)) <= laid_out_source.size[0] / 2
+    assert set_is_local
+    if _test_vertical_spans_overlap(set_node, laid_out_source) and set_node.x > laid_out_source.x:
+        assert _node_input_port_y(set_node, set_link.target_port) == pytest.approx(
+            _node_output_port_y(laid_out_source, set_link.source_port)
+        )
 
     for get_node in get_nodes:
         link = result.links[get_node.output_links[0]]
         target = result.nodes[link.target]
-        get_gap = target.x - (get_node.x + get_node.size[0])
-        assert VIRTUAL_HUB_MIN_GAP <= get_gap <= VIRTUAL_HUB_MAX_GAP
-        assert _node_output_port_y(get_node, link.source_port) == pytest.approx(
-            _node_input_port_y(target, link.target_port)
-        )
+        get_is_local = (
+            VIRTUAL_HUB_MIN_GAP
+            <= target.x - (get_node.x + get_node.size[0])
+            <= VIRTUAL_HUB_MAX_GAP
+        ) or abs((get_node.x + get_node.size[0] / 2) - (target.x + target.size[0] / 2)) <= target.size[0] / 2
+        assert get_is_local
+        if _test_vertical_spans_overlap(get_node, target) and get_node.x < target.x:
+            assert _node_output_port_y(get_node, link.source_port) == pytest.approx(
+                _node_input_port_y(target, link.target_port)
+            )
 
     logger.info("Virtual Set/Get hub endpoint anchoring test passed")
 
@@ -711,6 +1245,48 @@ def test_layout_score_penalizes_large_horizontal_gaps():
     assert gapped_score.gap_cost > 0
     assert gapped_score.total > packed_score.total
     logger.info("Gap penalty scoring test passed")
+
+
+def _test_node_is_local_to_endpoint(node: Node, endpoint: Node) -> bool:
+    side_gap = min(
+        abs(node.x - (endpoint.x + endpoint.size[0])),
+        abs(endpoint.x - (node.x + node.size[0])),
+    )
+    horizontal_overlap = not (
+        node.x + node.size[0] < endpoint.x
+        or endpoint.x + endpoint.size[0] < node.x
+    )
+    vertical_gap = min(
+        abs(node.y - (endpoint.y + endpoint.size[1])),
+        abs(endpoint.y - (node.y + node.size[1])),
+    )
+    vertical_overlap = _test_vertical_spans_overlap(node, endpoint)
+    return (
+        (side_gap <= VIRTUAL_HUB_MAX_GAP and vertical_overlap)
+        or (vertical_gap <= VIRTUAL_HUB_MAX_GAP and horizontal_overlap)
+    )
+
+
+def _test_vertical_spans_overlap(a: Node, b: Node) -> bool:
+    return not (a.y + a.size[1] < b.y or b.y + b.size[1] < a.y)
+
+
+def _test_rectangles_overlap(a: Node, b: Node) -> bool:
+    return not (
+        a.x + a.size[0] <= b.x
+        or b.x + b.size[0] <= a.x
+        or a.y + a.size[1] <= b.y
+        or b.y + b.size[1] <= a.y
+    )
+
+
+def _test_rectangles_overlap_groups(a: Group, b: Group) -> bool:
+    return not (
+        a.bounding[0] + a.bounding[2] <= b.bounding[0]
+        or b.bounding[0] + b.bounding[2] <= a.bounding[0]
+        or a.bounding[1] + a.bounding[3] <= b.bounding[1]
+        or b.bounding[1] + b.bounding[3] <= a.bounding[1]
+    )
 
 
 if __name__ == "__main__":

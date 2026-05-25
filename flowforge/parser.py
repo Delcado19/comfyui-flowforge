@@ -69,6 +69,7 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
             widget_input_count=widget_input_count,
             output_count=len(outputs) if isinstance(outputs, list) else 0,
             collapsed=bool(flags.get('collapsed')) if isinstance(flags, dict) else False,
+            pinned=bool(flags.get('pinned')) if isinstance(flags, dict) else False,
             widgets_values=widgets_values,
         )
         workflow.nodes[node_id] = node
@@ -116,6 +117,9 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
             logger.warning("Group missing id, skipping")
             continue
         name = group_data.get('name', f'group_{group_id}')
+        if 'title' in group_data and 'name' not in group_data:
+            name = group_data.get('title', name)
+        flags = group_data.get('flags', {})
         # Bounding box: [x, y, width, height]
         bounding = group_data.get('bounding', [0.0, 0.0, 0.0, 0.0])
         if isinstance(bounding, dict):
@@ -130,7 +134,8 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
         group = Group(
             id=group_id,
             name=name,
-            bounding=[float(bounding[0]), float(bounding[1]), float(bounding[2]), float(bounding[3])]
+            bounding=[float(bounding[0]), float(bounding[1]), float(bounding[2]), float(bounding[3])],
+            pinned=bool(flags.get('pinned')) if isinstance(flags, dict) else False,
         )
         workflow.groups.append(group)
         logger.debug(f"Parsed group {group_id}: {name} at bounding {group.bounding}")

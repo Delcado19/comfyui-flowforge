@@ -64,6 +64,7 @@ uv run flowforge-gui
 The GUI opens in your browser at the URL shown in the terminal. It starts at `http://127.0.0.1:5173` and automatically picks the next available frontend port when that port is unavailable.
 The launcher also auto-selects an available backend API port and passes it through to the frontend so the browser session stays connected even when local ports are already in use.
 Use **Optimize + Layout** in the toolbar for the normal cleanup flow: insert Set/Get hubs for eligible high-fanout `MODEL`, `CLIP`, and `VAE` wiring, then run layout. Use **Layout Only** when the workflow should keep its original node graph.
+Optimizer rewrites are skipped when a fanout touches pinned nodes or nodes inside pinned groups, so pinned control areas keep their visible structure.
 
 ### One-Click Launchers
 
@@ -83,10 +84,10 @@ Both launchers run from the repository root and start `uv run flowforge-gui`.
 
 ### Features
 
-- **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions, compact node sizes, and group bounds
+- **Workflow JSON Roundtrip**: Preserves ComfyUI workflow metadata while updating layout positions, compact node sizes, and group bounds for unpinned elements
 - **Visual Workflow Canvas**: See how nodes are positioned on a pan/zoom canvas
 - **Mini Map and Groups**: Navigate large workflows with a minimap, grouped background regions, group-aware dragging, resizable group containers, and group creation/deletion controls
-- **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus live X/Y spacing controls for layout density and toolbar buttons to create or clear groups
+- **Interactive Controls**: Open, optimize, layout, and save workflows with button clicks plus live X/Y spacing controls, pin/unpin controls, and toolbar buttons to create or clear groups
 - **Before/After Comparison**: Toggle ghost outlines of the previous node positions after a layout run
 - **Color-Coded Nodes**: Different node types are visually distinguished and rendered with ComfyUI-like widgets
 - **Zoom & Pan**: Mouse wheel zoom, plus/minus buttons, and scrollbars for navigation
@@ -97,7 +98,7 @@ FlowForge implements a compact layout pipeline:
 
 ### Phase 0 — Node Compaction
 
-Before any graph geometry is derived, layout shrinks nodes that have saved larger dimensions down to a conservative compact size. Reroutes, note-like decorative nodes, collapsed nodes, and regular nodes use separate minimum dimensions. Existing nodes that are already smaller are left unchanged.
+Before any graph geometry is derived, layout shrinks unpinned nodes that have saved larger dimensions down to a conservative compact size. Reroutes, note-like decorative nodes, collapsed nodes, and regular nodes use separate minimum dimensions. Existing nodes that are already smaller are left unchanged. Nodes with ComfyUI `flags.pinned: true`, and nodes inside groups with `flags.pinned: true`, keep their saved position and size.
 
 ### Phase 1 — Group Membership
 
@@ -112,13 +113,16 @@ A directed graph is built between groups: a group A gets an edge to group B when
 Within each group, independently:
 
 1. **Layer assignment** — each node receives a layer number equal to the longest path from any source node to it (`layer = max(layer[predecessor]) + 1`, with sources at layer 0). Uses a topological sort; nodes in cycles (rare in valid ComfyUI workflows) fall back to layer 0.
-2. **Crossing minimisation** — nodes within each layer are reordered using the _barycenter heuristic_: each node's score is the average position of its neighbours in the adjacent layer's current order. Two passes are run (forward then backward) to reduce edge crossings.
-3. **Coordinate assignment** — nodes are placed on a grid: X increases by layer, Y increases by position within the layer. Bypassed nodes (`mode = 4`) are sorted to the end of their layer so they don't interrupt the active flow. The public `layout` operation evaluates several spacing candidates and applies the most compact result, with additional penalties for layouts that become too wide compared to their height or leave large horizontal gaps. Small workflows try 3 candidates, medium workflows 5, and larger workflows 7. Candidate search can stop early once later variants stop improving, and candidate order is biased by the workflow's overall aspect ratio.
+2. **Side-branch compaction** — display/debug side branches such as `MaskToImage -> PreviewImage`, terminal text previews, and prompt switch/control panels do not force extra main columns when they can sit beside the data they inspect or control.
+3. **Crossing minimisation** — nodes within each layer are reordered using the _barycenter heuristic_: each node's score is the average position of its neighbours in the adjacent layer's current order. Two passes are run (forward then backward) to reduce edge crossings.
+4. **Coordinate assignment** — nodes are placed on a grid: X increases by layer, Y increases by position within the layer. Bypassed nodes (`mode = 4`) are sorted to the end of their layer so they don't interrupt the active flow. The public `layout` operation evaluates several spacing candidates and applies the most compact result, with additional penalties for layouts that become too wide compared to their height or leave large horizontal gaps. Small workflows try 3 candidates, medium workflows 5, and larger workflows 7. Candidate search can stop early once later variants stop improving, and candidate order is biased by the workflow's overall aspect ratio.
 
 ### Phase 4 — Global Positioning
 
-The content size of every group is known after Phase 3. Column widths are determined by the widest group in each column. Groups are placed left-to-right by column and top-to-bottom within each column. Group rectangles are compacted to their laid-out node contents plus padding before the global placement is finalized. Node positions are translated from group-local coordinates to global canvas coordinates.
-Linked ungrouped nodes are arranged in dataflow layers before being placed after the grouped layout, so source-to-target chains continue to move left-to-right instead of being packed only by original Y position. Unlinked ungrouped nodes keep compact vertical packing.
+The content size of every unpinned group is known after Phase 3. Column widths are determined by the widest group in each column. Unpinned groups are placed left-to-right by column and top-to-bottom within each column. Group rectangles are compacted to their laid-out node contents plus padding before the global placement is finalized. Node positions are translated from group-local coordinates to global canvas coordinates. Groups with ComfyUI `flags.pinned: true` keep their saved `bounding` rectangle, and their member nodes keep their saved positions and sizes.
+Linked ungrouped nodes are arranged in dataflow layers before being placed after the grouped layout, so source-to-target chains continue to move left-to-right instead of being packed only by original Y position. Primitive control nodes, such as seed, CFG, and string controls, and sampler setup sources such as `EmptyLatentImage`, are then pulled into collision-free local slots around the input side of their downstream consumer or sampler cluster so workflow control panels stay close to the nodes they drive without covering context nodes. Grouped control nodes only anchor to consumers inside the same group, so a loader/control group is not stretched toward an external sampler. Unlinked ungrouped nodes keep compact vertical packing.
+Pinned node geometry is treated as a hard obstacle: unpinned nodes are moved out from under pinned nodes, then local controls and virtual hubs are re-anchored against the final endpoint positions.
+Virtual Set/Get hubs are excluded from regular group and dataflow placement. They behave as local source/destination adornments: FlowForge keeps them port-adjacent when possible, then tries same-side vertical slots, then places them directly above or below their physical endpoint before falling back to a sideways shift. Virtual hubs follow their physical endpoint even if their old position placed them inside a pinned group or their own pin flag is set, because otherwise they create long cross-workflow wires instead of acting as local anchors.
 
 ### Decorative Nodes
 
@@ -126,7 +130,7 @@ Comment nodes (`Note`, `MarkdownNote`, `Label`) carry no dataflow edges and are 
 
 ### Phase 5 — Bounding Box Update
 
-Each group's `bounding` rectangle is reconciled with the final positions of its member nodes plus the group padding. Layout compacts larger existing group rectangles when the contained nodes fit into a smaller layout. Groups and ungrouped nodes are packed in vertical columns to use the Y axis before widening the workflow.
+Each group's `bounding` rectangle is reconciled with the final positions of its member nodes plus the group padding. Layout compacts larger existing group rectangles when the contained nodes fit into a smaller layout. Groups and ungrouped nodes are packed in vertical columns to use the Y axis before widening the workflow, but a very wide group starts a new column instead of being stacked under a narrow group. As a final visible-geometry pass, unpinned groups move as whole units when their compacted rectangle would overlap another group or a node outside the group.
 
 ### Layout Spacing
 
@@ -150,7 +154,7 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 - Eliminates the long wires entirely, which reduces crossing counts after layout.
 - Breaks inter-group cycles that loader fan-out would otherwise create, allowing the layout algorithm to produce a strictly left-to-right result.
 
-**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, FlowForge estimates the routing cost before and after a rewrite. Cross-group links are weighted slightly higher so broad inter-group fanouts are prioritized. Candidate savings are recomputed greedily after each rewrite so the optimizer always applies the best remaining candidate on the current graph. If the rewritten graph is cheaper, FlowForge inserts one `SetNode` immediately after the source and one `GetNode` before each target. Layout keeps each virtual hub beside its physical port endpoint and assigns it to that endpoint's group: `SetNode` next to the source output and `GetNode` next to the consumer input. The Set/Get pair uses the same widget value as its virtual connection key, so no physical `SetNode -> GetNode` link is added. `Reroute` chains are collapsed during detection, so fanout hidden behind reroute nodes is considered too. The original links are removed. The workflow runs identically in ComfyUI.
+**What it does:** for every output of type `MODEL`, `CLIP`, or `VAE` with two or more downstream connections, or with a single long cross-group connection, FlowForge estimates the routing cost before and after a rewrite. Cross-group links are weighted slightly higher so broad inter-group fanouts are prioritized. Candidate savings are recomputed greedily after each rewrite so the optimizer always applies the best remaining candidate on the current graph. If the rewritten graph is cheaper, FlowForge inserts one `SetNode` immediately after the source and one `GetNode` before each target. Layout keeps each virtual hub beside its physical port endpoint and assigns it to that endpoint's group: `SetNode` next to the source output and `GetNode` next to the consumer input. FlowForge does not rewrite a fanout upstream of LoRA or same-type pass-through transformer nodes, because that would put a local `GetNode` in the source panel instead of putting the `SetNode` on the transformed output. The Set/Get pair uses the same widget value as its virtual connection key, so no physical `SetNode -> GetNode` link is added. `Reroute` chains are collapsed during detection, so fanout hidden behind reroute nodes is considered too. The original links are removed. The workflow runs identically in ComfyUI.
 
 **Requirement:** comfyui-kjnodes must be installed in your ComfyUI instance, otherwise ComfyUI will show missing-node warnings on load.
 
@@ -171,7 +175,8 @@ Pass `--optimize` to run a pre-layout pass that converts high-fanout `MODEL`, `C
 Repository-local agent rules live in [AGENTS.md](AGENTS.md). Documentation synchronization is handled by the Documentation Maintenance Agent policy in [docs/DOCUMENTATION_MAINTENANCE.md](docs/DOCUMENTATION_MAINTENANCE.md).
 
 Release history is tracked in [CHANGELOG.md](CHANGELOG.md). Release and deployment expectations are tracked in [docs/RELEASE.md](docs/RELEASE.md), with frontend asset packaging details in [docs/PACKAGING.md](docs/PACKAGING.md). FlowForge currently supports source-checkout deployment with `uv`; broader distribution targets are still deferred.
-GitHub Actions CI runs backend tests, Ruff, Mypy, fixture workflow validation, frontend typecheck, and frontend build on `master`, pull requests, and version tags.
+GitHub Actions CI runs backend tests, Ruff, Mypy, bundled example workflow regression coverage, frontend typecheck, and frontend build on `master`, pull requests, and version tags.
+Run `uv run pytest tests/test_example_workflows.py` to exercise the read-only `example-workflows` corpus through layout roundtrip checks plus layout-only and Optimize + Layout quality reports.
 For local maintainer validation against read-only ComfyUI UI workflows, run `uv run python tools/validate_local_workflows.py`.
 For release readiness, run `uv run python tools/check_release_ready.py`; add `--tag vX.Y.Z --github` after tagging and publishing to verify remote refs, the GitHub Release, and Actions.
 For read-only layout quality metrics across workflow folders, run `uv run python tools/report_layout_quality.py example-workflows`. Add `--optimize` to measure the Set/Get optimizer before layout. The report includes aggregate crossing/right-to-left counts and link-category breakdowns for the laid-out result.
@@ -210,6 +215,7 @@ comfyui-flowforge/
 │   └── test_parser.py
 ├── tools/                 # Maintainer validation scripts
 │   ├── build_package_assets.py
+│   ├── report_layout_quality.py
 │   └── validate_local_workflows.py
 ├── LICENSE               # MIT license
 ├── pyproject.toml        # Project configuration

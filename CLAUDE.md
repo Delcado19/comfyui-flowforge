@@ -31,6 +31,11 @@ Read ComfyUI workflow JSON files and rearrange nodes and connections so the grap
 - Internal grouped node ordering uses forward/backward barycenter sweeps against adjacent layer order to reduce crossings.
 - FlowForge works on UI workflow JSON, not API prompt JSON.
 - Layout should preserve all unknown top-level and node-level fields.
+- Layout should respect ComfyUI `flags.pinned: true` on nodes and groups. Pinned nodes keep their saved position and size; nodes inside pinned groups should also stay fixed while the group keeps its saved bounding rectangle.
+- The frontend exposes pin buttons on node and group title bars and an unpin-all button in the canvas toolbar; these controls mutate native ComfyUI `flags.pinned`.
+- Primitive control nodes such as seed, CFG, string controls, and sampler setup sources such as `EmptyLatentImage` should stay near their downstream consumer or sampler cluster when they are not pinned. Virtual Set/Get hubs are endpoint adornments, not regular graph nodes: exclude them from group/dataflow placement, keep them near their physical endpoint, prefer side placement when clear, then same-side vertical slots, then above/below placement, then sideways fallback. This applies even if they are inside a pinned group or carry their own pin flag.
+- Sampler control stacks must not overlay context nodes. Treat pinned node geometry as a hard obstacle, clear unpinned nodes away from it, and run a final local-anchor pass after clearance so controls and virtual hubs follow the final endpoint positions.
+- The optimizer must skip Set/Get fanout rewrites when the source or any terminal consumer is pinned or inside a pinned group; pinned control areas should not gain generated hub nodes.
 - Local UI workflow roundtrip validation is available with `uv run python tools/validate_local_workflows.py`.
 - Read-only layout quality reporting is available with `uv run python tools/report_layout_quality.py example-workflows`; it includes aggregate crossing/right-to-left metrics and laid-out link-category breakdowns.
 
