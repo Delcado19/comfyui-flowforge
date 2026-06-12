@@ -863,7 +863,9 @@ watch(
         <div
           class="workflow-group-title"
           :style="getGroupTitleStyle(group)"
+          title="Drag group. Double-click to rename."
           @pointerdown="onGroupPointerDown($event, group)"
+          @dblclick.stop="renameGroup(group)"
         >
           <span class="workflow-group-title-text">{{ getGroupTitle(group) }}</span>
           <button

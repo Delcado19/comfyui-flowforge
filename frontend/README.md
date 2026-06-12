@@ -48,7 +48,7 @@ Canvas navigation:
 - Drag the canvas background with the left mouse button to pan the workflow.
 - Use the canvas group creation control to drag on empty canvas space, define a group rectangle, and enter a title when prompted.
 - Drag a group title to move the group and all nodes currently inside it.
-- Click the group rename button to edit an existing group title.
+- Double-click a group title, or click the group rename button, to edit an existing group title.
 - Click the pin button in a node or group title to toggle ComfyUI `flags.pinned`.
 - Click the group delete button to remove a single group.
 - Drag a group edge or corner to resize the group. Resize constraints keep contained nodes inside the group rectangle.
