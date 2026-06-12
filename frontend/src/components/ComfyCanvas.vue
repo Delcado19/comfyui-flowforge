@@ -16,6 +16,7 @@ const props = withDefaults(defineProps<{
 })
 const PORT_CENTER_OFFSET = 12
 const GROUP_CONTENT_PADDING = 24
+const GROUP_HEADER_CLEARANCE = 36
 const MIN_GROUP_WIDTH = 120
 const MIN_GROUP_HEIGHT = 80
 const GROUP_CREATE_MIN_SIZE = 24
@@ -249,12 +250,16 @@ function getGroupVisualBounds(group: ComfyGroup): [number, number, number, numbe
   for (const node of getNodesInGroup(group)) {
     const [x, y, nodeWidth, nodeHeight] = getNodeBounds(node)
     minX = Math.min(minX, x)
-    minY = Math.min(minY, y)
+    minY = Math.min(minY, y - GROUP_HEADER_CLEARANCE)
     maxX = Math.max(maxX, x + nodeWidth)
     maxY = Math.max(maxY, y + nodeHeight)
   }
 
   return [minX, minY, maxX - minX, maxY - minY]
+}
+
+function getGroupTitle(group: ComfyGroup): string {
+  return group.title?.trim() || `Group ${group.id}`
 }
 
 function getNodesInGroup(group: ComfyGroup) {
@@ -345,6 +350,13 @@ function deleteAllGroups() {
 
 function deleteGroup(groupId: number | string) {
   store.deleteGroup(groupId)
+}
+
+function renameGroup(group: ComfyGroup) {
+  const currentTitle = getGroupTitle(group)
+  const title = window.prompt('Group title', currentTitle)
+  if (title === null) return
+  store.renameGroup(group.id, title.trim() || currentTitle)
 }
 
 function isGroupPinned(group: ComfyGroup): boolean {
@@ -487,7 +499,7 @@ function onGroupResizePointerMove(e: PointerEvent) {
   if (minBounds) {
     const [contentLeft, contentTop, contentRight, contentBottom] = minBounds
     left = Math.min(left, contentLeft - GROUP_CONTENT_PADDING)
-    top = Math.min(top, contentTop - GROUP_CONTENT_PADDING)
+    top = Math.min(top, contentTop - GROUP_HEADER_CLEARANCE)
     right = Math.max(right, contentRight + GROUP_CONTENT_PADDING)
     bottom = Math.max(bottom, contentBottom + GROUP_CONTENT_PADDING)
   }
@@ -852,8 +864,20 @@ watch(
           class="workflow-group-title"
           :style="getGroupTitleStyle(group)"
           @pointerdown="onGroupPointerDown($event, group)"
-      >
-          <span class="workflow-group-title-text">{{ group.title }}</span>
+        >
+          <span class="workflow-group-title-text">{{ getGroupTitle(group) }}</span>
+          <button
+            type="button"
+            class="workflow-group-rename-button"
+            title="Rename group"
+            @pointerdown.stop
+            @click.stop="renameGroup(group)"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 17.5V20h2.5L18.1 9.4l-2.5-2.5L5 17.5z" />
+              <path d="M17 5.5 18.5 4a1.4 1.4 0 0 1 2 2L19 7.5z" />
+            </svg>
+          </button>
           <button
             type="button"
             class="workflow-group-pin-button"
@@ -1002,6 +1026,7 @@ watch(
   pointer-events: auto;
 }
 .group-toolbar button,
+.workflow-group-rename-button,
 .workflow-group-delete-button,
 .workflow-group-pin-button {
   width: 28px;
@@ -1014,17 +1039,25 @@ watch(
   cursor: pointer;
 }
 .group-toolbar button:hover:not(:disabled),
+.workflow-group-rename-button:hover,
 .workflow-group-delete-button:hover,
 .workflow-group-pin-button:hover,
 .workflow-group-pin-button.active {
   background: #3a3a3a;
 }
 .toolbar-pin-button svg,
+.workflow-group-rename-button svg,
 .workflow-group-pin-button svg {
   display: block;
   width: 18px;
   height: 18px;
   margin: 4px auto;
+}
+.workflow-group-rename-button svg {
+  fill: #cfcfcf;
+}
+.toolbar-pin-button svg,
+.workflow-group-pin-button svg {
   transform: rotate(-42deg);
 }
 .toolbar-pin-button .pin-slash {
@@ -1137,10 +1170,12 @@ watch(
   pointer-events: auto;
 }
 .workflow-group-title-text {
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.workflow-group-rename-button,
 .workflow-group-delete-button {
   flex: 0 0 auto;
 }

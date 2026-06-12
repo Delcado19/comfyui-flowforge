@@ -10,6 +10,7 @@ import pytest
 from flowforge.layout import (
     apply,
     apply_best_layout,
+    GROUP_HEADER_HEIGHT,
     LayoutSettings,
     LayoutScore,
     VIRTUAL_HUB_MAX_GAP,
@@ -18,6 +19,7 @@ from flowforge.layout import (
     _layout_groups_internal,
     _node_input_port_y,
     _node_output_port_y,
+    _position_group_bridge_nodes,
     _position_groups_globally,
     _position_linked_ungrouped_nodes,
     _position_text_previews_near_sources,
@@ -175,6 +177,44 @@ def test_internal_layout_uses_per_layer_widths():
     assert middle.x - source.x == source.size[0] + 50
     assert wide.x - middle.x == middle.size[0] + 50
     logger.info("Per-layer internal width test passed")
+
+
+def test_internal_layout_wraps_long_layer_chains_downward():
+    logger.info("Testing long internal layer chain wrapping")
+    wf = Workflow()
+    nodes = [
+        Node(
+            id=index,
+            type=f"Node{index}",
+            x=0,
+            y=0,
+            size=[200, 80],
+            input_links=[] if index == 1 else [index - 1],
+            output_links=[] if index == 6 else [index],
+        )
+        for index in range(1, 7)
+    ]
+    wf.nodes = {node.id: node for node in nodes}
+    wf.links = {
+        index: Link(
+            id=index,
+            source=index,
+            source_port=0,
+            target=index + 1,
+            target_port=0,
+            type="DATA",
+        )
+        for index in range(1, 6)
+    }
+    wf.groups = [Group(id=1, name="long-chain", bounding=[0, 0, 1800, 600], nodes=nodes)]
+
+    _layout_groups_internal(wf, LayoutSettings(50, 50))
+
+    assert wf.nodes[4].x == wf.nodes[1].x
+    assert wf.nodes[4].y > wf.nodes[1].y
+    assert wf.nodes[2].x > wf.nodes[1].x
+    assert wf.nodes[5].x > wf.nodes[4].x
+    logger.info("Long internal layer chain wrapping test passed")
 
 
 def test_nodes_shrink_to_compact_size_before_layout():
@@ -581,6 +621,33 @@ def test_ungrouped_bridge_nodes_influence_group_flow_columns():
     logger.info("Ungrouped bridge flow-column test passed")
 
 
+def test_bridge_nodes_stay_between_compact_group_columns():
+    logger.info("Testing compact bridge node placement between group columns")
+    wf = Workflow()
+    source_group = Group(id=1, name="Upscale", bounding=[0, 0, 320, 220])
+    target_group = Group(id=2, name="Output", bounding=[600, 0, 520, 720])
+    source = Node(id=1, type="KSampler", x=40, y=40, size=[220, 120], output_links=[10])
+    bridge = Node(id=2, type="VAEDecodeTiled", x=0, y=0, size=[200, 100], input_links=[10], output_links=[11])
+    target = Node(id=3, type="SaveImageClean", x=640, y=60, size=[420, 560], input_links=[11])
+    source_group.nodes = [source]
+    target_group.nodes = [target]
+    wf.groups = [source_group, target_group]
+    wf.nodes = {node.id: node for node in (source, bridge, target)}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="LATENT"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="IMAGE"),
+    }
+    settings = LayoutSettings(20, 20)
+
+    _position_groups_globally(wf, settings)
+    _position_group_bridge_nodes(wf, [bridge], settings)
+
+    assert bridge.x >= source_group.bounding[0] + source_group.bounding[2]
+    assert bridge.x + bridge.size[0] <= target_group.bounding[0]
+    assert bridge.y + bridge.size[1] <= target_group.bounding[1] + target_group.bounding[3]
+    logger.info("Compact bridge node placement test passed")
+
+
 def test_bounding_box_update():
     logger.info("Testing bounding box update")
     wf = Workflow()
@@ -604,6 +671,23 @@ def test_bounding_box_update():
     assert abs(b[2] - expected_w) < 1
     assert abs(b[3] - expected_h) < 1
     logger.info("Bounding box update test passed")
+
+
+def test_bounding_box_update_reserves_group_header_height():
+    logger.info("Testing group header clearance in compact spacing")
+    wf = Workflow()
+    group = Group(id=1, name="compact", bounding=[0, 0, 0, 0])
+    node = Node(id=1, type="A", x=100, y=100, size=[200, 100])
+    group.nodes = [node]
+    wf.groups = [group]
+    wf.nodes = {1: node}
+    settings = LayoutSettings(20, 20)
+
+    _update_bounding_boxes(wf, settings)
+
+    assert node.y - group.bounding[1] >= GROUP_HEADER_HEIGHT
+    assert group.bounding[3] == GROUP_HEADER_HEIGHT + node.size[1] + settings.group_padding
+    logger.info("Group header clearance test passed")
 
 
 def test_group_geometry_clearance_moves_whole_groups():

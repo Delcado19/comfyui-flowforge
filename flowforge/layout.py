@@ -55,6 +55,10 @@ LAYOUT_SCORE_GAP_WEIGHT = 0.12
 LAYOUT_SCORE_GAP_THRESHOLD = 160.0
 LAYOUT_GROUP_TARGET_ASPECT_RATIO = 2.2
 LAYOUT_GROUP_ROW_MAX_AVERAGE_WIDTHS = 2.25
+GROUP_HEADER_HEIGHT = 36.0
+GROUP_INTERNAL_WRAP_MIN_LAYERS = 5
+GROUP_INTERNAL_WRAP_TARGET_WIDTH = 900.0
+GROUP_INTERNAL_WRAP_ASPECT_RATIO = 2.8
 LAYOUT_CANDIDATE_PROFILES = (
     (1.0, 1.0),
     (0.8, 1.0),
@@ -833,11 +837,12 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
             base_x = min(n.x for n in group.nodes) if group.nodes else 0
             base_y = min(n.y for n in group.nodes) if group.nodes else 0
         
-        layer_x_positions = _internal_layer_x_positions(
+        layer_positions = _internal_layer_positions(
             workflow,
             layer_to_nodes,
             max_layer,
             base_x,
+            base_y,
             settings,
         )
         
@@ -851,29 +856,53 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
             bypassed = [nid for nid in nodes_in_layer if workflow.nodes[nid].mode == 4]
             ordered_nids = active + bypassed
             
-            current_y = base_y
+            layer_x, current_y = layer_positions[layer]
             for nid in ordered_nids:
                 node = workflow.nodes[nid]
                 node_h = _node_visual_height(node)
                 if not _is_pinned_node(workflow, node):
-                    node.x = layer_x_positions[layer]
+                    node.x = layer_x
                     node.y = current_y
                 current_y += node_h + settings.node_v_gap
 
 
-def _internal_layer_x_positions(
+def _internal_layer_positions(
     workflow: Workflow,
     layer_to_nodes: dict[int, list[int]],
     max_layer: int,
     base_x: float,
+    base_y: float,
     settings: LayoutSettings,
+) -> dict[int, tuple[float, float]]:
+    """Use per-layer widths and wrap long internal chains into compact rows."""
+    layer_widths = _internal_layer_widths(workflow, layer_to_nodes, max_layer)
+    layer_heights = _internal_layer_heights(workflow, layer_to_nodes, max_layer, settings)
+    columns_per_row = _internal_columns_per_row(layer_widths, layer_heights, settings)
+    positions: dict[int, tuple[float, float]] = {}
+    current_y = base_y
+
+    for row_start in range(0, max_layer + 1, columns_per_row):
+        row_layers = range(row_start, min(max_layer + 1, row_start + columns_per_row))
+        current_x = base_x
+        row_height = 0.0
+        for layer in row_layers:
+            positions[layer] = (current_x, current_y)
+            row_height = max(row_height, layer_heights[layer])
+            current_x += layer_widths[layer] + settings.node_h_gap
+        current_y += row_height + settings.group_v_gap
+
+    return positions
+
+
+def _internal_layer_widths(
+    workflow: Workflow,
+    layer_to_nodes: dict[int, list[int]],
+    max_layer: int,
 ) -> dict[int, float]:
     """Use each layer's own width so one large node does not widen all columns."""
-    positions: dict[int, float] = {}
-    current_x = base_x
+    widths: dict[int, float] = {}
     for layer in range(max_layer + 1):
-        positions[layer] = current_x
-        layer_width = max(
+        widths[layer] = max(
             (
                 _node_visual_width(workflow.nodes[node_id])
                 for node_id in layer_to_nodes.get(layer, [])
@@ -881,8 +910,46 @@ def _internal_layer_x_positions(
             ),
             default=NODE_MIN_WIDTH,
         )
-        current_x += layer_width + settings.node_h_gap
-    return positions
+    return widths
+
+
+def _internal_layer_heights(
+    workflow: Workflow,
+    layer_to_nodes: dict[int, list[int]],
+    max_layer: int,
+    settings: LayoutSettings,
+) -> dict[int, float]:
+    heights: dict[int, float] = {}
+    for layer in range(max_layer + 1):
+        node_ids = [
+            node_id
+            for node_id in layer_to_nodes.get(layer, [])
+            if node_id in workflow.nodes
+        ]
+        if not node_ids:
+            heights[layer] = NODE_MIN_HEIGHT
+            continue
+        heights[layer] = sum(_node_visual_height(workflow.nodes[node_id]) for node_id in node_ids)
+        heights[layer] += settings.node_v_gap * max(0, len(node_ids) - 1)
+    return heights
+
+
+def _internal_columns_per_row(
+    layer_widths: dict[int, float],
+    layer_heights: dict[int, float],
+    settings: LayoutSettings,
+) -> int:
+    layer_count = len(layer_widths)
+    if layer_count < GROUP_INTERNAL_WRAP_MIN_LAYERS:
+        return max(1, layer_count)
+
+    total_width = sum(layer_widths.values()) + settings.node_h_gap * max(0, layer_count - 1)
+    max_height = max(layer_heights.values(), default=NODE_MIN_HEIGHT)
+    width_budget = max(GROUP_INTERNAL_WRAP_TARGET_WIDTH, max_height * GROUP_INTERNAL_WRAP_ASPECT_RATIO)
+    if total_width <= width_budget:
+        return layer_count
+
+    return max(2, min(layer_count, math.ceil(math.sqrt(layer_count))))
 
 
 def _assign_longest_path_layers(
@@ -1055,11 +1122,8 @@ def _position_groups_globally(
         if not group.nodes or group.pinned:
             continue
 
-        min_x, min_y, max_x, max_y = _group_content_bounds(group)
-        required_width = (max_x - min_x) + 2 * settings.group_padding
-        required_height = (max_y - min_y) + 2 * settings.group_padding
-        g_width = required_width
-        g_height = required_height
+        min_x, min_y, _max_x, _max_y = _group_content_bounds(group)
+        g_width, g_height = _required_group_size(group, settings)
 
         row_has_content = current_x > start_x
         starts_next_row = (
@@ -1072,7 +1136,7 @@ def _position_groups_globally(
             row_height = 0.0
         
         offset_x = (current_x + settings.group_padding) - min_x
-        offset_y = (current_y + settings.group_padding) - min_y
+        offset_y = (current_y + _group_top_padding(settings)) - min_y
 
         for node in group.nodes:
             if _is_pinned_node(workflow, node):
@@ -1128,7 +1192,7 @@ def _position_groups_by_flow_layers(
             new_x = layer_x_positions[layer]
             new_y = current_y
             offset_x = (new_x + settings.group_padding) - min_x
-            offset_y = (new_y + settings.group_padding) - min_y
+            offset_y = (new_y + _group_top_padding(settings)) - min_y
 
             for node in group.nodes:
                 if _is_pinned_node(workflow, node):
@@ -1149,8 +1213,17 @@ def _required_group_size(group: Group, settings: LayoutSettings) -> tuple[float,
     min_x, min_y, max_x, max_y = _group_content_bounds(group)
     return (
         (max_x - min_x) + 2 * settings.group_padding,
-        (max_y - min_y) + 2 * settings.group_padding,
+        (max_y - min_y) + _group_top_padding(settings) + _group_bottom_padding(settings),
     )
+
+
+def _group_top_padding(settings: LayoutSettings) -> float:
+    """Reserve the visible ComfyUI group title band above member nodes."""
+    return max(settings.group_padding, GROUP_HEADER_HEIGHT)
+
+
+def _group_bottom_padding(settings: LayoutSettings) -> float:
+    return settings.group_padding
 
 
 def _flow_group_h_gap(workflow: Workflow, settings: LayoutSettings) -> float:
@@ -1158,6 +1231,7 @@ def _flow_group_h_gap(workflow: Workflow, settings: LayoutSettings) -> float:
     if not _has_movable_group_bridge_flow_edges(workflow):
         return settings.group_h_gap
 
+    bridge_gap = _bridge_side_gap(settings)
     group_by_node_id = _group_by_node_id(workflow)
     bridge_width = max(
         (
@@ -1167,7 +1241,7 @@ def _flow_group_h_gap(workflow: Workflow, settings: LayoutSettings) -> float:
         ),
         default=NODE_MIN_WIDTH,
     )
-    return max(settings.group_h_gap, bridge_width + settings.node_h_gap)
+    return max(settings.group_h_gap, bridge_width + bridge_gap * 2.0)
 
 
 def _has_movable_group_bridge_flow_edges(workflow: Workflow) -> bool:
@@ -1466,7 +1540,6 @@ def _position_group_bridge_nodes(
     placed_rects: list[tuple[float, float, float, float]] = []
     current_right = 0.0
     for slot in sorted(slot_to_nodes):
-        x = _bridge_slot_x(workflow, group_layers, slot, settings)
         current_y = 50.0
         slot_nodes = sorted(
             slot_to_nodes[slot],
@@ -1477,6 +1550,8 @@ def _position_group_bridge_nodes(
                 node.id,
             ),
         )
+        slot_width = max(_node_visual_width(node) for node in slot_nodes)
+        x = _bridge_slot_x(workflow, group_layers, slot, settings, slot_width)
         for node in slot_nodes:
             node_w = _node_visual_width(node)
             node_h = _node_visual_height(node)
@@ -1576,60 +1651,78 @@ def _bridge_slot_x(
     group_layers: dict[int, int],
     slot: int,
     settings: LayoutSettings,
+    width: float,
 ) -> float:
-    gap = max(24.0, settings.node_h_gap * 0.5)
+    gap = _bridge_side_gap(settings)
     previous_groups = [
         group
         for group in workflow.groups
         if _has_positive_bounding(group) and group_layers.get(group.id, 0) <= slot
     ]
-    if previous_groups:
-        right = max(group.bounding[0] + group.bounding[2] for group in previous_groups)
-        return right + gap
 
     next_groups = [
         group
         for group in workflow.groups
         if _has_positive_bounding(group) and group_layers.get(group.id, 0) > slot
     ]
+
+    if previous_groups and next_groups:
+        right = max(group.bounding[0] + group.bounding[2] for group in previous_groups)
+        left = min(group.bounding[0] for group in next_groups)
+        slot_left = right + gap
+        slot_right = left - gap
+        if slot_right - slot_left >= width:
+            return slot_left + (slot_right - slot_left - width) / 2.0
+        return slot_left
+
+    if previous_groups:
+        right = max(group.bounding[0] + group.bounding[2] for group in previous_groups)
+        return right + gap
+
     if next_groups:
         left = min(group.bounding[0] for group in next_groups)
-        return left - NODE_MIN_WIDTH - gap
+        return left - width - gap
 
     return 50.0
+
+
+def _bridge_side_gap(settings: LayoutSettings) -> float:
+    return max(24.0, settings.node_h_gap * 0.5)
 
 
 def _bridge_node_desired_y(
     workflow: Workflow,
     node: Node,
-    group_by_node_id: dict[int, Group],
+    _group_by_node_id: dict[int, Group],
 ) -> float:
     centers: list[float] = []
     for link_id in node.input_links:
         link = workflow.links.get(link_id)
         if link is None:
             continue
-        centers.append(_bridge_endpoint_center_y(workflow, link.source, group_by_node_id))
+        centers.append(_bridge_source_port_y(workflow, link))
     for link_id in node.output_links:
         link = workflow.links.get(link_id)
         if link is None:
             continue
-        centers.append(_bridge_endpoint_center_y(workflow, link.target, group_by_node_id))
+        centers.append(_bridge_target_port_y(workflow, link))
     if not centers:
         return node.y
     return (sum(centers) / len(centers)) - _node_visual_height(node) / 2.0
 
 
-def _bridge_endpoint_center_y(
-    workflow: Workflow,
-    node_id: int,
-    group_by_node_id: dict[int, Group],
-) -> float:
-    if (group := group_by_node_id.get(node_id)) is not None:
-        return group.bounding[1] + group.bounding[3] / 2.0
-    if (node := workflow.nodes.get(node_id)) is not None:
-        return node.y + _node_visual_height(node) / 2.0
-    return 0.0
+def _bridge_source_port_y(workflow: Workflow, link: Link) -> float:
+    source = workflow.nodes.get(link.source)
+    if source is None:
+        return 0.0
+    return _node_output_port_y(source, link.source_port)
+
+
+def _bridge_target_port_y(workflow: Workflow, link: Link) -> float:
+    target = workflow.nodes.get(link.target)
+    if target is None:
+        return 0.0
+    return _node_input_port_y(target, link.target_port)
 
 
 def _resolve_bridge_y(
@@ -2676,9 +2769,9 @@ def _update_bounding_boxes(workflow: Workflow, settings: LayoutSettings) -> None
         
         min_x, min_y, max_x, max_y = _group_content_bounds(group)
         content_left = min_x - settings.group_padding
-        content_top = min_y - settings.group_padding
+        content_top = min_y - _group_top_padding(settings)
         content_right = max_x + settings.group_padding
-        content_bottom = max_y + settings.group_padding
+        content_bottom = max_y + _group_bottom_padding(settings)
 
         group.bounding = [
             content_left,
@@ -2897,7 +2990,7 @@ def _node_center(node: Node) -> tuple[float, float]:
 def _group_visual_height(group: Group, settings: LayoutSettings) -> float:
     _, _, _, max_y = _group_content_bounds(group)
     min_y = min(n.y for n in group.nodes)
-    return (max_y - min_y) + 2 * settings.group_padding
+    return (max_y - min_y) + _group_top_padding(settings) + _group_bottom_padding(settings)
 
 
 def _estimate_vertical_packing_budget(items, height_fn, gap: float) -> float:
@@ -2925,7 +3018,7 @@ def _estimate_group_row_width(groups: list[Group], settings: LayoutSettings) -> 
         sizes.append(
             (
                 (max_x - min_x) + 2 * settings.group_padding,
-                (max_y - _min_y) + 2 * settings.group_padding,
+                (max_y - _min_y) + _group_top_padding(settings) + _group_bottom_padding(settings),
             )
         )
 

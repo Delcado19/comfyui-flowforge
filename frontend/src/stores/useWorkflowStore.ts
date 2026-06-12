@@ -113,6 +113,11 @@ export const useWorkflowStore = defineStore('workflow', {
       if (!group) return
       group.bounding = bounding
     },
+    renameGroup(groupId: number | string, title: string) {
+      const group = this.workflow?.groups?.find((item) => item.id === groupId)
+      if (!group) return
+      group.title = title
+    },
     toggleNodePinned(nodeId: NodeId) {
       const node = this.workflow?.nodes.find((item) => item.id === nodeId)
       if (!node) return

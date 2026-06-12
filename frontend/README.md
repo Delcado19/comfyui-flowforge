@@ -23,11 +23,11 @@ Python package builds can stage the built frontend into `flowforge/frontend_dist
 - **ComfyConnection.vue** - SVG Bezier curves connecting ports
 - **useWorkflowStore.ts** - Pinia store for full ComfyUI workflow JSON state
 - **Toolbar Optimize + Layout Action** - Calls `/optimize` to insert Set/Get hubs for eligible high-fanout `MODEL`, `CLIP`, and `VAE` wiring, then calls `/layout`
-- **Group and Minimap Layers** - Background group regions, draggable group titles, per-group delete buttons, resize handles, and a minimap for navigation
+- **Group and Minimap Layers** - Background group regions, draggable group titles, per-group rename/delete buttons, resize handles, and a minimap for navigation
 - **Toolbar Spacing Control** - Live X/Y sliders plus numeric fields that re-run `/layout` with the current spacing values; the backend compacts saved node sizes except image load/save preview nodes and annotation nodes, evaluates multiple spacing candidates, keeps the most compact result, and reports the selected candidate in a response header
-- **Compact Group Side Branches** - Layout keeps debug previews and prompt control side branches beside their inspected data instead of letting them stretch groups into unnecessary extra columns, and internal group columns use per-layer widths so large preview/save nodes do not widen every column
+- **Compact Group Side Branches** - Layout keeps debug previews and prompt control side branches beside their inspected data instead of letting them stretch groups into unnecessary extra columns, uses per-layer widths so large preview/save nodes do not widen every column, and wraps long internal group chains downward when needed
 - **ComfyUI Pin Respect** - Layout keeps nodes and groups with `flags.pinned: true` at their saved positions, including nodes inside pinned groups, and treats pinned group surfaces as obstacles for movable controls and virtual hubs
-- **Group Geometry Clearance** - Layout keeps group member nodes inside their group rectangle and moves unpinned groups as whole units when compacted group surfaces would overlap other groups, pinned group surfaces, or outside nodes
+- **Group Geometry Clearance** - Layout keeps group member nodes inside their group rectangle, reserves group title/header clearance, and moves unpinned groups as whole units when compacted group surfaces would overlap other groups, pinned group surfaces, or outside nodes
 - **Flow-Aware Group Placement** - Connected groups use inter-group dataflow columns, including eligible paths through ungrouped bridge nodes, to keep source, branch, and output groups aligned with their wires; unconnected group sets still use capped row wrapping
 - **Compact Ungrouped Flow Columns** - Linked ungrouped nodes use per-layer column widths, ungrouped bridge nodes are placed between their movable source/target groups, and ungrouped source nodes that feed grouped blocks are pulled beside their target groups to reduce excessive horizontal spread
 - **Pin Controls** - Node and group title bars include pin buttons, and the canvas toolbar can clear all pinned nodes and groups
@@ -48,6 +48,7 @@ Canvas navigation:
 - Drag the canvas background with the left mouse button to pan the workflow.
 - Use the canvas group creation control to drag on empty canvas space, define a group rectangle, and enter a title when prompted.
 - Drag a group title to move the group and all nodes currently inside it.
+- Click the group rename button to edit an existing group title.
 - Click the pin button in a node or group title to toggle ComfyUI `flags.pinned`.
 - Click the group delete button to remove a single group.
 - Drag a group edge or corner to resize the group. Resize constraints keep contained nodes inside the group rectangle.
