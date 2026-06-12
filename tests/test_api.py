@@ -351,5 +351,60 @@ async def test_layout_respects_comfyui_pinned_flags(client):
     assert data["groups"][0]["flags"] == {"pinned": True}
 
 
+@pytest.mark.asyncio
+async def test_layout_preserves_authored_visual_node_sizes(client):
+    logger.info("Testing layout preserves authored image and annotation node sizes")
+    workflow = {
+        "nodes": [
+            {
+                "id": 1,
+                "type": "LoadImage",
+                "pos": [0, 0],
+                "size": [360, 260],
+                "inputs": [],
+                "outputs": [{"name": "IMAGE", "links": [10]}],
+            },
+            {
+                "id": 2,
+                "type": "SaveImageClean",
+                "pos": [520, 0],
+                "size": [960, 1100],
+                "inputs": [{"name": "images", "link": 10}],
+                "outputs": [],
+                "widgets_values": [""] * 13,
+            },
+            {
+                "id": 3,
+                "type": "MarkdownNote",
+                "pos": [0, 1400],
+                "size": [640, 360],
+                "inputs": [],
+                "outputs": [],
+            },
+            {
+                "id": 4,
+                "type": "Label (rgthree)",
+                "pos": [0, 1800],
+                "size": [780, 90],
+                "inputs": [],
+                "outputs": [],
+            },
+        ],
+        "links": [[10, 1, 0, 2, 0, "IMAGE"]],
+        "groups": [],
+    }
+
+    resp = await client.post("/layout", json=workflow)
+    assert resp.status == 200
+    data = await resp.json()
+    sizes = {node["id"]: node["size"] for node in data["nodes"]}
+
+    assert sizes[1] == [360, 260]
+    assert sizes[2] == [960, 1100]
+    assert sizes[3] == [640, 360]
+    assert sizes[4] == [780, 90]
+    logger.info("Authored visual node size preservation test passed")
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

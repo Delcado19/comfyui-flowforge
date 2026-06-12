@@ -47,11 +47,14 @@ VIRTUAL_HUB_VERTICAL_FALLBACK_STEPS = 8
 LAYOUT_SCORE_WIDTH_WEIGHT = 2.5
 LAYOUT_SCORE_HEIGHT_WEIGHT = 1.0
 LAYOUT_SCORE_LINK_WEIGHT = 0.02
+LAYOUT_SCORE_CROSSING_WEIGHT = 500.0
+LAYOUT_SCORE_RIGHT_TO_LEFT_WEIGHT = 1000.0
 LAYOUT_SCORE_ASPECT_WEIGHT = 120.0
 LAYOUT_SCORE_ASPECT_RATIO = 1.35
 LAYOUT_SCORE_GAP_WEIGHT = 0.12
 LAYOUT_SCORE_GAP_THRESHOLD = 160.0
-LAYOUT_WIDE_GROUP_COLUMN_RATIO = 1.5
+LAYOUT_GROUP_TARGET_ASPECT_RATIO = 2.2
+LAYOUT_GROUP_ROW_MAX_AVERAGE_WIDTHS = 2.25
 LAYOUT_CANDIDATE_PROFILES = (
     (1.0, 1.0),
     (0.8, 1.0),
@@ -318,6 +321,12 @@ def _apply_layout_pass(
         # other groups or foreign nodes when compact bounds collide.
         logger.debug("Phase 5b: Group Geometry Clearance")
         _resolve_group_geometry_overlaps(workflow, settings)
+
+        # Phase 5c: Later group moves can expose another pinned-surface
+        # overlap. Run one final node pass after group clearance as the last
+        # geometry contract before serialization.
+        logger.debug("Phase 5c: Final Pinned Geometry Clearance")
+        _separate_unpinned_nodes_from_pinned_geometry(workflow, settings)
         
         if log:
             logger.info("Layout algorithm completed successfully")
@@ -403,10 +412,14 @@ def _score_layout_candidate(workflow: Workflow) -> LayoutScore:
     aspect_ratio = width / max(1.0, height)
     aspect_cost = max(0.0, aspect_ratio - LAYOUT_SCORE_ASPECT_RATIO) * LAYOUT_SCORE_ASPECT_WEIGHT
     gap_cost = _layout_gap_cost(workflow)
+    crossing_cost = _layout_crossing_count(workflow) * LAYOUT_SCORE_CROSSING_WEIGHT
+    right_to_left_cost = _layout_right_to_left_count(workflow) * LAYOUT_SCORE_RIGHT_TO_LEFT_WEIGHT
     total = (
         width * LAYOUT_SCORE_WIDTH_WEIGHT
         + height * LAYOUT_SCORE_HEIGHT_WEIGHT
         + link_cost * LAYOUT_SCORE_LINK_WEIGHT
+        + crossing_cost
+        + right_to_left_cost
         + aspect_cost
         + gap_cost
     )
@@ -477,6 +490,69 @@ def _link_length(workflow: Workflow, link: Link) -> float:
     return abs(target_x - source_x) + abs(target_y - source_y)
 
 
+def _layout_crossing_count(workflow: Workflow) -> int:
+    """Count straight-line link crossings for choosing among layout candidates."""
+    centers = {
+        node.id: (
+            node.x + _node_visual_width(node) / 2.0,
+            node.y + _node_visual_height(node) / 2.0,
+        )
+        for node in workflow.nodes.values()
+    }
+    segments: list[tuple[int, int, tuple[float, float], tuple[float, float]]] = []
+    for link in workflow.links.values():
+        if link.source not in centers or link.target not in centers:
+            continue
+        segments.append((link.source, link.target, centers[link.source], centers[link.target]))
+
+    crossings = 0
+    for index, first in enumerate(segments):
+        for second in segments[index + 1 :]:
+            if first[0] in {second[0], second[1]} or first[1] in {second[0], second[1]}:
+                continue
+            if _segments_intersect(first[2], first[3], second[2], second[3]):
+                crossings += 1
+    return crossings
+
+
+def _layout_right_to_left_count(workflow: Workflow) -> int:
+    """Count links whose target center is left of the source center."""
+    count = 0
+    for link in workflow.links.values():
+        source = workflow.nodes.get(link.source)
+        target = workflow.nodes.get(link.target)
+        if source is None or target is None:
+            continue
+        source_x = source.x + _node_visual_width(source) / 2.0
+        target_x = target.x + _node_visual_width(target) / 2.0
+        if target_x < source_x:
+            count += 1
+    return count
+
+
+def _segments_intersect(
+    a1: tuple[float, float],
+    a2: tuple[float, float],
+    b1: tuple[float, float],
+    b2: tuple[float, float],
+) -> bool:
+    if a1 == b1 or a1 == b2 or a2 == b1 or a2 == b2:
+        return False
+
+    def orientation(
+        p: tuple[float, float],
+        q: tuple[float, float],
+        r: tuple[float, float],
+    ) -> float:
+        return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1])
+
+    o1 = orientation(a1, a2, b1)
+    o2 = orientation(a1, a2, b2)
+    o3 = orientation(b1, b2, a1)
+    o4 = orientation(b1, b2, a2)
+    return o1 * o2 < 0 and o3 * o4 < 0
+
+
 # ---------------------------------------------------------------------------
 # Phase 1: Group Membership
 # ---------------------------------------------------------------------------
@@ -532,6 +608,8 @@ def _shrink_nodes_to_minimum_size(workflow: Workflow) -> None:
     for node in workflow.nodes.values():
         if _is_pinned_node(workflow, node):
             continue
+        if _preserves_authored_node_size(node):
+            continue
         if not node.size or len(node.size) < 2:
             continue
 
@@ -579,6 +657,15 @@ def _minimum_node_size(node: Node) -> tuple[float, float]:
         + NODE_BOTTOM_PADDING,
     )
     return NODE_MIN_WIDTH, min_height
+
+
+def _preserves_authored_node_size(node: Node) -> bool:
+    """Keep authored visual nodes at their saved ComfyUI size.
+
+    Image I/O and annotation nodes often contain previews, text, labels, or
+    custom save controls where the author's rectangle is meaningful UI state.
+    """
+    return _is_image_io_node(node) or _is_decorative_node(node)
 
 
 def _widget_row_heights(values: list, widget_input_count: int) -> list[float]:
@@ -927,12 +1014,9 @@ def _position_groups_globally(
     start_y = 50.0
     current_x = start_x
     current_y = start_y
-    column_width = 0.0
-    column_budget = _estimate_vertical_packing_budget(
-        [group for group in workflow.groups if group.nodes and not group.pinned],
-        lambda group: _group_visual_height(group, settings),
-        settings.group_v_gap,
-    )
+    row_height = 0.0
+    movable_groups = [group for group in workflow.groups if group.nodes and not group.pinned]
+    target_row_width = _estimate_group_row_width(movable_groups, settings)
 
     for group in workflow.groups:
         if not group.nodes or group.pinned:
@@ -944,15 +1028,15 @@ def _position_groups_globally(
         g_width = required_width
         g_height = required_height
 
-        starts_wide_column = (
-            current_y > start_y
-            and column_width > 0
-            and g_width > column_width * LAYOUT_WIDE_GROUP_COLUMN_RATIO
+        row_has_content = current_x > start_x
+        starts_next_row = (
+            row_has_content
+            and current_x + g_width > start_x + target_row_width
         )
-        if current_y > start_y and (current_y + g_height > start_y + column_budget or starts_wide_column):
-            current_x += column_width + settings.group_h_gap
-            current_y = start_y
-            column_width = 0.0
+        if starts_next_row:
+            current_x = start_x
+            current_y += row_height + settings.group_v_gap
+            row_height = 0.0
         
         offset_x = (current_x + settings.group_padding) - min_x
         offset_y = (current_y + settings.group_padding) - min_y
@@ -965,8 +1049,8 @@ def _position_groups_globally(
         
         group.bounding = [current_x, current_y, g_width, g_height]
         
-        current_y += g_height + settings.group_v_gap
-        column_width = max(column_width, g_width)
+        current_x += g_width + settings.group_h_gap
+        row_height = max(row_height, g_height)
         
     # The final bounding boxes are updated later; current_y/current_x only
     # affect placement.
@@ -992,7 +1076,12 @@ def _position_ungrouped_nodes(
     start_x = _ungrouped_start_x(workflow, settings, start_x_floor)
 
     if _has_internal_links(workflow, nodes_to_position):
-        return _position_linked_ungrouped_nodes(workflow, nodes_to_position, settings, start_x)
+        current_right = _position_linked_ungrouped_nodes(workflow, nodes_to_position, settings, start_x)
+        return max(
+            current_right,
+            _position_external_sources_near_group_targets(workflow, nodes_to_position, settings),
+            _position_control_nodes_near_targets(workflow, nodes_to_position, settings),
+        )
 
     sorted_nodes = _order_ungrouped_nodes_by_flow(workflow, nodes_to_position)
 
@@ -1017,6 +1106,7 @@ def _position_ungrouped_nodes(
 
     return max(
         current_x + column_width,
+        _position_external_sources_near_group_targets(workflow, nodes_to_position, settings),
         _position_control_nodes_near_targets(workflow, nodes_to_position, settings),
     )
 
@@ -1073,7 +1163,110 @@ def _position_linked_ungrouped_nodes(
             column_width = max(column_width, _node_visual_width(node))
         current_right = max(current_right, x + column_width)
 
-    return max(current_right, _position_control_nodes_near_targets(workflow, nodes, settings))
+    return current_right
+
+
+def _position_external_sources_near_group_targets(
+    workflow: Workflow,
+    nodes: list[Node],
+    settings: LayoutSettings,
+) -> float:
+    """Pull ungrouped source nodes beside the grouped blocks they feed."""
+    group_by_node_id = _group_by_node_id(workflow)
+    current_right = 0.0
+    for node in sorted(nodes, key=lambda item: (item.y, item.x, item.id)):
+        if not _is_external_group_source_node(workflow, node, group_by_node_id):
+            continue
+
+        targets = [
+            workflow.nodes[link.target]
+            for link_id in node.output_links
+            if (link := workflow.links.get(link_id)) is not None
+            and link.target in workflow.nodes
+            and link.target in group_by_node_id
+        ]
+        if not targets:
+            continue
+
+        x, y = _resolve_external_source_position(workflow, node, targets, group_by_node_id, settings)
+        node.x = x
+        node.y = y
+        current_right = max(current_right, node.x + _node_visual_width(node))
+    return current_right
+
+
+def _is_external_group_source_node(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+) -> bool:
+    if (
+        node.input_links
+        or not node.output_links
+        or node.id in group_by_node_id
+        or _is_pinned_node(workflow, node)
+        or _is_decorative_node(node)
+        or _is_reroute_node(node)
+        or _is_set_node(node)
+        or _is_get_node(node)
+    ):
+        return False
+
+    return any(
+        (link := workflow.links.get(link_id)) is not None
+        and link.target in group_by_node_id
+        for link_id in node.output_links
+    )
+
+
+def _resolve_external_source_position(
+    workflow: Workflow,
+    node: Node,
+    targets: list[Node],
+    group_by_node_id: dict[int, Group],
+    settings: LayoutSettings,
+) -> tuple[float, float]:
+    left, top, right, bottom = _external_source_anchor_bounds(targets, group_by_node_id)
+    node_w = _node_visual_width(node)
+    node_h = _node_visual_height(node)
+    gap = max(24.0, settings.node_h_gap * 0.5)
+    center_y = top + max(0.0, (bottom - top - node_h) / 2.0)
+    center_x = left + max(0.0, (right - left - node_w) / 2.0)
+    candidates = [
+        (left - node_w - gap, center_y),
+        (center_x, top - node_h - gap),
+        (center_x, bottom + gap),
+        (right + gap, center_y),
+    ]
+    ignored_node_ids = {node.id}
+    for x, y in candidates:
+        if _first_node_collision(workflow, x, y, node_w, node_h, ignored_node_ids) is None:
+            return x, y
+    return left - node_w - gap, center_y
+
+
+def _external_source_anchor_bounds(
+    targets: list[Node],
+    group_by_node_id: dict[int, Group],
+) -> tuple[float, float, float, float]:
+    """Use target group surfaces so later group padding does not cover sources."""
+    groups = {
+        group.id: group
+        for target in targets
+        if (group := group_by_node_id.get(target.id)) is not None
+    }
+    if groups:
+        left = min(group.bounding[0] for group in groups.values())
+        top = min(group.bounding[1] for group in groups.values())
+        right = max(group.bounding[0] + group.bounding[2] for group in groups.values())
+        bottom = max(group.bounding[1] + group.bounding[3] for group in groups.values())
+        return left, top, right, bottom
+
+    left = min(target.x for target in targets)
+    top = min(target.y for target in targets)
+    right = max(target.x + _node_visual_width(target) for target in targets)
+    bottom = max(target.y + _node_visual_height(target) for target in targets)
+    return left, top, right, bottom
 
 
 def _position_control_nodes_near_targets(
@@ -1600,6 +1793,9 @@ def _first_virtual_hub_collision(
     ignored_node_ids: set[int],
     placed_hub_ids: set[int],
 ) -> Node | None:
+    if _overlaps_fixed_geometry(workflow, x, y, _node_visual_width(node), _node_visual_height(node), ignored_node_ids):
+        return node
+
     for other in workflow.nodes.values():
         if other.id in ignored_node_ids:
             continue
@@ -1628,6 +1824,16 @@ def _first_node_collision(
     height: float,
     ignored_node_ids: set[int],
 ) -> Node | None:
+    if _overlaps_fixed_geometry(workflow, x, y, width, height, ignored_node_ids):
+        return next(
+            (
+                node
+                for node in workflow.nodes.values()
+                if _is_pinned_node(workflow, node) and node.id not in ignored_node_ids
+            ),
+            next(iter(workflow.nodes.values()), None),
+        )
+
     for other in workflow.nodes.values():
         if other.id in ignored_node_ids:
             continue
@@ -1707,11 +1913,8 @@ def _assign_virtual_hub_groups_to_endpoints(workflow: Workflow) -> None:
 
 
 def _separate_unpinned_nodes_from_pinned_geometry(workflow: Workflow, settings: LayoutSettings) -> None:
-    pinned_nodes = [
-        node for node in workflow.nodes.values()
-        if _is_pinned_node(workflow, node) and not _is_virtual_hub_node(node)
-    ]
-    if not pinned_nodes:
+    fixed_rects = _fixed_geometry_rects(workflow)
+    if not fixed_rects:
         return
 
     movable_nodes = [
@@ -1721,29 +1924,23 @@ def _separate_unpinned_nodes_from_pinned_geometry(workflow: Workflow, settings: 
     gap = max(12.0, settings.node_v_gap * 0.25)
 
     for node in sorted(movable_nodes, key=lambda item: (item.y, item.x, item.id)):
-        for _ in range(len(pinned_nodes) + 1):
-            collision = _first_overlap_with_nodes(node, pinned_nodes)
+        ignored_node_ids = {node.id}
+        for _ in range(len(fixed_rects) + 1):
+            collision = _first_overlap_with_fixed_geometry(workflow, node, ignored_node_ids)
             if collision is None:
                 break
-            node.y = collision.y + _node_visual_height(collision) + gap
+            node.y = collision[3] + gap
 
 
-def _first_overlap_with_nodes(node: Node, candidates: list[Node]) -> Node | None:
-    for other in candidates:
-        if other.id == node.id:
-            continue
-        if _rectangles_overlap(
-            node.x,
-            node.y,
-            _node_visual_width(node),
-            _node_visual_height(node),
-            other.x,
-            other.y,
-            _node_visual_width(other),
-            _node_visual_height(other),
-            padding=6.0,
-        ):
-            return other
+def _first_overlap_with_fixed_geometry(
+    workflow: Workflow,
+    node: Node,
+    ignored_node_ids: set[int],
+) -> tuple[float, float, float, float] | None:
+    rect = _node_rect(node)
+    for fixed_rect in _fixed_geometry_rects(workflow, ignored_node_ids):
+        if _rects_overlap(rect, _expand_rect(fixed_rect, 6.0)):
+            return fixed_rect
     return None
 
 
@@ -1908,6 +2105,9 @@ def _resolve_group_geometry_overlaps(workflow: Workflow, settings: LayoutSetting
     """Move whole movable groups until group surfaces no longer overlap."""
     groups = [group for group in workflow.groups if _has_positive_bounding(group)]
     groups.sort(key=lambda group: (group.bounding[1], group.bounding[0], group.id))
+    fixed_group_obstacles = [
+        group for group in groups if _group_has_fixed_geometry(group)
+    ]
     grouped_node_ids = {node.id for group in workflow.groups for node in group.nodes}
     fixed_node_obstacles = [
         _node_rect(node)
@@ -1926,7 +2126,8 @@ def _resolve_group_geometry_overlaps(workflow: Workflow, settings: LayoutSetting
             group_rect = _group_rect(group)
             obstacles = [
                 _group_rect(other)
-                for other in placed_groups
+                for other in [*fixed_group_obstacles, *placed_groups]
+                if other is not group
                 if _rects_overlap(group_rect, _group_rect(other))
             ]
             obstacles.extend(rect for rect in fixed_node_obstacles if _rects_overlap(group_rect, rect))
@@ -1986,6 +2187,55 @@ def _rects_overlap(
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
 
 
+def _overlaps_fixed_geometry(
+    workflow: Workflow,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    ignored_node_ids: set[int],
+) -> bool:
+    """Return True when a candidate rectangle covers pinned layout geometry."""
+    candidate = (x, y, x + width, y + height)
+    return any(
+        _rects_overlap(candidate, _expand_rect(fixed_rect, 6.0))
+        for fixed_rect in _fixed_geometry_rects(workflow, ignored_node_ids)
+    )
+
+
+def _fixed_geometry_rects(
+    workflow: Workflow,
+    ignored_node_ids: set[int] | None = None,
+) -> list[tuple[float, float, float, float]]:
+    """Pinned nodes and pinned groups are hard obstacles for movable geometry."""
+    ignored_node_ids = ignored_node_ids or set()
+    rects = [
+        _group_rect(group)
+        for group in workflow.groups
+        if group.pinned and _has_positive_bounding(group)
+    ]
+    rects.extend(
+        _node_rect(node)
+        for node in workflow.nodes.values()
+        if _is_pinned_node(workflow, node)
+        and not _is_virtual_hub_node(node)
+        and node.id not in ignored_node_ids
+    )
+    return rects
+
+
+def _expand_rect(
+    rect: tuple[float, float, float, float],
+    padding: float,
+) -> tuple[float, float, float, float]:
+    return (
+        rect[0] - padding,
+        rect[1] - padding,
+        rect[2] + padding,
+        rect[3] + padding,
+    )
+
+
 def _group_content_bounds(group: Group) -> tuple[float, float, float, float]:
     """Return [left, top, right, bottom] bounds for the group's node content."""
     min_x = min(n.x for n in group.nodes)
@@ -2004,11 +2254,27 @@ def _is_pinned_node(workflow: Workflow, node: Node) -> bool:
     """Return True when ComfyUI pin flags should keep a node in place."""
     if node.pinned:
         return True
-    return any(group.pinned and _node_in_group(node, group) for group in workflow.groups)
+    return any(
+        group.pinned and _node_belongs_to_group(node, group)
+        for group in workflow.groups
+    )
+
+
+def _node_belongs_to_group(node: Node, group: Group) -> bool:
+    """Use assigned membership first so overlaps do not become implicit pins."""
+    if group.nodes:
+        return any(member.id == node.id for member in group.nodes)
+    return _node_in_group(node, group)
 
 
 def _is_decorative_node(node: Node) -> bool:
-    return node.type in {"Note", "MarkdownNote", "Label"}
+    normalized_type = "".join(character for character in node.type.lower() if character.isalnum())
+    return "note" in normalized_type or normalized_type.startswith("label")
+
+
+def _is_image_io_node(node: Node) -> bool:
+    normalized_type = "".join(character for character in node.type.lower() if character.isalnum())
+    return normalized_type.startswith("loadimage") or normalized_type.startswith("saveimage")
 
 
 def _is_set_node(node: Node) -> bool:
@@ -2051,9 +2317,40 @@ def _estimate_vertical_packing_budget(items, height_fn, gap: float) -> float:
 
     heights = [max(1.0, float(height_fn(item))) for item in items]
     total_height = sum(heights) + gap * max(0, len(heights) - 1)
-    target_columns = max(1, min(len(heights), int(math.sqrt(len(heights))) or 1))
+    # Prefer using vertical space before widening the workflow, but still allow
+    # larger workflows to open extra columns before long vertical stacks create
+    # avoidable right-to-left links.
+    target_columns = max(1, min(len(heights), int(math.sqrt(len(heights)) / 1.25) or 1))
     tallest = max(heights)
     return max(tallest, total_height / target_columns)
+
+
+def _estimate_group_row_width(groups: list[Group], settings: LayoutSettings) -> float:
+    """Return a soft row width so group layout can wrap downward."""
+    if not groups:
+        return 0.0
+
+    sizes: list[tuple[float, float]] = []
+    for group in groups:
+        min_x, _min_y, max_x, max_y = _group_content_bounds(group)
+        sizes.append(
+            (
+                (max_x - min_x) + 2 * settings.group_padding,
+                (max_y - _min_y) + 2 * settings.group_padding,
+            )
+        )
+
+    total_area = sum(width * height for width, height in sizes)
+    max_width = max(width for width, _ in sizes)
+    average_width = sum(width for width, _ in sizes) / len(sizes)
+    width_from_area = math.sqrt(total_area * LAYOUT_GROUP_TARGET_ASPECT_RATIO)
+    width_cap = max_width + average_width * LAYOUT_GROUP_ROW_MAX_AVERAGE_WIDTHS
+    minimum_pair_width = (
+        sum(width for width, _ in sizes[:2]) + settings.group_h_gap
+        if len(sizes) > 1
+        else max_width
+    )
+    return max(max_width, minimum_pair_width, min(width_from_area, width_cap))
 
 
 def _clamp_layout_distance(value: float) -> float:

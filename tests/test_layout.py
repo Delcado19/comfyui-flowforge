@@ -22,6 +22,7 @@ from flowforge.layout import (
     _position_text_previews_near_sources,
     _score_layout_candidate,
     _resolve_layout_candidate_count,
+    _separate_unpinned_nodes_from_pinned_geometry,
     _assign_longest_path_layers,
     _compress_debug_sidecar_layers,
     _minimize_layer_crossings,
@@ -157,12 +158,12 @@ def test_internal_layout_stacks_variable_height_nodes_without_overlap():
 def test_nodes_shrink_to_compact_size_before_layout():
     logger.info("Testing compact node size preprocessing")
     wf = Workflow()
-    # Real ComfyUI SaveImageClean: 1 slot input + 10 widget-inputs, 13 saved
+    # Real ComfyUI custom control: 1 slot input + 10 widget-inputs, 13 saved
     # widget values. Stacked rows = 1 + 13 = 14 single-line rows.
     # min_height = TITLE 26 + SLOT_OFFSET 8 + 14*20 + 13*4 + BOTTOM 12 = 378.
     large = Node(
         id=1,
-        type="SaveImageClean",
+        type="CustomControlPanel",
         x=0,
         y=0,
         size=[960, 1100],
@@ -181,6 +182,38 @@ def test_nodes_shrink_to_compact_size_before_layout():
     assert already_small.size == [140.0, 60.0]
     assert reroute.size == [40.0, 40.0]
     logger.info("Compact node size preprocessing test passed")
+
+
+def test_image_io_nodes_keep_authored_size_before_layout():
+    logger.info("Testing image I/O node size preservation")
+    wf = Workflow()
+    load_image = Node(id=1, type="LoadImage", x=0, y=0, size=[360, 260])
+    save_image = Node(id=2, type="SaveImage", x=0, y=0, size=[480, 420])
+    save_clean = Node(id=3, type="SaveImageClean", x=0, y=0, size=[960, 1100])
+    wf.nodes = {1: load_image, 2: save_image, 3: save_clean}
+
+    _shrink_nodes_to_minimum_size(wf)
+
+    assert load_image.size == [360, 260]
+    assert save_image.size == [480, 420]
+    assert save_clean.size == [960, 1100]
+    logger.info("Image I/O node size preservation test passed")
+
+
+def test_annotation_nodes_keep_authored_size_before_layout():
+    logger.info("Testing annotation node size preservation")
+    wf = Workflow()
+    note = Node(id=1, type="Note", x=0, y=0, size=[520, 260])
+    markdown = Node(id=2, type="MarkdownNote", x=0, y=0, size=[640, 360])
+    label = Node(id=3, type="Label (rgthree)", x=0, y=0, size=[780, 90])
+    wf.nodes = {1: note, 2: markdown, 3: label}
+
+    _shrink_nodes_to_minimum_size(wf)
+
+    assert note.size == [520, 260]
+    assert markdown.size == [640, 360]
+    assert label.size == [780, 90]
+    logger.info("Annotation node size preservation test passed")
 
 
 def test_node_compaction_stacks_slot_and_widget_rows_for_ksampler():
@@ -393,28 +426,75 @@ def test_global_positioning():
     logger.info("Global positioning test passed")
 
 
-def test_wide_group_starts_new_column_after_narrow_group():
-    logger.info("Testing wide group column break")
+def test_groups_wrap_downward_after_soft_row_width():
+    logger.info("Testing group rows wrap downward after soft width")
     wf = Workflow()
-    narrow = Group(id=1, name="narrow", bounding=[0, 0, 400, 400])
-    wide = Group(id=2, name="wide", bounding=[500, 0, 1400, 260])
-    wf.groups = [narrow, wide]
-    narrow_node = Node(id=1, type="Sampler", x=20, y=20, size=[220, 620])
-    wide_nodes = [
-        Node(id=2, type="UpscaleModelLoader", x=520, y=20, size=[220, 80]),
-        Node(id=3, type="ImageUpscaleWithModel", x=820, y=20, size=[220, 80]),
-        Node(id=4, type="ImageScaleBy", x=1120, y=20, size=[220, 80]),
-    ]
-    narrow.nodes = [narrow_node]
-    wide.nodes = wide_nodes
-    wf.nodes = {node.id: node for node in [narrow_node, *wide_nodes]}
+    wf.groups = []
+    for index in range(4):
+        group = Group(id=index + 1, name=f"group-{index + 1}", bounding=[0, 0, 420, 220])
+        node = Node(id=index + 1, type="Node", x=0, y=0, size=[260, 120])
+        group.nodes = [node]
+        wf.groups.append(group)
+        wf.nodes[node.id] = node
 
     _position_groups_globally(wf, LayoutSettings())
 
-    narrow_right = narrow.bounding[0] + narrow.bounding[2]
-    assert wide.bounding[0] > narrow_right
-    assert wide.bounding[1] == narrow.bounding[1]
-    logger.info("Wide group column break test passed")
+    assert wf.groups[0].bounding[1] == wf.groups[1].bounding[1]
+    assert wf.groups[2].bounding[0] == wf.groups[0].bounding[0]
+    assert wf.groups[2].bounding[1] > wf.groups[0].bounding[1]
+    logger.info("Group row wrapping test passed")
+
+
+def test_group_positioning_bounds_width_by_using_new_rows():
+    logger.info("Testing group packing bounds width with new rows")
+    wf = Workflow()
+    wf.groups = []
+    for index in range(5):
+        group = Group(id=index + 1, name=f"group-{index + 1}", bounding=[0, 0, 420, 220])
+        node = Node(id=index + 1, type="Node", x=0, y=0, size=[260, 120])
+        group.nodes = [node]
+        wf.groups.append(group)
+        wf.nodes[node.id] = node
+
+    _position_groups_globally(wf, LayoutSettings())
+
+    layout_left = min(group.bounding[0] for group in wf.groups)
+    layout_right = max(group.bounding[0] + group.bounding[2] for group in wf.groups)
+    row_tops = {round(group.bounding[1], 3) for group in wf.groups}
+    assert len(row_tops) > 1
+    assert layout_right - layout_left < 1200.0
+    assert wf.groups[-1].bounding[1] > wf.groups[0].bounding[1]
+    logger.info("Bounded-width group packing test passed")
+
+
+def test_large_group_sequence_wraps_before_long_horizontal_strip():
+    logger.info("Testing large group sequence wraps before long horizontal strip")
+    wf = Workflow()
+    group_specs = [
+        (1, "Reference", 360, 180),
+        (2, "Realism", 900, 460),
+        (3, "Canny", 700, 260),
+        (4, "Upscale", 1500, 300),
+        (5, "Outputs", 360, 520),
+    ]
+    for group_id, name, width, height in group_specs:
+        group = Group(id=group_id, name=name, bounding=[0, 0, width, height])
+        node = Node(id=group_id, type="Node", x=0, y=0, size=[width - 100, height - 80])
+        group.nodes = [node]
+        wf.groups.append(group)
+        wf.nodes[node.id] = node
+
+    _position_groups_globally(wf, LayoutSettings(50, 50))
+
+    row_tops = {round(group.bounding[1], 3) for group in wf.groups}
+    layout_left = min(group.bounding[0] for group in wf.groups)
+    layout_right = max(group.bounding[0] + group.bounding[2] for group in wf.groups)
+    total_group_width = sum(group.bounding[2] for group in wf.groups)
+    total_gap_width = LayoutSettings(50, 50).group_h_gap * (len(wf.groups) - 1)
+
+    assert len(row_tops) > 1
+    assert layout_right - layout_left < total_group_width + total_gap_width
+    logger.info("Large group sequence wrapping test passed")
 
 
 def test_bounding_box_update():
@@ -566,6 +646,51 @@ def test_unpinned_nodes_clear_pinned_node_geometry():
     logger.info("Pinned geometry clearance test passed")
 
 
+def test_unpinned_nodes_clear_pinned_group_surface():
+    logger.info("Testing unpinned nodes clear pinned group surface")
+    wf = Workflow()
+    pinned_group = Group(id=1, name="Pinned Controls", bounding=[320, 120, 460, 360], pinned=True)
+    pinned_member = Node(id=1, type="VAELoader", x=360, y=160, size=[220, 80])
+    movable = Node(id=2, type="Final Preview", x=40, y=40, size=[260, 140])
+    wf.groups = [pinned_group]
+    wf.nodes = {1: pinned_member, 2: movable}
+
+    _assign_groups(wf)
+    movable.x = 360
+    movable.y = 220
+
+    _separate_unpinned_nodes_from_pinned_geometry(wf, LayoutSettings())
+    group = wf.groups[0]
+    movable_rect = _test_node_rect(movable)
+    group_rect = _test_group_rect(group)
+
+    assert group.bounding == [320, 120, 460, 360]
+    assert wf.nodes[1].x == 360
+    assert wf.nodes[1].y == 160
+    assert not _test_rects_overlap(movable_rect, group_rect)
+    logger.info("Pinned group surface clearance test passed")
+
+
+def test_movable_group_clears_later_sorted_pinned_group():
+    logger.info("Testing movable groups clear later-sorted pinned groups")
+    wf = Workflow()
+    movable_group = Group(id=1, name="Output", bounding=[100, 40, 420, 260])
+    pinned_group = Group(id=2, name="Pinned VAE", bounding=[120, 180, 500, 320], pinned=True)
+    output = Node(id=1, type="Final Preview", x=140, y=80, size=[240, 120])
+    vae = Node(id=2, type="VAELoader", x=160, y=220, size=[220, 80])
+    movable_group.nodes = [output]
+    pinned_group.nodes = [vae]
+    wf.groups = [movable_group, pinned_group]
+    wf.nodes = {1: output, 2: vae}
+
+    _resolve_group_geometry_overlaps(wf, LayoutSettings())
+
+    assert pinned_group.bounding == [120, 180, 500, 320]
+    assert not _test_rectangles_overlap_groups(movable_group, pinned_group)
+    assert output.y > 80
+    logger.info("Later-sorted pinned group clearance test passed")
+
+
 def test_decorative_nodes_move_to_left_column():
     logger.info("Testing decorative node placement")
     wf = Workflow()
@@ -638,6 +763,25 @@ def test_linked_ungrouped_nodes_clear_group_columns():
             f"ungrouped node {node_id} at x={node.x} overlaps group extent x<{group_right}"
         )
     logger.info("Linked ungrouped placement test passed")
+
+
+def test_external_ungrouped_source_moves_next_to_target_group():
+    logger.info("Testing external source nodes anchor near target groups")
+    wf = Workflow()
+    source = Node(id=1, type="LoadImage", x=2400, y=0, size=[320, 260], output_links=[10])
+    target = Node(id=2, type="VAEEncode", x=100, y=100, size=[260, 120], input_links=[10])
+    group = Group(id=1, name="Encode", bounding=[60, 60, 420, 260])
+    wf.nodes = {1: source, 2: target}
+    wf.links = {10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="IMAGE")}
+    wf.groups = [group]
+
+    result = apply(wf, LayoutSettings())
+    source = result.nodes[1]
+    group = result.groups[0]
+
+    assert source.x + source.size[0] < group.bounding[0]
+    assert result.links[10].target == target.id
+    logger.info("External source group anchoring test passed")
 
 
 def test_primitive_control_nodes_stay_near_single_consumer():
@@ -1287,6 +1431,26 @@ def _test_rectangles_overlap_groups(a: Group, b: Group) -> bool:
         or a.bounding[1] + a.bounding[3] <= b.bounding[1]
         or b.bounding[1] + b.bounding[3] <= a.bounding[1]
     )
+
+
+def _test_node_rect(node: Node) -> tuple[float, float, float, float]:
+    return (node.x, node.y, node.x + node.size[0], node.y + node.size[1])
+
+
+def _test_group_rect(group: Group) -> tuple[float, float, float, float]:
+    return (
+        group.bounding[0],
+        group.bounding[1],
+        group.bounding[0] + group.bounding[2],
+        group.bounding[1] + group.bounding[3],
+    )
+
+
+def _test_rects_overlap(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> bool:
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
 
 
 if __name__ == "__main__":

@@ -3,6 +3,15 @@
 All notable changes to ComfyUI FlowForge are documented here.
 
 ## [Unreleased]
+
+### Changed
+
+- Keep `LoadImage*`, `SaveImage*`, `Note`, `MarkdownNote`, and label nodes at their saved ComfyUI size instead of compacting preview, save-control, or annotation nodes to the generic minimum rectangle.
+- Treat pinned group rectangles as fixed layout obstacles for movable nodes, local control stacks, virtual Set/Get hubs, and movable groups so layout cleanup does not cover pinned control areas.
+- Prefer layout candidates with fewer straight-line crossings when compactness candidates otherwise compete.
+- Wrap groups into capped-width rows before the workflow becomes a long horizontal strip, reducing overly wide layouts when vertical space is available.
+- Pull ungrouped source nodes beside the grouped blocks they feed so loader and model-source nodes no longer widen the workflow from the far right with right-to-left links.
+
 ## [0.2.1] - 2026-05-25
 
 ### Added

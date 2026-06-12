@@ -23,6 +23,9 @@ export function isCollapsedNode(node: ComfyNode): boolean {
 
 export function getNodeDisplayHeight(node: ComfyNode): number {
   const [_, baseHeight] = getNodeSize(node)
+  if (preservesAuthoredNodeSize(node)) {
+    return baseHeight
+  }
   if (isRerouteNode(node)) {
     return Math.max(TITLE_HEIGHT + SLOT_ROW_OFFSET + ROW_HEIGHT + NODE_BOTTOM_PADDING, TITLE_HEIGHT + ROW_HEIGHT + 10)
   }
@@ -40,6 +43,24 @@ export function getNodeDisplayHeight(node: ComfyNode): number {
 export function getNodeDisplaySize(node: ComfyNode): [number, number] {
   const [width] = getNodeSize(node)
   return [width, getNodeDisplayHeight(node)]
+}
+
+export function preservesAuthoredNodeSize(node: ComfyNode): boolean {
+  return isImageIoNode(node) || isDecorativeNode(node)
+}
+
+export function isDecorativeNode(node: ComfyNode): boolean {
+  const normalizedType = normalizeNodeType(node.type)
+  return normalizedType.includes('note') || normalizedType.startsWith('label')
+}
+
+export function isImageIoNode(node: ComfyNode): boolean {
+  const normalizedType = normalizeNodeType(node.type)
+  return normalizedType.startsWith('loadimage') || normalizedType.startsWith('saveimage')
+}
+
+function normalizeNodeType(type: string): string {
+  return type.toLowerCase().replace(/[^a-z0-9]/g, '')
 }
 
 export function getNodeInputPortY(node: ComfyNode, inputIndex: number): number {

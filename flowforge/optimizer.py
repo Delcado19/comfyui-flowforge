@@ -529,7 +529,16 @@ def _fanout_touches_pinned_geometry(workflow: Workflow, src_node: Node, terminal
 def _is_pinned_node(workflow: Workflow, node: Node) -> bool:
     if node.pinned:
         return True
-    return any(group.pinned and _node_in_group(node, group) for group in workflow.groups)
+    return any(
+        group.pinned and _node_belongs_to_group(node, group)
+        for group in workflow.groups
+    )
+
+
+def _node_belongs_to_group(node: Node, group: Group) -> bool:
+    if group.nodes:
+        return any(member.id == node.id for member in group.nodes)
+    return _node_in_group(node, group)
 
 
 def _node_in_group(node: Node, group: Group) -> bool:

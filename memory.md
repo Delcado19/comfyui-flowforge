@@ -51,6 +51,7 @@
 - Primitive control nodes such as seed, CFG, string controls, and sampler setup sources such as `EmptyLatentImage` should stay near their downstream consumer or sampler cluster instead of being left in distant source columns. Virtual Set/Get hubs are endpoint adornments, not regular graph nodes: exclude them from group/dataflow placement, keep them near their physical endpoint, prefer side placement when clear, then same-side vertical slots, then above/below placement, then sideways fallback. This applies even if they are inside a pinned group or carry their own pin flag.
 - Sampler control stacks must not overlay context nodes. Treat pinned node geometry as a hard obstacle, clear unpinned nodes away from it, and run a final local-anchor pass after clearance so controls and virtual hubs follow the final endpoint positions.
 - Set/Get optimization should not rewrite fanouts that touch pinned nodes or nodes inside pinned groups; pinned control panels should keep their visible structure.
+- The capped group-row heuristic is not enough for the current optimized SDXL/controlnet-style workflow: the maintainer still sees an overly wide result with `layout only` at `x=y=50`, with less than the desired 25% width reduction. Next work should add a workflow-wide width target or multi-row group scheduler instead of only capping the soft row width.
 
 ## Notes
 

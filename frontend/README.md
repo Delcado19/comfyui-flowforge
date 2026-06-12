@@ -24,11 +24,11 @@ Python package builds can stage the built frontend into `flowforge/frontend_dist
 - **useWorkflowStore.ts** - Pinia store for full ComfyUI workflow JSON state
 - **Toolbar Optimize + Layout Action** - Calls `/optimize` to insert Set/Get hubs for eligible high-fanout `MODEL`, `CLIP`, and `VAE` wiring, then calls `/layout`
 - **Group and Minimap Layers** - Background group regions, draggable group titles, per-group delete buttons, resize handles, and a minimap for navigation
-- **Toolbar Spacing Control** - Live X/Y sliders plus numeric fields that re-run `/layout` with the current spacing values; the backend compacts saved node sizes, evaluates multiple spacing candidates, keeps the most compact result, and reports the selected candidate in a response header
+- **Toolbar Spacing Control** - Live X/Y sliders plus numeric fields that re-run `/layout` with the current spacing values; the backend compacts saved node sizes except image load/save preview nodes and annotation nodes, evaluates multiple spacing candidates, keeps the most compact result, and reports the selected candidate in a response header
 - **Compact Group Side Branches** - Layout keeps debug previews and prompt control side branches beside their inspected data instead of letting them stretch groups into unnecessary extra columns
-- **ComfyUI Pin Respect** - Layout keeps nodes and groups with `flags.pinned: true` at their saved positions, including nodes inside pinned groups
-- **Group Geometry Clearance** - Layout keeps group member nodes inside their group rectangle and moves unpinned groups as whole units when compacted group surfaces would overlap other groups or outside nodes
-- **Wide Group Column Breaks** - Very wide groups start a fresh column instead of being stacked below narrow groups, keeping broad post-processing chains readable
+- **ComfyUI Pin Respect** - Layout keeps nodes and groups with `flags.pinned: true` at their saved positions, including nodes inside pinned groups, and treats pinned group surfaces as obstacles for movable controls and virtual hubs
+- **Group Geometry Clearance** - Layout keeps group member nodes inside their group rectangle and moves unpinned groups as whole units when compacted group surfaces would overlap other groups, pinned group surfaces, or outside nodes
+- **Bounded Group Rows** - Groups wrap into new rows when the capped soft row width is reached, and ungrouped source nodes that feed grouped blocks are pulled beside their target groups to reduce excessive horizontal spread
 - **Pin Controls** - Node and group title bars include pin buttons, and the canvas toolbar can clear all pinned nodes and groups
 - **Toolbar Group Actions** - Button to clear all groups in the workflow; drag-based group creation starts from the canvas overlay controls
 - **Before/After Layout Comparison** - After a layout run, the canvas can show the previous node positions as ghost outlines behind the current layout
@@ -54,6 +54,7 @@ Canvas navigation:
 - Use the toolbar pin button to unpin every pinned node and group in the workflow.
 - Adjust the X and Y spacing controls to change layout density in real time. Each control is clamped to 20-240 px.
 - Existing ComfyUI pinned nodes and groups stay fixed when layout runs.
+- Image load/save nodes, notes, Markdown notes, and labels keep their saved ComfyUI rectangle instead of being compacted to the generic node minimum.
 - Optimize + Layout does not insert Set/Get hubs into pinned node or group geometry.
 - Set/Get hub nodes follow their physical endpoint during layout and do not expose pin controls in the canvas.
 
