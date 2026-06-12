@@ -9,6 +9,9 @@ All notable changes to ComfyUI FlowForge are documented here.
 - Keep `LoadImage*`, `SaveImage*`, `Note`, `MarkdownNote`, and label nodes at their saved ComfyUI size instead of compacting preview, save-control, or annotation nodes to the generic minimum rectangle.
 - Treat pinned group rectangles as fixed layout obstacles for movable nodes, local control stacks, virtual Set/Get hubs, and movable groups so layout cleanup does not cover pinned control areas.
 - Prefer layout candidates with fewer straight-line crossings when compactness candidates otherwise compete.
+- Use per-layer internal group column widths so one large preview or save node does not force every group column to the same width.
+- Place connected groups in inter-group dataflow columns, follow eligible bridge paths through ungrouped nodes for movable groups, and use per-layer widths for linked ungrouped columns, reducing stretched layouts caused by large source or preview nodes.
+- Keep ungrouped bridge nodes between their movable source and target group columns instead of moving central processing chains to the far right and wiring back across the canvas.
 - Wrap groups into capped-width rows before the workflow becomes a long horizontal strip, reducing overly wide layouts when vertical space is available.
 - Pull ungrouped source nodes beside the grouped blocks they feed so loader and model-source nodes no longer widen the workflow from the far right with right-to-left links.
 

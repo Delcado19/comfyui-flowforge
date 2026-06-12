@@ -833,8 +833,13 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
             base_x = min(n.x for n in group.nodes) if group.nodes else 0
             base_y = min(n.y for n in group.nodes) if group.nodes else 0
         
-        # Maximum node width in this group (for NODE_H_GAP calculation)
-        max_node_w = max((_node_visual_width(n) for n in group.nodes), default=200.0)
+        layer_x_positions = _internal_layer_x_positions(
+            workflow,
+            layer_to_nodes,
+            max_layer,
+            base_x,
+            settings,
+        )
         
         # Place nodes
         for layer in range(max_layer + 1):
@@ -851,9 +856,33 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
                 node = workflow.nodes[nid]
                 node_h = _node_visual_height(node)
                 if not _is_pinned_node(workflow, node):
-                    node.x = base_x + layer * (max_node_w + settings.node_h_gap)
+                    node.x = layer_x_positions[layer]
                     node.y = current_y
                 current_y += node_h + settings.node_v_gap
+
+
+def _internal_layer_x_positions(
+    workflow: Workflow,
+    layer_to_nodes: dict[int, list[int]],
+    max_layer: int,
+    base_x: float,
+    settings: LayoutSettings,
+) -> dict[int, float]:
+    """Use each layer's own width so one large node does not widen all columns."""
+    positions: dict[int, float] = {}
+    current_x = base_x
+    for layer in range(max_layer + 1):
+        positions[layer] = current_x
+        layer_width = max(
+            (
+                _node_visual_width(workflow.nodes[node_id])
+                for node_id in layer_to_nodes.get(layer, [])
+                if node_id in workflow.nodes
+            ),
+            default=NODE_MIN_WIDTH,
+        )
+        current_x += layer_width + settings.node_h_gap
+    return positions
 
 
 def _assign_longest_path_layers(
@@ -1010,6 +1039,10 @@ def _position_groups_globally(
 
     if not workflow.groups:
         return
+
+    if _has_group_flow_edges(workflow):
+        _position_groups_by_flow_layers(workflow, settings, start_x)
+        return
     
     start_y = 50.0
     current_x = start_x
@@ -1056,6 +1089,269 @@ def _position_groups_globally(
     # affect placement.
 
 
+def _position_groups_by_flow_layers(
+    workflow: Workflow,
+    settings: LayoutSettings,
+    start_x: float,
+) -> None:
+    """Place connected groups in dataflow columns to shorten cross-group wires."""
+    group_sizes = {
+        group.id: _required_group_size(group, settings)
+        for group in workflow.groups
+        if group.nodes and not group.pinned
+    }
+    if not group_sizes:
+        return
+
+    layers = _group_flow_layers(workflow)
+    layer_to_groups: dict[int, list[Group]] = {}
+    for group in workflow.groups:
+        if group.id in group_sizes:
+            layer_to_groups.setdefault(layers.get(group.id, 0), []).append(group)
+
+    layer_x_positions: dict[int, float] = {}
+    current_x = start_x
+    flow_gap = _flow_group_h_gap(workflow, settings)
+    for layer in sorted(layer_to_groups):
+        layer_x_positions[layer] = current_x
+        layer_width = max(group_sizes[group.id][0] for group in layer_to_groups[layer])
+        current_x += layer_width + flow_gap
+
+    for layer in sorted(layer_to_groups):
+        current_y = 50.0
+        for group in sorted(
+            layer_to_groups[layer],
+            key=lambda item: (_group_flow_order_key(workflow, item, layers), item.bounding[1], item.bounding[0], item.id),
+        ):
+            g_width, g_height = group_sizes[group.id]
+            min_x, min_y, _max_x, _max_y = _group_content_bounds(group)
+            new_x = layer_x_positions[layer]
+            new_y = current_y
+            offset_x = (new_x + settings.group_padding) - min_x
+            offset_y = (new_y + settings.group_padding) - min_y
+
+            for node in group.nodes:
+                if _is_pinned_node(workflow, node):
+                    continue
+                node.x += offset_x
+                node.y += offset_y
+
+            group.bounding = [new_x, new_y, g_width, g_height]
+            current_y += g_height + settings.group_v_gap
+
+
+def _has_group_flow_edges(workflow: Workflow) -> bool:
+    adj, _rev_adj = _group_flow_adjacency(workflow)
+    return any(targets for targets in adj.values())
+
+
+def _required_group_size(group: Group, settings: LayoutSettings) -> tuple[float, float]:
+    min_x, min_y, max_x, max_y = _group_content_bounds(group)
+    return (
+        (max_x - min_x) + 2 * settings.group_padding,
+        (max_y - min_y) + 2 * settings.group_padding,
+    )
+
+
+def _flow_group_h_gap(workflow: Workflow, settings: LayoutSettings) -> float:
+    """Reserve enough inter-group space for bridge nodes between flow columns."""
+    if not _has_movable_group_bridge_flow_edges(workflow):
+        return settings.group_h_gap
+
+    group_by_node_id = _group_by_node_id(workflow)
+    bridge_width = max(
+        (
+            _node_visual_width(node)
+            for node in workflow.nodes.values()
+            if _has_direct_group_incident_link(workflow, node, group_by_node_id)
+        ),
+        default=NODE_MIN_WIDTH,
+    )
+    return max(settings.group_h_gap, bridge_width + settings.node_h_gap)
+
+
+def _has_movable_group_bridge_flow_edges(workflow: Workflow) -> bool:
+    group_by_node_id = _group_by_node_id(workflow)
+    group_by_id = {group.id: group for group in workflow.groups}
+    for group in workflow.groups:
+        if not group.nodes or _group_has_fixed_geometry(group):
+            continue
+        for node in group.nodes:
+            reachable = _reachable_target_groups_from_node(
+                workflow,
+                node.id,
+                group.id,
+                group_by_node_id,
+            )
+            for target_group_id, via_bridge in reachable.items():
+                target_group = group_by_id.get(target_group_id)
+                if (
+                    via_bridge
+                    and target_group is not None
+                    and not _group_has_fixed_geometry(target_group)
+                ):
+                    return True
+    return False
+
+
+def _has_direct_group_incident_link(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+) -> bool:
+    if node.id in group_by_node_id or _is_decorative_node(node) or _is_virtual_hub_node(node):
+        return False
+    return any(
+        (link := workflow.links.get(link_id)) is not None
+        and link.source in group_by_node_id
+        for link_id in node.input_links
+    ) or any(
+        (link := workflow.links.get(link_id)) is not None
+        and link.target in group_by_node_id
+        for link_id in node.output_links
+    )
+
+
+def _group_flow_layers(workflow: Workflow) -> dict[int, int]:
+    """Assign group columns by longest inter-group dependency path."""
+    group_ids = {group.id for group in workflow.groups if group.nodes}
+    adj, rev_adj = _group_flow_adjacency(workflow)
+
+    layers: dict[int, int] = {
+        group_id: 0
+        for group_id in group_ids
+        if not rev_adj[group_id]
+    }
+    queue = list(layers)
+    while queue:
+        group_id = queue.pop(0)
+        for target_id in sorted(adj[group_id]):
+            next_layer = layers[group_id] + 1
+            if next_layer > layers.get(target_id, -1):
+                layers[target_id] = next_layer
+            rev_adj[target_id].discard(group_id)
+            if not rev_adj[target_id]:
+                queue.append(target_id)
+
+    for group_id in group_ids:
+        if group_id in layers:
+            continue
+        processed_predecessors = [
+            source_id
+            for source_id, targets in adj.items()
+            if group_id in targets and source_id in layers
+        ]
+        if processed_predecessors:
+            layers[group_id] = max(layers[source_id] + 1 for source_id in processed_predecessors)
+        else:
+            layers[group_id] = 0
+    return layers
+
+
+def _group_flow_adjacency(workflow: Workflow) -> tuple[dict[int, set[int]], dict[int, set[int]]]:
+    """Build group dependencies, following ungrouped bridge nodes when needed."""
+    group_by_node_id = _group_by_node_id(workflow)
+    group_by_id = {group.id: group for group in workflow.groups}
+    group_ids = {group.id for group in workflow.groups if group.nodes}
+    adj: dict[int, set[int]] = {group_id: set() for group_id in group_ids}
+    rev_adj: dict[int, set[int]] = {group_id: set() for group_id in group_ids}
+
+    for group in workflow.groups:
+        if group.id not in group_ids:
+            continue
+        for node in group.nodes:
+            for target_group_id, via_bridge in _reachable_target_groups_from_node(
+                workflow,
+                node.id,
+                group.id,
+                group_by_node_id,
+            ).items():
+                if target_group_id == group.id:
+                    continue
+                target_group = group_by_id.get(target_group_id)
+                if (
+                    via_bridge
+                    and target_group is not None
+                    and (_group_has_fixed_geometry(group) or _group_has_fixed_geometry(target_group))
+                ):
+                    continue
+                adj[group.id].add(target_group_id)
+                rev_adj[target_group_id].add(group.id)
+
+    return adj, rev_adj
+
+
+def _reachable_target_groups_from_node(
+    workflow: Workflow,
+    start_node_id: int,
+    source_group_id: int,
+    group_by_node_id: dict[int, Group],
+) -> dict[int, bool]:
+    """Find downstream groups without letting ungrouped bridge nodes hide flow."""
+    targets: dict[int, bool] = {}
+    queue = [
+        (link.target, False)
+        for link_id in workflow.nodes[start_node_id].output_links
+        if (link := workflow.links.get(link_id)) is not None
+    ]
+    visited: set[int] = set()
+
+    while queue:
+        node_id, via_bridge = queue.pop(0)
+        if node_id in visited or node_id not in workflow.nodes:
+            continue
+        visited.add(node_id)
+
+        group = group_by_node_id.get(node_id)
+        if group is not None:
+            if group.id != source_group_id:
+                targets[group.id] = targets.get(group.id, True) and via_bridge
+            continue
+
+        node = workflow.nodes[node_id]
+        if _is_decorative_node(node) or _is_virtual_hub_node(node):
+            continue
+        queue.extend(
+            (link.target, True)
+            for link_id in node.output_links
+            if (link := workflow.links.get(link_id)) is not None
+        )
+
+    return targets
+
+
+def _group_flow_order_key(
+    workflow: Workflow,
+    group: Group,
+    layers: dict[int, int],
+) -> float:
+    """Use neighbouring group positions as a stable vertical ordering hint."""
+    group_by_node_id = _group_by_node_id(workflow)
+    centres: list[float] = []
+    for link in workflow.links.values():
+        source_group = group_by_node_id.get(link.source)
+        target_group = group_by_node_id.get(link.target)
+        if source_group is None or target_group is None or source_group is target_group:
+            continue
+        if source_group is group and layers.get(target_group.id, 0) != layers.get(group.id, 0):
+            centres.append(_group_original_center_y(target_group))
+        elif target_group is group and layers.get(source_group.id, 0) != layers.get(group.id, 0):
+            centres.append(_group_original_center_y(source_group))
+    if not centres:
+        return _group_original_center_y(group)
+    return sum(centres) / len(centres)
+
+
+def _group_original_center_y(group: Group) -> float:
+    if _has_positive_bounding(group):
+        return group.bounding[1] + group.bounding[3] / 2.0
+    if not group.nodes:
+        return 0.0
+    top = min(node.y for node in group.nodes)
+    bottom = max(node.y + _node_visual_height(node) for node in group.nodes)
+    return top + (bottom - top) / 2.0
+
+
 def _position_ungrouped_nodes(
     workflow: Workflow,
     settings: LayoutSettings,
@@ -1074,11 +1370,16 @@ def _position_ungrouped_nodes(
     logger.debug(f"Positioning {len(nodes_to_position)} ungrouped nodes")
 
     start_x = _ungrouped_start_x(workflow, settings, start_x_floor)
+    bridge_right, bridge_node_ids = _position_group_bridge_nodes(workflow, nodes_to_position, settings)
+    nodes_to_position = [node for node in nodes_to_position if node.id not in bridge_node_ids]
+    if not nodes_to_position:
+        return max(start_x_floor, bridge_right)
 
     if _has_internal_links(workflow, nodes_to_position):
         current_right = _position_linked_ungrouped_nodes(workflow, nodes_to_position, settings, start_x)
         return max(
             current_right,
+            bridge_right,
             _position_external_sources_near_group_targets(workflow, nodes_to_position, settings),
             _position_control_nodes_near_targets(workflow, nodes_to_position, settings),
         )
@@ -1106,9 +1407,279 @@ def _position_ungrouped_nodes(
 
     return max(
         current_x + column_width,
+        bridge_right,
         _position_external_sources_near_group_targets(workflow, nodes_to_position, settings),
         _position_control_nodes_near_targets(workflow, nodes_to_position, settings),
     )
+
+
+def _position_group_bridge_nodes(
+    workflow: Workflow,
+    nodes: list[Node],
+    settings: LayoutSettings,
+) -> tuple[float, set[int]]:
+    """Place ungrouped bridge nodes in the gaps between their connected groups."""
+    group_by_node_id = _group_by_node_id(workflow)
+    if not group_by_node_id:
+        return 0.0, set()
+    movable_group_ids = {
+        group.id
+        for group in workflow.groups
+        if group.nodes and not _group_has_fixed_geometry(group)
+    }
+    if not movable_group_ids:
+        return 0.0, set()
+
+    candidates = [
+        node
+        for node in nodes
+        if _is_group_bridge_eligible_node(workflow, node, group_by_node_id)
+    ]
+    if not candidates:
+        return 0.0, set()
+
+    group_layers = _group_flow_layers(workflow)
+    source_layers, target_layers = _bridge_group_layer_sets(
+        workflow,
+        candidates,
+        group_by_node_id,
+        group_layers,
+        movable_group_ids,
+    )
+    bridge_node_ids = {
+        node.id
+        for node in candidates
+        if source_layers[node.id] or target_layers[node.id]
+        if not _is_external_group_source_node(workflow, node, group_by_node_id)
+    }
+    if not bridge_node_ids:
+        return 0.0, set()
+
+    slot_to_nodes: dict[int, list[Node]] = {}
+    for node in candidates:
+        if node.id not in bridge_node_ids:
+            continue
+        slot = _bridge_slot_index(source_layers[node.id], target_layers[node.id])
+        slot_to_nodes.setdefault(slot, []).append(node)
+
+    fixed_rects = _bridge_fixed_rects(workflow, bridge_node_ids)
+    placed_rects: list[tuple[float, float, float, float]] = []
+    current_right = 0.0
+    for slot in sorted(slot_to_nodes):
+        x = _bridge_slot_x(workflow, group_layers, slot, settings)
+        current_y = 50.0
+        slot_nodes = sorted(
+            slot_to_nodes[slot],
+            key=lambda node: (
+                _bridge_node_desired_y(workflow, node, group_by_node_id) + _node_visual_height(node) / 2.0,
+                node.y,
+                node.x,
+                node.id,
+            ),
+        )
+        for node in slot_nodes:
+            node_w = _node_visual_width(node)
+            node_h = _node_visual_height(node)
+            desired_y = _bridge_node_desired_y(workflow, node, group_by_node_id)
+            y = _resolve_bridge_y(
+                x,
+                max(current_y, desired_y),
+                node_w,
+                node_h,
+                fixed_rects,
+                placed_rects,
+                settings,
+            )
+            node.x = x
+            node.y = y
+            placed_rects.append(_node_rect(node))
+            current_y = y + node_h + settings.node_v_gap
+            current_right = max(current_right, node.x + node_w)
+
+    return current_right, bridge_node_ids
+
+
+def _is_group_bridge_eligible_node(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+) -> bool:
+    return (
+        node.id not in group_by_node_id
+        and not _is_pinned_node(workflow, node)
+        and not _is_decorative_node(node)
+        and not _is_virtual_hub_node(node)
+    )
+
+
+def _bridge_group_layer_sets(
+    workflow: Workflow,
+    nodes: list[Node],
+    group_by_node_id: dict[int, Group],
+    group_layers: dict[int, int],
+    movable_group_ids: set[int],
+) -> tuple[dict[int, set[int]], dict[int, set[int]]]:
+    node_ids = {node.id for node in nodes}
+    source_layers: dict[int, set[int]] = {node_id: set() for node_id in node_ids}
+    target_layers: dict[int, set[int]] = {node_id: set() for node_id in node_ids}
+    predecessors: dict[int, set[int]] = {node_id: set() for node_id in node_ids}
+    successors: dict[int, set[int]] = {node_id: set() for node_id in node_ids}
+
+    for link in workflow.links.values():
+        if link.source in node_ids and link.target in node_ids:
+            successors[link.source].add(link.target)
+            predecessors[link.target].add(link.source)
+        if (
+            link.target in node_ids
+            and (source_group := group_by_node_id.get(link.source)) is not None
+            and source_group.id in movable_group_ids
+        ):
+            source_layers[link.target].add(group_layers.get(source_group.id, 0))
+        if (
+            link.source in node_ids
+            and (target_group := group_by_node_id.get(link.target)) is not None
+            and target_group.id in movable_group_ids
+        ):
+            target_layers[link.source].add(group_layers.get(target_group.id, 0))
+
+    for _ in range(max(1, len(node_ids))):
+        changed = False
+        for node_id in node_ids:
+            for predecessor in predecessors[node_id]:
+                before = len(source_layers[node_id])
+                source_layers[node_id].update(source_layers[predecessor])
+                changed = changed or len(source_layers[node_id]) != before
+            for successor in successors[node_id]:
+                before = len(target_layers[node_id])
+                target_layers[node_id].update(target_layers[successor])
+                changed = changed or len(target_layers[node_id]) != before
+        if not changed:
+            break
+
+    return source_layers, target_layers
+
+
+def _bridge_slot_index(source_layers: set[int], target_layers: set[int]) -> int:
+    source_layer = max(source_layers) if source_layers else None
+    target_layer = min(target_layers) if target_layers else None
+    if source_layer is not None and target_layer is not None:
+        return max(source_layer, target_layer - 1)
+    if source_layer is not None:
+        return source_layer
+    if target_layer is not None:
+        return max(0, target_layer - 1)
+    return 0
+
+
+def _bridge_slot_x(
+    workflow: Workflow,
+    group_layers: dict[int, int],
+    slot: int,
+    settings: LayoutSettings,
+) -> float:
+    gap = max(24.0, settings.node_h_gap * 0.5)
+    previous_groups = [
+        group
+        for group in workflow.groups
+        if _has_positive_bounding(group) and group_layers.get(group.id, 0) <= slot
+    ]
+    if previous_groups:
+        right = max(group.bounding[0] + group.bounding[2] for group in previous_groups)
+        return right + gap
+
+    next_groups = [
+        group
+        for group in workflow.groups
+        if _has_positive_bounding(group) and group_layers.get(group.id, 0) > slot
+    ]
+    if next_groups:
+        left = min(group.bounding[0] for group in next_groups)
+        return left - NODE_MIN_WIDTH - gap
+
+    return 50.0
+
+
+def _bridge_node_desired_y(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+) -> float:
+    centers: list[float] = []
+    for link_id in node.input_links:
+        link = workflow.links.get(link_id)
+        if link is None:
+            continue
+        centers.append(_bridge_endpoint_center_y(workflow, link.source, group_by_node_id))
+    for link_id in node.output_links:
+        link = workflow.links.get(link_id)
+        if link is None:
+            continue
+        centers.append(_bridge_endpoint_center_y(workflow, link.target, group_by_node_id))
+    if not centers:
+        return node.y
+    return (sum(centers) / len(centers)) - _node_visual_height(node) / 2.0
+
+
+def _bridge_endpoint_center_y(
+    workflow: Workflow,
+    node_id: int,
+    group_by_node_id: dict[int, Group],
+) -> float:
+    if (group := group_by_node_id.get(node_id)) is not None:
+        return group.bounding[1] + group.bounding[3] / 2.0
+    if (node := workflow.nodes.get(node_id)) is not None:
+        return node.y + _node_visual_height(node) / 2.0
+    return 0.0
+
+
+def _resolve_bridge_y(
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    fixed_rects: list[tuple[float, float, float, float]],
+    placed_rects: list[tuple[float, float, float, float]],
+    settings: LayoutSettings,
+) -> float:
+    for _ in range(len(fixed_rects) + len(placed_rects) + 1):
+        collision_bottom = _bridge_collision_bottom(x, y, width, height, fixed_rects, placed_rects)
+        if collision_bottom is None:
+            return y
+        y = max(y + settings.node_v_gap, collision_bottom + settings.node_v_gap)
+    return y
+
+
+def _bridge_collision_bottom(
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+    fixed_rects: list[tuple[float, float, float, float]],
+    placed_rects: list[tuple[float, float, float, float]],
+) -> float | None:
+    candidate = (x, y, x + width, y + height)
+    for rect in [*fixed_rects, *placed_rects]:
+        if _rects_overlap(candidate, _expand_rect(rect, 6.0)):
+            return rect[3]
+    return None
+
+
+def _bridge_fixed_rects(
+    workflow: Workflow,
+    bridge_node_ids: set[int],
+) -> list[tuple[float, float, float, float]]:
+    rects = [
+        _group_rect(group)
+        for group in workflow.groups
+        if _has_positive_bounding(group)
+    ]
+    rects.extend(
+        _node_rect(node)
+        for node in workflow.nodes.values()
+        if node.id not in bridge_node_ids
+        and (_is_decorative_node(node) or _is_pinned_node(workflow, node))
+    )
+    return rects
 
 
 def _ungrouped_start_x(
@@ -1149,11 +1720,11 @@ def _position_linked_ungrouped_nodes(
     for node in nodes:
         layer_to_nodes.setdefault(layers[node.id], []).append(node)
 
-    max_node_w = max((_node_visual_width(node) for node in nodes), default=200.0)
+    layer_x_positions = _node_layer_x_positions(layer_to_nodes, start_x, settings)
     current_right = start_x
     for layer in sorted(layer_to_nodes):
         layer_nodes = sorted(layer_to_nodes[layer], key=lambda node: (_ungrouped_barycenter(workflow, node, layers), node.y, node.x, node.id))
-        x = start_x + layer * (max_node_w + settings.node_h_gap)
+        x = layer_x_positions[layer]
         y = 50.0
         column_width = 0.0
         for node in layer_nodes:
@@ -1164,6 +1735,24 @@ def _position_linked_ungrouped_nodes(
         current_right = max(current_right, x + column_width)
 
     return current_right
+
+
+def _node_layer_x_positions(
+    layer_to_nodes: dict[int, list[Node]],
+    start_x: float,
+    settings: LayoutSettings,
+) -> dict[int, float]:
+    """Use per-layer node widths for ungrouped dataflow columns."""
+    positions: dict[int, float] = {}
+    current_x = start_x
+    for layer in sorted(layer_to_nodes):
+        positions[layer] = current_x
+        layer_width = max(
+            (_node_visual_width(node) for node in layer_to_nodes[layer]),
+            default=NODE_MIN_WIDTH,
+        )
+        current_x += layer_width + settings.node_h_gap
+    return positions
 
 
 def _position_external_sources_near_group_targets(

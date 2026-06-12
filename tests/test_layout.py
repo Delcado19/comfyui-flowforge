@@ -19,6 +19,7 @@ from flowforge.layout import (
     _node_input_port_y,
     _node_output_port_y,
     _position_groups_globally,
+    _position_linked_ungrouped_nodes,
     _position_text_previews_near_sources,
     _score_layout_candidate,
     _resolve_layout_candidate_count,
@@ -153,6 +154,27 @@ def test_internal_layout_stacks_variable_height_nodes_without_overlap():
     first, second = same_layer_nodes
     assert first.y + first.size[1] + 40 <= second.y
     logger.info("Variable-height internal layer packing test passed")
+
+
+def test_internal_layout_uses_per_layer_widths():
+    logger.info("Testing internal layout uses per-layer widths")
+    wf = Workflow()
+    source = Node(id=1, type="Loader", x=0, y=0, size=[220, 80], output_links=[10])
+    middle = Node(id=2, type="Processor", x=0, y=0, size=[260, 100], input_links=[10], output_links=[11])
+    wide = Node(id=3, type="SaveImageClean", x=0, y=0, size=[960, 500], input_links=[11])
+    group = Group(id=1, name="Preview-heavy group", bounding=[0, 0, 2000, 500], nodes=[source, middle, wide])
+    wf.groups = [group]
+    wf.nodes = {1: source, 2: middle, 3: wide}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="DATA"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="DATA"),
+    }
+
+    _layout_groups_internal(wf, LayoutSettings(50, 50))
+
+    assert middle.x - source.x == source.size[0] + 50
+    assert wide.x - middle.x == middle.size[0] + 50
+    logger.info("Per-layer internal width test passed")
 
 
 def test_nodes_shrink_to_compact_size_before_layout():
@@ -497,6 +519,68 @@ def test_large_group_sequence_wraps_before_long_horizontal_strip():
     logger.info("Large group sequence wrapping test passed")
 
 
+def test_connected_groups_use_flow_columns():
+    logger.info("Testing connected groups use dataflow columns")
+    wf = Workflow()
+    source_group = Group(id=1, name="Source", bounding=[0, 400, 420, 220])
+    branch_a_group = Group(id=2, name="Branch A", bounding=[900, 40, 420, 220])
+    branch_b_group = Group(id=3, name="Branch B", bounding=[900, 780, 420, 220])
+    output_group = Group(id=4, name="Output", bounding=[1800, 420, 420, 220])
+    wf.groups = [source_group, branch_a_group, branch_b_group, output_group]
+
+    source = Node(id=1, type="Loader", x=40, y=440, size=[240, 100], output_links=[10, 11])
+    branch_a = Node(id=2, type="Processor", x=940, y=80, size=[260, 120], input_links=[10], output_links=[12])
+    branch_b = Node(id=3, type="Processor", x=940, y=820, size=[260, 120], input_links=[11], output_links=[13])
+    output = Node(id=4, type="SaveImageClean", x=1840, y=460, size=[360, 160], input_links=[12, 13])
+    source_group.nodes = [source]
+    branch_a_group.nodes = [branch_a]
+    branch_b_group.nodes = [branch_b]
+    output_group.nodes = [output]
+    wf.nodes = {node.id: node for node in (source, branch_a, branch_b, output)}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="DATA"),
+        11: Link(id=11, source=1, source_port=0, target=3, target_port=0, type="DATA"),
+        12: Link(id=12, source=2, source_port=0, target=4, target_port=0, type="DATA"),
+        13: Link(id=13, source=3, source_port=0, target=4, target_port=0, type="DATA"),
+    }
+
+    _position_groups_globally(wf, LayoutSettings(50, 50))
+
+    assert source_group.bounding[0] < branch_a_group.bounding[0] < output_group.bounding[0]
+    assert source_group.bounding[0] < branch_b_group.bounding[0] < output_group.bounding[0]
+    assert branch_a_group.bounding[0] == branch_b_group.bounding[0]
+    assert branch_b_group.bounding[1] > branch_a_group.bounding[1]
+    logger.info("Connected group flow-column test passed")
+
+
+def test_ungrouped_bridge_nodes_influence_group_flow_columns():
+    logger.info("Testing ungrouped bridge nodes influence group flow columns")
+    wf = Workflow()
+    source = Node(id=1, type="LoadImage", x=20, y=20, size=[220, 120], output_links=[10])
+    bridge = Node(id=2, type="ImageScaleToTotalPixels", x=500, y=40, size=[260, 120], input_links=[10], output_links=[11])
+    target = Node(id=3, type="VAEEncode", x=1020, y=20, size=[240, 120], input_links=[11])
+    source_group = Group(id=1, name="Source", bounding=[0, 0, 320, 220])
+    target_group = Group(id=2, name="Target", bounding=[1000, 0, 360, 220])
+    wf.groups = [target_group, source_group]
+    wf.nodes = {node.id: node for node in (source, bridge, target)}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="IMAGE"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="IMAGE"),
+    }
+
+    result = apply(wf, LayoutSettings(50, 50))
+    groups_by_name = {group.name: group for group in result.groups}
+    source_group = groups_by_name["Source"]
+    target_group = groups_by_name["Target"]
+    bridge = result.nodes[2]
+
+    assert source_group.bounding[0] < target_group.bounding[0]
+    assert bridge.x >= source_group.bounding[0] + source_group.bounding[2]
+    assert bridge.x + bridge.size[0] <= target_group.bounding[0]
+    assert all(bridge not in group.nodes for group in result.groups)
+    logger.info("Ungrouped bridge flow-column test passed")
+
+
 def test_bounding_box_update():
     logger.info("Testing bounding box update")
     wf = Workflow()
@@ -763,6 +847,25 @@ def test_linked_ungrouped_nodes_clear_group_columns():
             f"ungrouped node {node_id} at x={node.x} overlaps group extent x<{group_right}"
         )
     logger.info("Linked ungrouped placement test passed")
+
+
+def test_linked_ungrouped_nodes_use_per_layer_widths():
+    logger.info("Testing linked ungrouped placement uses per-layer widths")
+    wf = Workflow()
+    source = Node(id=1, type="Wide Source", x=0, y=0, size=[900, 120], output_links=[10])
+    middle = Node(id=2, type="Middle", x=0, y=0, size=[220, 100], input_links=[10], output_links=[11])
+    target = Node(id=3, type="Target", x=0, y=0, size=[240, 100], input_links=[11])
+    wf.nodes = {1: source, 2: middle, 3: target}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="DATA"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="DATA"),
+    }
+
+    _position_linked_ungrouped_nodes(wf, [source, middle, target], LayoutSettings(50, 50), start_x=100)
+
+    assert middle.x - source.x == source.size[0] + 50
+    assert target.x - middle.x == middle.size[0] + 50
+    logger.info("Linked ungrouped per-layer width test passed")
 
 
 def test_external_ungrouped_source_moves_next_to_target_group():
