@@ -4,10 +4,17 @@ All notable changes to ComfyUI FlowForge are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- Frontend node resize handles for editing saved ComfyUI node sizes directly on the workflow canvas.
+
 ### Changed
 
+- Make frontend node resize handles higher contrast so the compact corner grip stays visible on dark ComfyUI nodes.
 - Keep `LoadImage*`, `SaveImage*`, `Note`, `MarkdownNote`, and label nodes at their saved ComfyUI size instead of compacting preview, save-control, or annotation nodes to the generic minimum rectangle.
 - Treat pinned group rectangles as fixed layout obstacles for movable nodes, local control stacks, virtual Set/Get hubs, and movable groups so layout cleanup does not cover pinned control areas.
+- Keep ungrouped bridge nodes between their actual incident group surfaces when they feed or read from pinned groups, so fixed output panels do not leave decode/adapter bridge nodes stranded beyond the source group.
+- Restrict group-bridge placement to true group-to-group bridge nodes, keeping source-only ungrouped chains in normal dataflow layers instead of stacking them vertically beside loader groups.
 - Prefer layout candidates with fewer straight-line crossings when compactness candidates otherwise compete.
 - Use per-layer internal group column widths so one large preview or save node does not force every group column to the same width.
 - Wrap long internal group layer chains into additional rows so compact refinement groups use vertical space instead of becoming wide strips.

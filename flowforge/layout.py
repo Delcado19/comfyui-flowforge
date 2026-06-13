@@ -1501,8 +1501,6 @@ def _position_group_bridge_nodes(
         for group in workflow.groups
         if group.nodes and not _group_has_fixed_geometry(group)
     }
-    if not movable_group_ids:
-        return 0.0, set()
 
     candidates = [
         node
@@ -1510,6 +1508,11 @@ def _position_group_bridge_nodes(
         if _is_group_bridge_eligible_node(workflow, node, group_by_node_id)
     ]
     if not candidates:
+        return 0.0, set()
+    if not movable_group_ids and not any(
+        _bridge_has_fixed_incident_group_pair(workflow, node, group_by_node_id)
+        for node in candidates
+    ):
         return 0.0, set()
 
     group_layers = _group_flow_layers(workflow)
@@ -1523,7 +1526,13 @@ def _position_group_bridge_nodes(
     bridge_node_ids = {
         node.id
         for node in candidates
-        if source_layers[node.id] or target_layers[node.id]
+        if _should_position_as_group_bridge(
+            workflow,
+            node,
+            group_by_node_id,
+            source_layers[node.id],
+            target_layers[node.id],
+        )
         if not _is_external_group_source_node(workflow, node, group_by_node_id)
     }
     if not bridge_node_ids:
@@ -1551,10 +1560,18 @@ def _position_group_bridge_nodes(
             ),
         )
         slot_width = max(_node_visual_width(node) for node in slot_nodes)
-        x = _bridge_slot_x(workflow, group_layers, slot, settings, slot_width)
+        fallback_x = _bridge_slot_x(workflow, group_layers, slot, settings, slot_width)
         for node in slot_nodes:
             node_w = _node_visual_width(node)
             node_h = _node_visual_height(node)
+            x = _bridge_node_x(
+                workflow,
+                node,
+                group_by_node_id,
+                settings,
+                fallback_x,
+                node_w,
+            )
             desired_y = _bridge_node_desired_y(workflow, node, group_by_node_id)
             y = _resolve_bridge_y(
                 x,
@@ -1585,6 +1602,21 @@ def _is_group_bridge_eligible_node(
         and not _is_decorative_node(node)
         and not _is_virtual_hub_node(node)
     )
+
+
+def _should_position_as_group_bridge(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+    source_layers: set[int],
+    target_layers: set[int],
+) -> bool:
+    # Source-only chains are normal ungrouped dataflow, not group bridges.
+    # Treating every downstream node as a bridge collapses whole workflows into
+    # one tall slot beside the loader groups.
+    if source_layers and target_layers:
+        return True
+    return _bridge_has_fixed_incident_group_pair(workflow, node, group_by_node_id)
 
 
 def _bridge_group_layer_sets(
@@ -1684,6 +1716,89 @@ def _bridge_slot_x(
         return left - width - gap
 
     return 50.0
+
+
+def _bridge_node_x(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+    settings: LayoutSettings,
+    fallback_x: float,
+    width: float,
+) -> float:
+    fixed_gap_x = _bridge_fixed_incident_gap_x(
+        workflow,
+        node,
+        group_by_node_id,
+        settings,
+        width,
+    )
+    return fixed_gap_x if fixed_gap_x is not None else fallback_x
+
+
+def _bridge_has_fixed_incident_group_pair(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+) -> bool:
+    incident_groups = _bridge_direct_incident_groups(workflow, node, group_by_node_id)
+    return len(incident_groups) >= 2 and any(_group_has_fixed_geometry(group) for group in incident_groups)
+
+
+def _bridge_fixed_incident_gap_x(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+    settings: LayoutSettings,
+    width: float,
+) -> float | None:
+    incident_groups = _bridge_direct_incident_groups(workflow, node, group_by_node_id)
+    if not _bridge_has_fixed_incident_group_pair(workflow, node, group_by_node_id):
+        return None
+
+    # Pinned groups cannot be moved by bridge-derived dependencies, but bridge
+    # nodes should still use the actual visible gap around that fixed surface.
+    rects = sorted(
+        (_group_rect(group) for group in incident_groups if _has_positive_bounding(group)),
+        key=lambda rect: (rect[0] + rect[2]) / 2.0,
+    )
+    gap = _bridge_side_gap(settings)
+    best_x: float | None = None
+    best_available = 0.0
+    for left_rect, right_rect in zip(rects, rects[1:]):
+        slot_left = left_rect[2] + gap
+        slot_right = right_rect[0] - gap
+        available = slot_right - slot_left
+        if available >= width and available > best_available:
+            best_x = slot_left + (available - width) / 2.0
+            best_available = available
+
+    return best_x
+
+
+def _bridge_direct_incident_groups(
+    workflow: Workflow,
+    node: Node,
+    group_by_node_id: dict[int, Group],
+) -> list[Group]:
+    groups: dict[int, Group] = {}
+    for link_id in node.input_links:
+        link = workflow.links.get(link_id)
+        if link is None:
+            continue
+        group = group_by_node_id.get(link.source)
+        if group is not None:
+            groups[group.id] = group
+
+    for link_id in node.output_links:
+        link = workflow.links.get(link_id)
+        if link is None:
+            continue
+        group = group_by_node_id.get(link.target)
+        if group is not None:
+            groups[group.id] = group
+
+    return list(groups.values())
 
 
 def _bridge_side_gap(settings: LayoutSettings) -> float:

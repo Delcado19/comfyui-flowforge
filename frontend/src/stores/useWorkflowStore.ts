@@ -95,6 +95,22 @@ export const useWorkflowStore = defineStore('workflow', {
       if (!node) return
       node.pos = [x, y]
     },
+    resizeNode(nodeId: NodeId, width: number, height: number) {
+      const node = this.workflow?.nodes.find((item) => item.id === nodeId)
+      if (!node) return
+
+      if (Array.isArray(node.size)) {
+        node.size = [width, height]
+        return
+      }
+
+      if (node.size && typeof node.size === 'object') {
+        node.size = { ...node.size, width, height }
+        return
+      }
+
+      node.size = [width, height]
+    },
     moveGroupByDelta(groupId: number | string, dx: number, dy: number, nodeIds: NodeId[] = []) {
       const group = this.workflow?.groups?.find((item) => item.id === groupId)
       if (!group || !Array.isArray(group.bounding)) return

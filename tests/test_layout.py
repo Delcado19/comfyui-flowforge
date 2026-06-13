@@ -21,6 +21,7 @@ from flowforge.layout import (
     _node_output_port_y,
     _position_group_bridge_nodes,
     _position_groups_globally,
+    _position_ungrouped_nodes,
     _position_linked_ungrouped_nodes,
     _position_text_previews_near_sources,
     _score_layout_candidate,
@@ -646,6 +647,150 @@ def test_bridge_nodes_stay_between_compact_group_columns():
     assert bridge.x + bridge.size[0] <= target_group.bounding[0]
     assert bridge.y + bridge.size[1] <= target_group.bounding[1] + target_group.bounding[3]
     logger.info("Compact bridge node placement test passed")
+
+
+def test_multi_node_group_bridge_chain_stays_between_group_columns():
+    logger.info("Testing multi-node bridge chain placement between group columns")
+    wf = Workflow()
+    source_group = Group(id=1, name="Source", bounding=[0, 0, 320, 220])
+    target_group = Group(id=2, name="Target", bounding=[900, 0, 420, 420])
+    source = Node(id=1, type="LoadImage", x=40, y=40, size=[220, 120], output_links=[10])
+    bridge_a = Node(id=2, type="ImageScale", x=0, y=0, size=[180, 100], input_links=[10], output_links=[11])
+    bridge_b = Node(id=3, type="VAEEncodeTiled", x=0, y=0, size=[200, 120], input_links=[11], output_links=[12])
+    target = Node(id=4, type="KSampler", x=940, y=60, size=[260, 260], input_links=[12])
+    source_group.nodes = [source]
+    target_group.nodes = [target]
+    wf.groups = [source_group, target_group]
+    wf.nodes = {node.id: node for node in (source, bridge_a, bridge_b, target)}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="IMAGE"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="IMAGE"),
+        12: Link(id=12, source=3, source_port=0, target=4, target_port=0, type="LATENT"),
+    }
+
+    _, bridge_node_ids = _position_group_bridge_nodes(wf, [bridge_a, bridge_b], LayoutSettings(30, 30))
+
+    source_right = source_group.bounding[0] + source_group.bounding[2]
+    target_left = target_group.bounding[0]
+    assert bridge_node_ids == {2, 3}
+    for bridge in (bridge_a, bridge_b):
+        assert bridge.x >= source_right
+        assert bridge.x + bridge.size[0] <= target_left
+    assert not _test_rectangles_overlap(bridge_a, bridge_b)
+    logger.info("Multi-node bridge chain placement test passed")
+
+
+def test_bridge_nodes_use_visible_gap_to_pinned_target_group():
+    logger.info("Testing bridge node placement beside pinned target groups")
+    wf = Workflow()
+    target_group = Group(id=1, name="Outputs", bounding=[0, 0, 420, 620], pinned=True)
+    source_group = Group(id=2, name="Upscale", bounding=[700, 0, 320, 220])
+    source = Node(id=1, type="KSampler", x=740, y=40, size=[220, 120], output_links=[10])
+    bridge = Node(id=2, type="VAEDecodeTiled", x=0, y=0, size=[120, 100], input_links=[10], output_links=[11])
+    target = Node(id=3, type="SaveImageClean", x=40, y=60, size=[340, 520], input_links=[11])
+    source_group.nodes = [source]
+    target_group.nodes = [target]
+    wf.groups = [target_group, source_group]
+    wf.nodes = {node.id: node for node in (source, bridge, target)}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="LATENT"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="IMAGE"),
+    }
+
+    _position_group_bridge_nodes(wf, [bridge], LayoutSettings(20, 20))
+
+    target_right = target_group.bounding[0] + target_group.bounding[2]
+    source_left = source_group.bounding[0]
+    assert bridge.x >= target_right
+    assert bridge.x + bridge.size[0] <= source_left
+    logger.info("Pinned target bridge placement test passed")
+
+
+def test_bridge_between_pinned_groups_uses_fixed_gap_without_movable_groups():
+    logger.info("Testing bridge placement between pinned group surfaces")
+    wf = Workflow()
+    source_group = Group(id=1, name="Pinned Source", bounding=[0, 0, 320, 220], pinned=True)
+    target_group = Group(id=2, name="Pinned Target", bounding=[700, 0, 420, 520], pinned=True)
+    source = Node(id=1, type="KSampler", x=40, y=40, size=[220, 120], output_links=[10])
+    bridge = Node(id=2, type="VAEDecodeTiled", x=0, y=0, size=[160, 120], input_links=[10], output_links=[11])
+    target = Node(id=3, type="SaveImageClean", x=740, y=60, size=[340, 420], input_links=[11])
+    source_group.nodes = [source]
+    target_group.nodes = [target]
+    wf.groups = [source_group, target_group]
+    wf.nodes = {node.id: node for node in (source, bridge, target)}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="LATENT"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="IMAGE"),
+    }
+
+    _, bridge_node_ids = _position_group_bridge_nodes(wf, [bridge], LayoutSettings(20, 20))
+
+    source_right = source_group.bounding[0] + source_group.bounding[2]
+    target_left = target_group.bounding[0]
+    assert bridge_node_ids == {2}
+    assert bridge.x >= source_right
+    assert bridge.x + bridge.size[0] <= target_left
+    logger.info("Pinned group bridge placement test passed")
+
+
+def test_one_sided_group_links_are_not_bridge_nodes():
+    logger.info("Testing one-sided group links stay out of bridge placement")
+    wf = Workflow()
+    source_group = Group(id=1, name="Source", bounding=[0, 0, 320, 220])
+    target_group = Group(id=2, name="Target", bounding=[900, 0, 420, 420])
+    source = Node(id=1, type="CheckpointLoaderSimple", x=40, y=40, size=[220, 120], output_links=[10])
+    source_only = Node(id=2, type="Context", x=0, y=0, size=[220, 120], input_links=[10], output_links=[11])
+    source_only_tail = Node(id=3, type="KSampler", x=0, y=0, size=[240, 240], input_links=[11])
+    target_only_head = Node(id=4, type="LoadImage", x=0, y=0, size=[220, 120], output_links=[12])
+    target_only = Node(id=5, type="ImageScale", x=0, y=0, size=[220, 120], input_links=[12], output_links=[13])
+    target = Node(id=6, type="VAEEncode", x=940, y=60, size=[240, 120], input_links=[13])
+    source_group.nodes = [source]
+    target_group.nodes = [target]
+    wf.groups = [source_group, target_group]
+    nodes = [source, source_only, source_only_tail, target_only_head, target_only, target]
+    wf.nodes = {node.id: node for node in nodes}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="MODEL"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="MODEL"),
+        12: Link(id=12, source=4, source_port=0, target=5, target_port=0, type="IMAGE"),
+        13: Link(id=13, source=5, source_port=0, target=6, target_port=0, type="IMAGE"),
+    }
+
+    _, bridge_node_ids = _position_group_bridge_nodes(
+        wf,
+        [source_only, source_only_tail, target_only_head, target_only],
+        LayoutSettings(30, 30),
+    )
+
+    assert bridge_node_ids == set()
+    logger.info("One-sided group link test passed")
+
+
+def test_source_only_ungrouped_chains_use_dataflow_layers_not_bridge_stack():
+    logger.info("Testing source-only ungrouped chains stay in dataflow layers")
+    wf = Workflow()
+    source_group = Group(id=1, name="Load Model", bounding=[0, 0, 320, 220])
+    source = Node(id=1, type="CheckpointLoaderSimple", x=40, y=40, size=[220, 120], output_links=[10])
+    first = Node(id=2, type="Context", x=0, y=0, size=[220, 140], input_links=[10], output_links=[11])
+    second = Node(id=3, type="KSampler", x=0, y=0, size=[260, 260], input_links=[11], output_links=[12])
+    third = Node(id=4, type="VAEDecodeTiled", x=0, y=0, size=[220, 120], input_links=[12])
+    source_group.nodes = [source]
+    wf.groups = [source_group]
+    wf.nodes = {node.id: node for node in (source, first, second, third)}
+    wf.ungrouped_nodes = [first, second, third]
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="MODEL"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="MODEL"),
+        12: Link(id=12, source=3, source_port=0, target=4, target_port=0, type="LATENT"),
+    }
+    settings = LayoutSettings(40, 40)
+
+    _position_groups_globally(wf, settings)
+    _position_ungrouped_nodes(wf, settings)
+
+    assert first.x < second.x < third.x
+    assert max(first.y, second.y, third.y) - min(first.y, second.y, third.y) < second.size[1]
+    logger.info("Source-only chain dataflow placement test passed")
 
 
 def test_bounding_box_update():

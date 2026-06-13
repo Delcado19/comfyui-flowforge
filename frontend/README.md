@@ -19,7 +19,7 @@ Python package builds can stage the built frontend into `flowforge/frontend_dist
 ## Features
 
 - **ComfyCanvas.vue** - Main canvas with wheel zoom and pan
-- **ComfyNode.vue** - ComfyUI-like node component using workflow dimensions, colors, slots, and widget controls. Widget-backed inputs render on their widget rows, while unconnected widget inputs are not duplicated as separate free sockets.
+- **ComfyNode.vue** - ComfyUI-like node component using workflow dimensions, colors, slots, widget controls, and a bottom-right resize handle. Widget-backed inputs render on their widget rows, while unconnected widget inputs are not duplicated as separate free sockets.
 - **ComfyConnection.vue** - SVG Bezier curves connecting ports
 - **useWorkflowStore.ts** - Pinia store for full ComfyUI workflow JSON state
 - **Toolbar Optimize + Layout Action** - Calls `/optimize` to insert Set/Get hubs for eligible high-fanout `MODEL`, `CLIP`, and `VAE` wiring, then calls `/layout`
@@ -46,6 +46,7 @@ Canvas navigation:
 
 - Mouse wheel zooms smoothly around the cursor position.
 - Drag the canvas background with the left mouse button to pan the workflow.
+- Drag a node title to move the node, or drag the node's bottom-right handle to resize its saved ComfyUI `size`.
 - Use the canvas group creation control to drag on empty canvas space, define a group rectangle, and enter a title when prompted.
 - Drag a group title to move the group and all nodes currently inside it.
 - Double-click a group title, or click the group rename button, to edit an existing group title.

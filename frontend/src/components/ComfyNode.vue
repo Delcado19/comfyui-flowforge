@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useWorkflowStore, type ComfyNode, type ComfyPort } from '../stores/useWorkflowStore'
-import { TITLE_HEIGHT, ROW_HEIGHT, SLOT_ROW_OFFSET, getNodeDisplayHeight, getNodeSize } from '../utils/nodeGeometry'
+import {
+  TITLE_HEIGHT,
+  ROW_HEIGHT,
+  SLOT_ROW_OFFSET,
+  getNodeDisplayHeight,
+  getNodeDisplaySize,
+  getNodeResizeMinimumSize,
+  getNodeSize,
+  getNodeStoredHeightForDisplayHeight,
+} from '../utils/nodeGeometry'
 import { getNodeDisplayRows, type DisplayRow } from '../utils/nodeWidgets'
 
 interface Props {
@@ -11,6 +20,7 @@ interface Props {
 const props = defineProps<Props>()
 const store = useWorkflowStore()
 const titleRef = ref<HTMLElement | null>(null)
+const resizeHandleRef = ref<HTMLElement | null>(null)
 
 const typeColors: Record<string, string> = {
   default: '#353535',
@@ -87,6 +97,9 @@ const isDragging = ref(false)
 const dragPointerId = ref<number | null>(null)
 const dragStart = ref({ x: 0, y: 0 })
 const nodeStart = ref({ x: 0, y: 0 })
+const isResizing = ref(false)
+const resizePointerId = ref<number | null>(null)
+const resizeStart = ref({ x: 0, y: 0, width: 0, height: 0 })
 
 const displayRows = computed<DisplayRow[]>(() => {
   if (isCollapsed.value || isReroute.value) {
@@ -147,7 +160,7 @@ function shadeColor(color: string, amount: number): string {
 function onTitlePointerDown(e: PointerEvent) {
   if (e.button !== 0) return
   const target = e.target as HTMLElement
-  if (target.closest('.title-dot') || target.closest('.pin-button')) return
+  if (target.closest('.title-dot') || target.closest('.pin-button') || target.closest('.node-resize-handle')) return
 
   e.preventDefault()
   e.stopPropagation()
@@ -158,11 +171,41 @@ function onTitlePointerDown(e: PointerEvent) {
   titleRef.value?.setPointerCapture(e.pointerId)
 }
 
+function onResizePointerDown(e: PointerEvent) {
+  if (e.button !== 0) return
+
+  e.preventDefault()
+  e.stopPropagation()
+  isDragging.value = false
+  isResizing.value = true
+  resizePointerId.value = e.pointerId
+
+  const [width, height] = getNodeDisplaySize(props.node)
+  resizeStart.value = {
+    x: e.clientX,
+    y: e.clientY,
+    width,
+    height,
+  }
+  resizeHandleRef.value?.setPointerCapture(e.pointerId)
+}
+
 function togglePinned() {
   store.toggleNodePinned(props.node.id)
 }
 
 function onPointerMove(e: PointerEvent) {
+  if (isResizing.value && resizePointerId.value === e.pointerId) {
+    const dx = (e.clientX - resizeStart.value.x) / store.scale
+    const dy = (e.clientY - resizeStart.value.y) / store.scale
+    const [minWidth, minHeight] = getNodeResizeMinimumSize(props.node)
+    const width = Math.max(minWidth, resizeStart.value.width + dx)
+    const displayHeight = Math.max(minHeight, resizeStart.value.height + dy)
+    const storedHeight = getNodeStoredHeightForDisplayHeight(props.node, displayHeight)
+    store.resizeNode(props.node.id, width, storedHeight)
+    return
+  }
+
   if (!isDragging.value || dragPointerId.value !== e.pointerId) return
 
   const dx = (e.clientX - dragStart.value.x) / store.scale
@@ -171,6 +214,15 @@ function onPointerMove(e: PointerEvent) {
 }
 
 function onPointerUp(e: PointerEvent) {
+  if (resizePointerId.value === e.pointerId) {
+    if (resizeHandleRef.value?.hasPointerCapture(e.pointerId)) {
+      resizeHandleRef.value.releasePointerCapture(e.pointerId)
+    }
+    isResizing.value = false
+    resizePointerId.value = null
+    return
+  }
+
   if (dragPointerId.value !== e.pointerId) return
   if (titleRef.value?.hasPointerCapture(e.pointerId)) {
     titleRef.value.releasePointerCapture(e.pointerId)
@@ -196,7 +248,7 @@ onUnmounted(() => {
   <div
     :style="bodyStyle"
     class="comfy-node"
-    :class="{ 'is-bypassed': isBypassed, 'is-collapsed': isCollapsed, 'is-reroute': isReroute, 'is-pinned': isPinned }"
+    :class="{ 'is-bypassed': isBypassed, 'is-collapsed': isCollapsed, 'is-reroute': isReroute, 'is-pinned': isPinned, 'is-resizing': isResizing }"
   >
     <div ref="titleRef" :style="titleStyle" class="node-title" @pointerdown="onTitlePointerDown">
       <span class="title-dot" :style="{ backgroundColor: titleColor }"></span>
@@ -255,6 +307,12 @@ onUnmounted(() => {
         <span v-else class="widget-value">{{ widget.value }}</span>
       </div>
     </div>
+    <div
+      ref="resizeHandleRef"
+      class="node-resize-handle"
+      title="Resize node"
+      @pointerdown="onResizePointerDown"
+    ></div>
   </div>
 </template>
 
@@ -277,6 +335,11 @@ onUnmounted(() => {
   border-color: #d7ac4d !important;
   box-shadow:
     0 0 0 1px rgb(215 172 77 / 45%),
+    0 2px 7px rgb(0 0 0 / 45%);
+}
+.comfy-node.is-resizing {
+  box-shadow:
+    0 0 0 1px rgb(106 168 216 / 55%),
     0 2px 7px rgb(0 0 0 / 45%);
 }
 .node-title {
@@ -364,6 +427,48 @@ onUnmounted(() => {
 .node-body {
   position: relative;
   overflow: visible;
+}
+.node-resize-handle {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  z-index: 12;
+  width: 16px;
+  height: 16px;
+  border: 1px solid rgb(12 24 36 / 80%);
+  border-bottom-right-radius: 4px;
+  background:
+    linear-gradient(135deg, transparent 0 38%, rgb(114 190 245 / 82%) 39% 100%),
+    rgb(32 80 118 / 70%);
+  box-shadow:
+    inset -1px -1px 0 rgb(255 255 255 / 44%),
+    0 0 0 1px rgb(114 190 245 / 40%),
+    0 1px 3px rgb(0 0 0 / 55%);
+  cursor: nwse-resize;
+  pointer-events: auto;
+  touch-action: none;
+}
+.node-resize-handle:hover {
+  background:
+    linear-gradient(135deg, transparent 0 38%, rgb(153 215 255 / 95%) 39% 100%),
+    rgb(44 104 148 / 90%);
+}
+.node-resize-handle::before,
+.node-resize-handle::after {
+  content: '';
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  border-right: 2px solid rgb(255 255 255 / 95%);
+  border-bottom: 2px solid rgb(255 255 255 / 95%);
+}
+.node-resize-handle::before {
+  width: 7px;
+  height: 7px;
+}
+.node-resize-handle::after {
+  width: 3px;
+  height: 3px;
 }
 .slot-row {
   position: absolute;
