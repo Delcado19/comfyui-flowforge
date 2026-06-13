@@ -10,6 +10,8 @@ All notable changes to ComfyUI FlowForge are documented here.
 
 ### Changed
 
+- Score group-bridge x candidates (fixed-incident gap and layer slot) by resulting cable length so a bridge out of a fixed group is no longer parked on top of an unrelated tall group sitting in that gap and then shoved far below it. The fixed-incident gap still wins whenever it is actually free.
+- Re-place group-bridge nodes after the regular ungrouped columns are positioned, using those regular node rectangles as obstacles, so a small bridge is no longer left buried under an oversized terminal node placed afterwards (reduces movable node overlaps across the example-workflows corpus from 18 to 2).
 - Make frontend node resize handles higher contrast so the compact corner grip stays visible on dark ComfyUI nodes.
 - Keep `LoadImage*`, `SaveImage*`, `Note`, `MarkdownNote`, and label nodes at their saved ComfyUI size instead of compacting preview, save-control, or annotation nodes to the generic minimum rectangle.
 - Treat pinned group rectangles as fixed layout obstacles for movable nodes, local control stacks, virtual Set/Get hubs, and movable groups so layout cleanup does not cover pinned control areas.

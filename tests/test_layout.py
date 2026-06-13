@@ -733,6 +733,96 @@ def test_bridge_between_pinned_groups_uses_fixed_gap_without_movable_groups():
     logger.info("Pinned group bridge placement test passed")
 
 
+def test_bridge_skips_fixed_gap_blocked_by_tall_non_incident_group():
+    """A bridge out of a fixed group must not be shoved below an unrelated tall group.
+
+    Regression: the fixed-incident gap x can land on top of a tall non-incident
+    group that happens to sit in that gap. The down-only Y resolver then pushed
+    the bridge far below that group, producing very long cables. The bridge must
+    now fall back to the clear layer slot and stay near its endpoints' Y band.
+    """
+    logger.info("Testing bridge avoids fixed gap blocked by tall non-incident group")
+    wf = Workflow()
+    # Fixed (pinned) source group on the left; the bridge is incident to it.
+    source_group = Group(id=1, name="Reference Input", bounding=[0, 0, 300, 200], pinned=True)
+    # Tall group sitting in the gap between source and target, NOT incident to
+    # the bridge (its node connects only inside its own group).
+    blocker_group = Group(id=2, name="Outputs", bounding=[400, 0, 600, 1400])
+    # Movable target group on the right; the bridge is incident to it.
+    target_group = Group(id=3, name="IP Adapter", bounding=[1400, 0, 300, 300])
+
+    source = Node(id=1, type="LoadImage", x=20, y=20, size=[260, 160], output_links=[10], pinned=True)
+    blocker_sink = Node(id=2, type="SaveImageClean", x=420, y=20, size=[560, 1360], input_links=[99])
+    blocker_src = Node(id=5, type="PreviewImage", x=420, y=20, size=[100, 60], output_links=[99])
+    bridge = Node(id=3, type="VAEDecodeTiled", x=0, y=0, size=[200, 120], input_links=[10], output_links=[11])
+    target = Node(id=4, type="IPAdapterAdvanced", x=1420, y=20, size=[260, 200], input_links=[11])
+
+    source_group.nodes = [source]
+    blocker_group.nodes = [blocker_sink, blocker_src]
+    target_group.nodes = [target]
+    wf.groups = [source_group, blocker_group, target_group]
+    wf.nodes = {node.id: node for node in (source, blocker_sink, blocker_src, bridge, target)}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=3, target_port=0, type="IMAGE"),
+        11: Link(id=11, source=3, source_port=0, target=4, target_port=0, type="IMAGE"),
+        99: Link(id=99, source=5, source_port=0, target=2, target_port=0, type="IMAGE"),
+    }
+
+    _, bridge_node_ids = _position_group_bridge_nodes(wf, [bridge], LayoutSettings(20, 20))
+
+    blocker_bottom = blocker_group.bounding[1] + blocker_group.bounding[3]
+    assert bridge_node_ids == {3}
+    # The bridge must not be pushed below the unrelated tall group.
+    assert bridge.y + bridge.size[1] <= blocker_bottom
+    # And it must not horizontally overlap the tall non-incident group.
+    blocker_left = blocker_group.bounding[0]
+    blocker_right = blocker_group.bounding[0] + blocker_group.bounding[2]
+    assert bridge.x >= blocker_right or bridge.x + bridge.size[0] <= blocker_left
+    logger.info("Bridge fixed-gap blocker test passed")
+
+
+def test_bridge_avoids_regular_node_obstacle_rects():
+    """A bridge must clear oversized regular ungrouped nodes placed after it.
+
+    Regression: bridges are positioned before the regular ungrouped columns, so
+    an oversized terminal/column node could land on top of a small bridge. The
+    bridge placement now accepts those regular node rectangles as obstacles and
+    moves the bridge to a clear slot instead of leaving it buried.
+    """
+    logger.info("Testing bridge clears regular node obstacle rectangles")
+    wf = Workflow()
+    source_group = Group(id=1, name="A", bounding=[0, 0, 320, 220])
+    target_group = Group(id=2, name="B", bounding=[600, 0, 520, 720])
+    source = Node(id=1, type="KSampler", x=40, y=40, size=[220, 120], output_links=[10])
+    bridge = Node(id=2, type="VAEDecodeTiled", x=0, y=0, size=[200, 100], input_links=[10], output_links=[11])
+    target = Node(id=3, type="SaveImageClean", x=640, y=60, size=[420, 560], input_links=[11])
+    source_group.nodes = [source]
+    target_group.nodes = [target]
+    wf.groups = [source_group, target_group]
+    wf.nodes = {node.id: node for node in (source, bridge, target)}
+    wf.links = {
+        10: Link(id=10, source=1, source_port=0, target=2, target_port=0, type="LATENT"),
+        11: Link(id=11, source=2, source_port=0, target=3, target_port=0, type="IMAGE"),
+    }
+    settings = LayoutSettings(20, 20)
+    _position_groups_globally(wf, settings)
+
+    # Baseline placement establishes where the bridge naturally sits.
+    _position_group_bridge_nodes(wf, [bridge], settings)
+    base_x, base_y = bridge.x, bridge.y
+    width, height = bridge.size[0], bridge.size[1]
+
+    # An oversized regular node now occupies exactly that area; the bridge must
+    # be moved clear of it.
+    obstacle = (base_x - 30, base_y - 200, base_x + width + 30, base_y + height + 600)
+    _position_group_bridge_nodes(wf, [bridge], settings, extra_fixed_rects=[obstacle])
+
+    overlap_x = min(bridge.x + width, obstacle[2]) - max(bridge.x, obstacle[0])
+    overlap_y = min(bridge.y + height, obstacle[3]) - max(bridge.y, obstacle[1])
+    assert not (overlap_x > 1 and overlap_y > 1)
+    logger.info("Bridge regular-node obstacle test passed")
+
+
 def test_one_sided_group_links_are_not_bridge_nodes():
     logger.info("Testing one-sided group links stay out of bridge placement")
     wf = Workflow()

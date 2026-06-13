@@ -1436,36 +1436,36 @@ def _position_ungrouped_nodes(
     Position nodes that are not part of any group using vertical column packing.
     This keeps the workflow narrower by using the Y axis first.
     """
-    nodes_to_position = workflow.ungrouped_nodes if nodes is None else nodes
-    nodes_to_position = [node for node in nodes_to_position if not _is_pinned_node(workflow, node)]
-    if not nodes_to_position:
+    unpinned_nodes = workflow.ungrouped_nodes if nodes is None else nodes
+    unpinned_nodes = [node for node in unpinned_nodes if not _is_pinned_node(workflow, node)]
+    if not unpinned_nodes:
         return start_x_floor
 
-    logger.debug(f"Positioning {len(nodes_to_position)} ungrouped nodes")
+    logger.debug(f"Positioning {len(unpinned_nodes)} ungrouped nodes")
 
     start_x = _ungrouped_start_x(workflow, settings, start_x_floor)
-    bridge_right, bridge_node_ids = _position_group_bridge_nodes(workflow, nodes_to_position, settings)
-    nodes_to_position = [node for node in nodes_to_position if node.id not in bridge_node_ids]
-    if not nodes_to_position:
+    bridge_right, bridge_node_ids = _position_group_bridge_nodes(workflow, unpinned_nodes, settings)
+    non_bridge_nodes = [node for node in unpinned_nodes if node.id not in bridge_node_ids]
+    if not non_bridge_nodes:
         return max(start_x_floor, bridge_right)
 
-    if _has_internal_links(workflow, nodes_to_position):
-        current_right = _position_linked_ungrouped_nodes(workflow, nodes_to_position, settings, start_x)
-        return max(
-            current_right,
-            bridge_right,
-            _position_external_sources_near_group_targets(workflow, nodes_to_position, settings),
-            _position_control_nodes_near_targets(workflow, nodes_to_position, settings),
+    if _has_internal_links(workflow, non_bridge_nodes):
+        current_right = _position_linked_ungrouped_nodes(workflow, non_bridge_nodes, settings, start_x)
+        external_right = _position_external_sources_near_group_targets(workflow, non_bridge_nodes, settings)
+        control_right = _position_control_nodes_near_targets(workflow, non_bridge_nodes, settings)
+        bridge_right = _refinalize_bridges_against_regular_nodes(
+            workflow, unpinned_nodes, non_bridge_nodes, bridge_node_ids, settings, bridge_right
         )
+        return max(current_right, bridge_right, external_right, control_right)
 
-    sorted_nodes = _order_ungrouped_nodes_by_flow(workflow, nodes_to_position)
+    sorted_nodes = _order_ungrouped_nodes_by_flow(workflow, non_bridge_nodes)
 
     start_y = 50.0
     current_x = start_x
     current_y = start_y
     column_width = 0.0
     column_budget = _estimate_vertical_packing_budget(sorted_nodes, _node_visual_height, settings.node_v_gap)
-    
+
     for node in sorted_nodes:
         node_w = _node_visual_width(node)
         node_h = _node_visual_height(node)
@@ -1479,20 +1479,51 @@ def _position_ungrouped_nodes(
         current_y += node_h + settings.node_v_gap
         column_width = max(column_width, node_w)
 
-    return max(
-        current_x + column_width,
-        bridge_right,
-        _position_external_sources_near_group_targets(workflow, nodes_to_position, settings),
-        _position_control_nodes_near_targets(workflow, nodes_to_position, settings),
+    external_right = _position_external_sources_near_group_targets(workflow, non_bridge_nodes, settings)
+    control_right = _position_control_nodes_near_targets(workflow, non_bridge_nodes, settings)
+    bridge_right = _refinalize_bridges_against_regular_nodes(
+        workflow, unpinned_nodes, non_bridge_nodes, bridge_node_ids, settings, bridge_right
     )
+    return max(current_x + column_width, bridge_right, external_right, control_right)
+
+
+def _refinalize_bridges_against_regular_nodes(
+    workflow: Workflow,
+    unpinned_nodes: list[Node],
+    non_bridge_nodes: list[Node],
+    bridge_node_ids: set[int],
+    settings: LayoutSettings,
+    bridge_right: float,
+) -> float:
+    """Re-place bridge nodes once the regular ungrouped nodes have final positions.
+
+    Bridges are placed first (their gap geometry does not depend on the regular
+    columns), but oversized terminal/column nodes positioned afterwards can land
+    on top of a small bridge. Re-running bridge placement with those regular node
+    rectangles as obstacles lets the cable-length candidate search move the
+    bridge to a clear slot instead.
+    """
+    if not bridge_node_ids:
+        return bridge_right
+    obstacle_rects = [_node_rect(node) for node in non_bridge_nodes]
+    refined_right, _ = _position_group_bridge_nodes(
+        workflow, unpinned_nodes, settings, extra_fixed_rects=obstacle_rects
+    )
+    return max(bridge_right, refined_right)
 
 
 def _position_group_bridge_nodes(
     workflow: Workflow,
     nodes: list[Node],
     settings: LayoutSettings,
+    extra_fixed_rects: list[tuple[float, float, float, float]] | None = None,
 ) -> tuple[float, set[int]]:
-    """Place ungrouped bridge nodes in the gaps between their connected groups."""
+    """Place ungrouped bridge nodes in the gaps between their connected groups.
+
+    ``extra_fixed_rects`` lets callers add already-placed regular ungrouped
+    nodes as obstacles so a small bridge node is not left buried under an
+    oversized terminal/column node that is positioned after the bridges.
+    """
     group_by_node_id = _group_by_node_id(workflow)
     if not group_by_node_id:
         return 0.0, set()
@@ -1545,7 +1576,7 @@ def _position_group_bridge_nodes(
         slot = _bridge_slot_index(source_layers[node.id], target_layers[node.id])
         slot_to_nodes.setdefault(slot, []).append(node)
 
-    fixed_rects = _bridge_fixed_rects(workflow, bridge_node_ids)
+    fixed_rects = _bridge_fixed_rects(workflow, bridge_node_ids, extra_fixed_rects)
     placed_rects: list[tuple[float, float, float, float]] = []
     current_right = 0.0
     for slot in sorted(slot_to_nodes):
@@ -1564,28 +1595,41 @@ def _position_group_bridge_nodes(
         for node in slot_nodes:
             node_w = _node_visual_width(node)
             node_h = _node_visual_height(node)
-            x = _bridge_node_x(
-                workflow,
-                node,
-                group_by_node_id,
-                settings,
-                fallback_x,
-                node_w,
-            )
             desired_y = _bridge_node_desired_y(workflow, node, group_by_node_id)
-            y = _resolve_bridge_y(
-                x,
-                max(current_y, desired_y),
-                node_w,
-                node_h,
-                fixed_rects,
-                placed_rects,
-                settings,
-            )
-            node.x = x
-            node.y = y
+            floor_y = max(current_y, desired_y)
+            # Score every x candidate (fixed-incident gap and layer slot) by the
+            # resulting cable length instead of always trusting the fixed gap.
+            # The fixed-incident gap can land on top of an unrelated tall group
+            # that sits in that gap; the down-only Y resolver then shoves the
+            # node far below it (long cables). Picking the shortest-cable
+            # candidate lets the clear slot win in that case while the fixed gap
+            # still wins whenever it is actually free.
+            best_x = fallback_x
+            best_y = floor_y
+            best_cost = math.inf
+            for candidate_x in _bridge_node_x_candidates(
+                workflow, node, group_by_node_id, settings, fallback_x, node_w
+            ):
+                candidate_y = _resolve_bridge_y(
+                    candidate_x,
+                    floor_y,
+                    node_w,
+                    node_h,
+                    fixed_rects,
+                    placed_rects,
+                    settings,
+                )
+                cost = _bridge_placement_cost(
+                    workflow, node, candidate_x, candidate_y, node_w, node_h
+                )
+                if cost < best_cost:
+                    best_cost = cost
+                    best_x = candidate_x
+                    best_y = candidate_y
+            node.x = best_x
+            node.y = best_y
             placed_rects.append(_node_rect(node))
-            current_y = y + node_h + settings.node_v_gap
+            current_y = best_y + node_h + settings.node_v_gap
             current_right = max(current_right, node.x + node_w)
 
     return current_right, bridge_node_ids
@@ -1718,14 +1762,22 @@ def _bridge_slot_x(
     return 50.0
 
 
-def _bridge_node_x(
+def _bridge_node_x_candidates(
     workflow: Workflow,
     node: Node,
     group_by_node_id: dict[int, Group],
     settings: LayoutSettings,
     fallback_x: float,
     width: float,
-) -> float:
+) -> list[float]:
+    """Distinct x candidates for a bridge node, fixed-incident gap first.
+
+    The fixed-incident gap is listed first so it wins ties and stays the
+    default beside pinned/fixed group surfaces, but the layer-slot fallback is
+    always offered too so cable-length scoring can reject a fixed gap that
+    overlaps an unrelated tall group sitting in that gap.
+    """
+    candidates: list[float] = []
     fixed_gap_x = _bridge_fixed_incident_gap_x(
         workflow,
         node,
@@ -1733,7 +1785,45 @@ def _bridge_node_x(
         settings,
         width,
     )
-    return fixed_gap_x if fixed_gap_x is not None else fallback_x
+    if fixed_gap_x is not None:
+        candidates.append(fixed_gap_x)
+    candidates.append(fallback_x)
+
+    distinct: list[float] = []
+    seen: set[float] = set()
+    for value in candidates:
+        key = round(value, 3)
+        if key in seen:
+            continue
+        seen.add(key)
+        distinct.append(value)
+    return distinct
+
+
+def _bridge_placement_cost(
+    workflow: Workflow,
+    node: Node,
+    x: float,
+    y: float,
+    width: float,
+    height: float,
+) -> float:
+    """Total Manhattan cable length from a candidate bridge position to its endpoints."""
+    center_x = x + width / 2.0
+    center_y = y + height / 2.0
+    total = 0.0
+    for link_id in (*node.input_links, *node.output_links):
+        link = workflow.links.get(link_id)
+        if link is None:
+            continue
+        other_id = link.source if link.target == node.id else link.target
+        other = workflow.nodes.get(other_id)
+        if other is None:
+            continue
+        other_x = other.x + _node_visual_width(other) / 2.0
+        other_y = other.y + _node_visual_height(other) / 2.0
+        total += abs(center_x - other_x) + abs(center_y - other_y)
+    return total
 
 
 def _bridge_has_fixed_incident_group_pair(
@@ -1875,6 +1965,7 @@ def _bridge_collision_bottom(
 def _bridge_fixed_rects(
     workflow: Workflow,
     bridge_node_ids: set[int],
+    extra_fixed_rects: list[tuple[float, float, float, float]] | None = None,
 ) -> list[tuple[float, float, float, float]]:
     rects = [
         _group_rect(group)
@@ -1887,6 +1978,8 @@ def _bridge_fixed_rects(
         if node.id not in bridge_node_ids
         and (_is_decorative_node(node) or _is_pinned_node(workflow, node))
     )
+    if extra_fixed_rects:
+        rects.extend(extra_fixed_rects)
     return rects
 
 
