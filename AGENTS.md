@@ -21,8 +21,6 @@ Check these documentation surfaces on every non-trivial change:
 
 - [README.md](README.md) - user-facing overview, install, commands, behavior, limitations, and project structure.
 - [frontend/README.md](frontend/README.md) - frontend setup, data model, scripts, and UI behavior.
-- [CLAUDE.md](CLAUDE.md) - maintainer notes, local ComfyUI facts, workflow-format assumptions, and communication rules.
-- [memory.md](memory.md) - local planning notes when the maintainer explicitly wants them kept as part of the project record.
 - [pyproject.toml](pyproject.toml) and [frontend/package.json](frontend/package.json) - metadata and command surfaces that documentation must match.
 - Any future files under `docs/`.
 

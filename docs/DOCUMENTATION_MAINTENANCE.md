@@ -22,8 +22,7 @@ The agent must treat documentation as part of the product. If code behavior chan
 | `README.md` | Primary user documentation | CLI, API, GUI, optimizer, layout behavior, preservation guarantees, install steps, limitations, validation, project structure, or license changes |
 | `CHANGELOG.md` | Release history | User-visible behavior, validation, dependency, compatibility, release, or packaging changes |
 | `frontend/README.md` | Frontend-specific documentation | Vue scripts, dev server flow, workflow JSON handling, canvas behavior, frontend dependencies, typecheck/build commands, or UI behavior changes |
-| `CLAUDE.md` | Maintainer and local ComfyUI notes | Workflow-format assumptions, local ComfyUI scan facts, installed-node assumptions, communication rules, or recurring maintainer workflows change |
-| `memory.md` | Local planning notes | The maintainer explicitly asks to keep planning/project record notes in sync |
+| `AGENTS.md` | Repository-local agent behavior | Communication rules, documentation/git agent policy, or local artifact policy change |
 | `docs/*.md` | Focused project documentation | Any topic-specific behavior becomes too detailed for `README.md` |
 | `tools/*.py` | Maintainer automation | Validation, packaging, release, or local workflow command behavior changes |
 | `pyproject.toml` | Python metadata and command surface | Package name, version, dependencies, scripts, classifiers, or URLs change |
