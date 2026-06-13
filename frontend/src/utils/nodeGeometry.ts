@@ -1,11 +1,16 @@
 import type { ComfyNode } from '../stores/useWorkflowStore'
-import { getNodeDisplayRows, getInputPortCenterY } from './nodeWidgets'
+import { getNodeDisplayRows, getInputPortCenterY, ROW_GAP, type DisplayRow } from './nodeWidgets'
 
 export const TITLE_HEIGHT = 26
 export const ROW_HEIGHT = 20
 export const SLOT_ROW_OFFSET = 8
 export const NODE_BOTTOM_PADDING = 12
 export const REROUTE_SLOT_OFFSET = 6
+// Multiline text widgets render as tall as their content, but that height must
+// not become the node's minimum: ComfyUI lets long prompts (e.g. CLIPTextEncode)
+// be shrunk so the text scrolls/clips. Cap the text contribution to the minimum
+// so a long prompt no longer blocks resizing the node smaller.
+const TEXT_WIDGET_MIN_HEIGHT = 60
 const NODE_RESIZE_MIN_WIDTH = 120
 const REROUTE_NODE_RESIZE_MIN_WIDTH = 40
 const DECORATIVE_NODE_RESIZE_MIN_WIDTH = 120
@@ -71,9 +76,26 @@ export function getNodeStoredHeightForDisplayHeight(node: ComfyNode, displayHeig
 function getNodeContentMinimumHeight(node: ComfyNode): number {
   const outputs = node.outputs ?? []
   const rows = getNodeDisplayRows(node)
-  const rowsHeight = rows.reduce((bottom, row) => Math.max(bottom, row.top + row.height), SLOT_ROW_OFFSET)
+  // Restack the rows using capped text-widget heights so a long multiline
+  // prompt does not inflate the node's minimum height; the row tops are
+  // recomputed here instead of using row.top because a capped text row also
+  // shifts every row below it up.
+  let top = SLOT_ROW_OFFSET
+  let rowsHeight = SLOT_ROW_OFFSET
+  for (const row of rows) {
+    const height = minimumRowHeight(row)
+    rowsHeight = Math.max(rowsHeight, top + height)
+    top += height + ROW_GAP
+  }
   const outputHeight = SLOT_ROW_OFFSET + outputs.length * ROW_HEIGHT
   return TITLE_HEIGHT + Math.max(rowsHeight, outputHeight) + NODE_BOTTOM_PADDING
+}
+
+function minimumRowHeight(row: DisplayRow): number {
+  if (row.kind === 'widget' && row.widgetKind === 'text') {
+    return Math.min(row.height, TEXT_WIDGET_MIN_HEIGHT)
+  }
+  return row.height
 }
 
 function getRerouteMinimumHeight(): number {

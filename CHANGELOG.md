@@ -8,6 +8,10 @@ All notable changes to ComfyUI FlowForge are documented here.
 
 - Frontend node resize handles for editing saved ComfyUI node sizes directly on the workflow canvas.
 
+### Fixed
+
+- Stop multiline text widgets (e.g. `CLIPTextEncode` prompts) from inflating a node's minimum resize height, so long-prompt nodes can be shrunk again on the canvas; the text scrolls/clips when the node is smaller than its content, matching ComfyUI.
+
 ### Changed
 
 - Score group-bridge x candidates (fixed-incident gap and layer slot) by resulting cable length so a bridge out of a fixed group is no longer parked on top of an unrelated tall group sitting in that gap and then shoved far below it. The fixed-incident gap still wins whenever it is actually free.
