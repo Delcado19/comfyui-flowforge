@@ -3,6 +3,7 @@ Tests for the layout algorithm.
 """
 
 from copy import deepcopy
+import math
 
 from flowforge.model import Node, Link, Group, Workflow
 from flowforge.optimizer import optimize
@@ -33,6 +34,7 @@ from flowforge.layout import (
     _shrink_nodes_to_minimum_size,
     _update_bounding_boxes,
     _resolve_group_geometry_overlaps,
+    _wrap_layer_columns,
 )
 from flowforge.logger import setup_logger
 
@@ -465,6 +467,49 @@ def test_layer_crossing_minimization_uses_adjacent_layer_order():
     logger.info("Internal layer crossing minimization test passed")
 
 
+def test_wrap_layer_columns_wraps_and_alternates_direction():
+    logger.info("Testing shared layer-column wrap helper")
+    layer_sizes = {
+        0: (300.0, 100.0),
+        1: (300.0, 100.0),
+        2: (300.0, 100.0),
+        3: (300.0, 100.0),
+    }
+    # Row cap fits exactly 2 layers per row: 300 + 50 (gap) + 300 = 650 <= 700,
+    # a third layer would push it to 1000 > 700.
+    positions = _wrap_layer_columns(
+        layer_sizes, row_width_cap=700.0, base_x=0.0, base_y=0.0, h_gap=50.0, v_gap=20.0
+    )
+
+    # Row 0 (even index): left-to-right in natural layer order.
+    assert positions[0] == (0.0, 0.0)
+    assert positions[1] == (350.0, 0.0)
+    # Row 1 (odd index): right-to-left, so layer 2 (continues the dataflow
+    # from row 0's last layer) lands at the row's right edge, adjacent to
+    # where layer 1 ended, instead of a long diagonal cable back to the left.
+    assert positions[2] == (350.0, 120.0)
+    assert positions[3] == (0.0, 120.0)
+    logger.info("Layer-column wrap helper test passed")
+
+
+def test_wrap_layer_columns_single_row_when_cap_not_exceeded():
+    logger.info("Testing layer-column wrap helper stays single-row under cap")
+    layer_sizes = {0: (300.0, 100.0), 1: (300.0, 100.0)}
+
+    positions = _wrap_layer_columns(
+        layer_sizes, row_width_cap=math.inf, base_x=10.0, base_y=10.0, h_gap=50.0, v_gap=20.0
+    )
+
+    assert positions == {0: (10.0, 10.0), 1: (360.0, 10.0)}
+    logger.info("Layer-column wrap helper single-row test passed")
+
+
+def test_wrap_layer_columns_handles_empty_input():
+    logger.info("Testing layer-column wrap helper with no layers")
+    assert _wrap_layer_columns({}, 500.0, 0.0, 0.0, 50.0, 20.0) == {}
+    logger.info("Layer-column wrap helper empty-input test passed")
+
+
 def test_global_positioning():
     logger.info("Testing global positioning")
     wf = Workflow()
@@ -592,6 +637,64 @@ def test_connected_groups_use_flow_columns():
     assert branch_a_group.bounding[0] == branch_b_group.bounding[0]
     assert branch_b_group.bounding[1] > branch_a_group.bounding[1]
     logger.info("Connected group flow-column test passed")
+
+
+def test_connected_group_columns_wrap_downward_after_soft_width():
+    logger.info("Testing connected group flow-columns wrap downward")
+    wf = Workflow()
+    nodes = [
+        Node(id=index, type="Node", x=0, y=0, size=[260, 120])
+        for index in range(1, 7)
+    ]
+    wf.nodes = {node.id: node for node in nodes}
+    wf.links = {}
+    for index in range(1, 6):
+        link = Link(id=index, source=index, source_port=0, target=index + 1, target_port=0, type="DATA")
+        wf.links[index] = link
+        wf.nodes[index].output_links.append(index)
+        wf.nodes[index + 1].input_links.append(index)
+    wf.groups = [
+        Group(id=index, name=f"group-{index}", bounding=[0, 0, 420, 220], nodes=[wf.nodes[index]])
+        for index in range(1, 7)
+    ]
+
+    settings = LayoutSettings(50, 50, wrap_columns=True)
+    _position_groups_globally(wf, settings)
+
+    row_tops = {round(group.bounding[1], 3) for group in wf.groups}
+    layout_left = min(group.bounding[0] for group in wf.groups)
+    layout_right = max(group.bounding[0] + group.bounding[2] for group in wf.groups)
+    total_group_width = sum(group.bounding[2] for group in wf.groups)
+
+    assert len(row_tops) > 1, "expected the connected group chain to wrap into more than one row"
+    assert layout_right - layout_left < total_group_width, "expected wrapping to bound width below the unwrapped sum"
+    logger.info("Connected group flow-column wrap test passed")
+
+
+def test_connected_group_columns_stay_single_row_without_wrap_flag():
+    logger.info("Testing connected group flow-columns stay unwrapped by default")
+    wf = Workflow()
+    nodes = [
+        Node(id=index, type="Node", x=0, y=0, size=[260, 120])
+        for index in range(1, 7)
+    ]
+    wf.nodes = {node.id: node for node in nodes}
+    wf.links = {}
+    for index in range(1, 6):
+        link = Link(id=index, source=index, source_port=0, target=index + 1, target_port=0, type="DATA")
+        wf.links[index] = link
+        wf.nodes[index].output_links.append(index)
+        wf.nodes[index + 1].input_links.append(index)
+    wf.groups = [
+        Group(id=index, name=f"group-{index}", bounding=[0, 0, 420, 220], nodes=[wf.nodes[index]])
+        for index in range(1, 7)
+    ]
+
+    _position_groups_globally(wf, LayoutSettings(50, 50))
+
+    row_tops = {round(group.bounding[1], 3) for group in wf.groups}
+    assert len(row_tops) == 1, "default settings (wrap_columns=False) must stay single-row"
+    logger.info("Connected group flow-column default-unwrapped test passed")
 
 
 def test_ungrouped_bridge_nodes_influence_group_flow_columns():

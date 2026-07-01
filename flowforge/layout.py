@@ -59,6 +59,7 @@ GROUP_HEADER_HEIGHT = 36.0
 GROUP_INTERNAL_WRAP_MIN_LAYERS = 5
 GROUP_INTERNAL_WRAP_TARGET_WIDTH = 900.0
 GROUP_INTERNAL_WRAP_ASPECT_RATIO = 2.8
+TOPLEVEL_WRAP_TARGET_ASPECT_RATIO = 2.8
 LAYOUT_CANDIDATE_PROFILES = (
     (1.0, 1.0),
     (0.8, 1.0),
@@ -74,6 +75,7 @@ class LayoutSettings:
 
     node_x_distance: float = DEFAULT_NODE_X_DISTANCE
     node_y_distance: float = DEFAULT_NODE_Y_DISTANCE
+    wrap_columns: bool = False
 
     def __post_init__(self) -> None:
         self.node_x_distance = _clamp_layout_distance(self.node_x_distance)
@@ -1173,23 +1175,31 @@ def _position_groups_by_flow_layers(
         if group.id in group_sizes:
             layer_to_groups.setdefault(layers.get(group.id, 0), []).append(group)
 
-    layer_x_positions: dict[int, float] = {}
-    current_x = start_x
     flow_gap = _flow_group_h_gap(workflow, settings)
-    for layer in sorted(layer_to_groups):
-        layer_x_positions[layer] = current_x
-        layer_width = max(group_sizes[group.id][0] for group in layer_to_groups[layer])
-        current_x += layer_width + flow_gap
+    layer_sizes: dict[int, tuple[float, float]] = {}
+    for layer, groups_in_layer in layer_to_groups.items():
+        layer_width = max(group_sizes[group.id][0] for group in groups_in_layer)
+        layer_height = sum(group_sizes[group.id][1] for group in groups_in_layer)
+        layer_height += settings.group_v_gap * max(0, len(groups_in_layer) - 1)
+        layer_sizes[layer] = (layer_width, layer_height)
+
+    row_width_cap = (
+        _toplevel_wrap_row_width_cap(layer_sizes) if settings.wrap_columns else math.inf
+    )
+    layer_positions = _wrap_layer_columns(
+        layer_sizes, row_width_cap, start_x, 50.0, flow_gap, settings.group_v_gap
+    )
 
     for layer in sorted(layer_to_groups):
-        current_y = 50.0
+        row_x, row_y = layer_positions[layer]
+        current_y = row_y
         for group in sorted(
             layer_to_groups[layer],
             key=lambda item: (_group_flow_order_key(workflow, item, layers), item.bounding[1], item.bounding[0], item.id),
         ):
             g_width, g_height = group_sizes[group.id]
             min_x, min_y, _max_x, _max_y = _group_content_bounds(group)
-            new_x = layer_x_positions[layer]
+            new_x = row_x
             new_y = current_y
             offset_x = (new_x + settings.group_padding) - min_x
             offset_y = (new_y + _group_top_padding(settings)) - min_y
@@ -3241,6 +3251,69 @@ def _estimate_group_row_width(groups: list[Group], settings: LayoutSettings) -> 
         else max_width
     )
     return max(max_width, minimum_pair_width, min(width_from_area, width_cap))
+
+
+def _toplevel_wrap_row_width_cap(layer_sizes: dict[int, tuple[float, float]]) -> float:
+    """Soft width cap so unbounded dataflow columns wrap downward, mirroring
+    the existing _estimate_group_row_width heuristic for disconnected groups."""
+    if not layer_sizes:
+        return 0.0
+
+    widths = [width for width, _height in layer_sizes.values()]
+    total_area = sum(width * height for width, height in layer_sizes.values())
+    max_width = max(widths)
+    average_width = sum(widths) / len(widths)
+    width_from_area = math.sqrt(total_area * TOPLEVEL_WRAP_TARGET_ASPECT_RATIO)
+    width_cap = max_width + average_width * LAYOUT_GROUP_ROW_MAX_AVERAGE_WIDTHS
+    return max(max_width, min(width_from_area, width_cap))
+
+
+def _wrap_layer_columns(
+    layer_sizes: dict[int, tuple[float, float]],
+    row_width_cap: float,
+    base_x: float,
+    base_y: float,
+    h_gap: float,
+    v_gap: float,
+) -> dict[int, tuple[float, float]]:
+    """Pack dataflow layer columns into boustrophedon rows once a row would
+    exceed row_width_cap.
+
+    Layers here have real data links to their neighbouring layer (unlike the
+    group-internal or disconnected-group wraps, which reset to the left
+    margin on every new row). Resetting here would draw a long diagonal
+    cable from the last item of one row back to the first item of the next,
+    so alternate rows fill right-to-left instead, keeping the layer that
+    ends one row physically adjacent to the layer that starts the next.
+    """
+    positions: dict[int, tuple[float, float]] = {}
+    if not layer_sizes:
+        return positions
+
+    rows: list[list[int]] = [[]]
+    row_width = 0.0
+    for layer in sorted(layer_sizes):
+        width, _height = layer_sizes[layer]
+        addition = width if not rows[-1] else width + h_gap
+        if rows[-1] and row_width + addition > row_width_cap:
+            rows.append([])
+            row_width = 0.0
+            addition = width
+        rows[-1].append(layer)
+        row_width += addition
+
+    current_y = base_y
+    for row_index, row_layers in enumerate(rows):
+        ordered_row = list(reversed(row_layers)) if row_index % 2 == 1 else row_layers
+        current_x = base_x
+        for layer in ordered_row:
+            width, _height = layer_sizes[layer]
+            positions[layer] = (current_x, current_y)
+            current_x += width + h_gap
+        row_height = max(layer_sizes[layer][1] for layer in row_layers)
+        current_y += row_height + v_gap
+
+    return positions
 
 
 def _clamp_layout_distance(value: float) -> float:
