@@ -1847,7 +1847,8 @@ def test_best_layout_tries_multiple_candidates_and_picks_best(monkeypatch):
         candidate_count=5,
     )
 
-    assert attempts[:5] == [
+    assert attempts[:6] == [
+        (100.0, 100.0, False),  # forced boustrophedon-wrap candidate, tried first
         (85.0, 115.0, False),
         (80.0, 100.0, False),
         (70.0, 90.0, False),

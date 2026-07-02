@@ -352,6 +352,20 @@ def _build_layout_candidates(
     variants: list[LayoutSettings] = []
     profiles = _ordered_layout_profiles(workflow)
 
+    # Always try one boustrophedon-column-wrap variant first. It is
+    # guaranteed to be evaluated (LAYOUT_CANDIDATE_MIN_EVALUATIONS keeps the
+    # first 3 candidates regardless of the patience-based early stop), so a
+    # workflow that does not need wrapping just loses to a later non-wrap
+    # candidate in _score_layout_candidate at the cost of one extra pass.
+    variants.append(
+        LayoutSettings(
+            settings.node_x_distance,
+            settings.node_y_distance,
+            wrap_columns=True,
+        )
+    )
+    target_count = count + 1
+
     for x_scale, y_scale in profiles[:count]:
         variants.append(
             LayoutSettings(
@@ -360,11 +374,11 @@ def _build_layout_candidates(
             )
         )
 
-    if len(variants) >= count:
-        return variants[:count]
+    if len(variants) >= target_count:
+        return variants[:target_count]
 
     profile_index = 0
-    while len(variants) < count:
+    while len(variants) < target_count:
         x_scale, y_scale = profiles[profile_index % len(profiles)]
         x_delta = 1.0 + (x_scale - 1.0) * 0.5
         y_delta = 1.0 + (y_scale - 1.0) * 0.5
