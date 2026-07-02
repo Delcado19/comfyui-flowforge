@@ -4,6 +4,10 @@ All notable changes to ComfyUI FlowForge are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- Wrap connected-group and linked-ungrouped-node dataflow columns into boustrophedon (snake) rows once they exceed a soft width cap, instead of growing width unbounded while leaving vertical space unused. The layout candidate search tries this alongside the existing spacing variants and keeps whichever scores better.
+
 ## [0.3.0] - 2026-06-13
 
 ### Added
