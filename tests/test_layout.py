@@ -1290,6 +1290,56 @@ def test_linked_ungrouped_nodes_use_per_layer_widths():
     logger.info("Linked ungrouped per-layer width test passed")
 
 
+def test_linked_ungrouped_nodes_wrap_downward_after_soft_width():
+    logger.info("Testing linked ungrouped node columns wrap downward")
+    wf = Workflow()
+    nodes = [
+        Node(id=index, type=f"Node{index}", x=0, y=0, size=[300, 100])
+        for index in range(1, 7)
+    ]
+    wf.nodes = {node.id: node for node in nodes}
+    wf.links = {}
+    for index in range(1, 6):
+        link = Link(id=index, source=index, source_port=0, target=index + 1, target_port=0, type="DATA")
+        wf.links[index] = link
+        wf.nodes[index].output_links.append(index)
+        wf.nodes[index + 1].input_links.append(index)
+
+    settings = LayoutSettings(50, 50, wrap_columns=True)
+    _position_linked_ungrouped_nodes(wf, nodes, settings, start_x=100)
+
+    row_tops = {round(node.y, 3) for node in nodes}
+    layout_left = min(node.x for node in nodes)
+    layout_right = max(node.x + node.size[0] for node in nodes)
+    total_node_width = sum(node.size[0] for node in nodes)
+
+    assert len(row_tops) > 1, "expected the linked ungrouped node chain to wrap into more than one row"
+    assert layout_right - layout_left < total_node_width, "expected wrapping to bound width below the unwrapped sum"
+    logger.info("Linked ungrouped node column wrap test passed")
+
+
+def test_linked_ungrouped_nodes_stay_single_row_without_wrap_flag():
+    logger.info("Testing linked ungrouped node columns stay unwrapped by default")
+    wf = Workflow()
+    nodes = [
+        Node(id=index, type=f"Node{index}", x=0, y=0, size=[300, 100])
+        for index in range(1, 7)
+    ]
+    wf.nodes = {node.id: node for node in nodes}
+    wf.links = {}
+    for index in range(1, 6):
+        link = Link(id=index, source=index, source_port=0, target=index + 1, target_port=0, type="DATA")
+        wf.links[index] = link
+        wf.nodes[index].output_links.append(index)
+        wf.nodes[index + 1].input_links.append(index)
+
+    _position_linked_ungrouped_nodes(wf, nodes, LayoutSettings(50, 50), start_x=100)
+
+    row_tops = {round(node.y, 3) for node in nodes}
+    assert len(row_tops) == 1, "default settings (wrap_columns=False) must stay single-row"
+    logger.info("Linked ungrouped node column default-unwrapped test passed")
+
+
 def test_external_ungrouped_source_moves_next_to_target_group():
     logger.info("Testing external source nodes anchor near target groups")
     wf = Workflow()

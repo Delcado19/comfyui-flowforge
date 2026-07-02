@@ -2031,12 +2031,11 @@ def _position_linked_ungrouped_nodes(
     for node in nodes:
         layer_to_nodes.setdefault(layers[node.id], []).append(node)
 
-    layer_x_positions = _node_layer_x_positions(layer_to_nodes, start_x, settings)
+    layer_positions = _node_layer_x_positions(layer_to_nodes, start_x, settings)
     current_right = start_x
     for layer in sorted(layer_to_nodes):
         layer_nodes = sorted(layer_to_nodes[layer], key=lambda node: (_ungrouped_barycenter(workflow, node, layers), node.y, node.x, node.id))
-        x = layer_x_positions[layer]
-        y = 50.0
+        x, y = layer_positions[layer]
         column_width = 0.0
         for node in layer_nodes:
             node.x = x
@@ -2052,18 +2051,22 @@ def _node_layer_x_positions(
     layer_to_nodes: dict[int, list[Node]],
     start_x: float,
     settings: LayoutSettings,
-) -> dict[int, float]:
-    """Use per-layer node widths for ungrouped dataflow columns."""
-    positions: dict[int, float] = {}
-    current_x = start_x
-    for layer in sorted(layer_to_nodes):
-        positions[layer] = current_x
-        layer_width = max(
-            (_node_visual_width(node) for node in layer_to_nodes[layer]),
-            default=NODE_MIN_WIDTH,
-        )
-        current_x += layer_width + settings.node_h_gap
-    return positions
+) -> dict[int, tuple[float, float]]:
+    """Use per-layer node widths for ungrouped dataflow columns, wrapping into
+    boustrophedon rows once a row grows too wide (see _wrap_layer_columns)."""
+    layer_sizes: dict[int, tuple[float, float]] = {}
+    for layer, nodes in layer_to_nodes.items():
+        width = max((_node_visual_width(node) for node in nodes), default=NODE_MIN_WIDTH)
+        height = sum(_node_visual_height(node) for node in nodes)
+        height += settings.node_v_gap * max(0, len(nodes) - 1)
+        layer_sizes[layer] = (width, height)
+
+    row_width_cap = (
+        _toplevel_wrap_row_width_cap(layer_sizes) if settings.wrap_columns else math.inf
+    )
+    return _wrap_layer_columns(
+        layer_sizes, row_width_cap, start_x, 50.0, settings.node_h_gap, settings.node_v_gap
+    )
 
 
 def _position_external_sources_near_group_targets(
