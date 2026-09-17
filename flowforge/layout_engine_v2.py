@@ -274,11 +274,11 @@ def _assign_scc_longest_path_layers(
     queue = sorted(component_layer)
     mutable_indegree = dict(indegree)
     while queue:
-        component = queue.pop(0)
-        for target in sorted(component_adj[component]):
+        component_id = queue.pop(0)
+        for target in sorted(component_adj[component_id]):
             component_layer[target] = max(
                 component_layer.get(target, 0),
-                component_layer[component] + 1,
+                component_layer[component_id] + 1,
             )
             mutable_indegree[target] -= 1
             if mutable_indegree[target] == 0:
