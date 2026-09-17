@@ -15,7 +15,8 @@ structural crossing minimization and candidate scoring.
 The design goal is that a v2 structural refinement is never mandatory. For each
 spacing/wrapping candidate, FlowForge first produces the normal legacy layout,
 then tries the v2 refinement on a copy. The refined copy is kept only when the
-v2 score improves. This keeps the legacy candidate as a local safety fallback.
+v2 selection policy improves. This keeps the legacy candidate as a local safety
+fallback.
 
 ## Current v2 Pipeline
 
@@ -27,35 +28,73 @@ For every legacy layout candidate:
 4. Assign longest-path layers on the condensed DAG.
 5. Preserve the existing debug/control sidecar layer compression rules.
 6. Expand links that skip layers with in-memory dummy vertices.
-7. Run repeated directional median sweeps over adjacent layers.
-8. Run local adjacent-node transposition passes while crossings improve.
-9. Remove dummy vertices from the physical layout and assign node coordinates.
-10. Re-run the existing bounding-box, group-overlap, pinned-clearance,
+7. Add fixed boundary anchors for physical links entering or leaving a group.
+8. Expand boundary links across intermediate layers with in-memory dummy chains.
+9. Run repeated directional median sweeps over adjacent layers.
+10. Run local adjacent-node transposition passes while crossings improve,
+    including the fixed boundary layers in the local crossing count.
+11. Reject a group refinement if its physical incident crossing count increases.
+12. Remove dummy and boundary vertices from the physical layout and assign node
+    coordinates.
+13. Re-run the existing bounding-box, group-overlap, pinned-clearance,
     control, text-preview, and virtual-hub geometry contracts.
-11. Score both the legacy and refined versions and retain the lower-cost one.
-12. Select the best candidate using the v2 score.
+14. Compare the legacy and refined versions with crossing-first candidate gates.
+15. Select the best candidate with the same crossing-first policy.
 
-Dummy vertices are layout-only objects. They never become ComfyUI nodes and are
-never serialized.
+Dummy and boundary vertices are layout-only objects. They never become ComfyUI
+nodes and are never serialized.
 
-## Port-Aware Candidate Score
+## Boundary-Aware Group Refinement
+
+The first v2 implementation optimized only links whose source and target were
+inside the same group. Corpus comparison showed that this reduced pure
+within-group crossings but could move an otherwise well-placed boundary node
+away from its external neighbours.
+
+Phase 1.5 models incoming and outgoing physical links as fixed anchors outside
+the left and right group boundaries. Their vertical order comes from the actual
+external socket geometry. Dummy chains carry that order through every internal
+layer to the connected node.
+
+After the proposed node order is placed, FlowForge counts all physical
+crossings where at least one segment touches the group. If the count increased,
+the group geometry is restored exactly to its pre-refinement state.
+
+This local guard is intentionally stricter than a weighted score: a shorter or
+more compact group cannot buy an increase in incident crossings.
+
+## Crossing-First Candidate Selection
+
+The port-aware v2 metrics are still collected for diagnostics, but candidate
+selection is now lexicographic instead of relying only on a weighted sum:
+
+1. movable overlaps;
+2. straight-line port-to-port crossings;
+3. right-to-left physical links;
+4. total Manhattan cable length;
+5. workflow area;
+6. width plus height;
+7. the original weighted v2 score as the final tie-breaker.
+
+This means a candidate with fewer right-to-left links, shorter cables, or a
+smaller canvas cannot replace another candidate if it introduces an additional
+physical crossing at the same overlap count.
+
+## Port-Aware Geometry
 
 The legacy candidate scorer measures physical links between node centres. The
-v2 scorer measures each physical link from the source output socket to the
+v2 metrics measure each physical link from the source output socket to the
 target input socket using the same port geometry helpers used by FlowForge's
 placement code.
 
-The v2 score currently combines:
+The metrics include:
 
 - straight-line port-to-port crossings;
 - right-to-left physical links;
 - overlaps between movable, non-decorative, non-virtual nodes;
 - total Manhattan cable length;
 - workflow width and height;
-- a wide-aspect penalty.
-
-Crossings, right-to-left links, and movable overlaps receive substantially
-higher weights than small compactness differences.
+- a wide-aspect penalty used by the diagnostic weighted score.
 
 ## SCC Handling
 
@@ -94,13 +133,49 @@ The structural refiner currently skips a group when:
 Existing bridge, local-control, text-preview, virtual-hub, pinned-surface, and
 group-overlap passes remain authoritative after refinement.
 
+In addition, Phase 1.5 rejects an individual group refinement when its incident
+physical crossing count increases, and final candidate selection rejects a
+crossing regression when overlap safety is unchanged.
+
+## Corpus Baseline and First v2 Comparison
+
+The current local corpus contains 81 UI workflows, 3,793 nodes, and 4,357
+physical links. The same corpus was measured on `master` and on the first v2
+implementation before Phase 1.5.
+
+| Mode | Master crossings | v2 crossings | Master RTL | v2 RTL |
+| --- | ---: | ---: | ---: | ---: |
+| Layout only | 6,390 | 6,068 | 461 | 379 |
+| Optimize + Layout | 4,320 | 4,395 | 372 | 318 |
+
+The first v2 implementation therefore improved layout-only crossings by 322 and
+RTL links by 82, while Optimize + Layout regressed by 75 crossings despite
+improving RTL by 54.
+
+Category comparison identified the main boundary problem:
+
+- `within_group x within_group`: 873 -> 607 in layout-only;
+- `group->group x group->group`: 1,485 -> 1,301 in layout-only;
+- `group->group x within_group`: 941 -> 1,153 in layout-only;
+- `group->group x within_group`: 799 -> 940 with Optimize + Layout.
+
+The SDXL workflow `Jibs_Ultimate_SD_Upscale_SDXL_V18_Workflow.json` was the
+largest single regression: v2 added about 100 crossings relative to master in
+both modes. It is the primary real-world regression case for Phase 1.5.
+
+Phase 1.5 must now be re-measured on the same 81-workflow corpus before the
+engine proceeds to top-level group ordering.
+
 ## Current Scope Boundary
 
-This first implementation deliberately refines **group internals only**.
-Ungrouped linked flows and top-level group ordering still use the mature legacy
-placement. Extending the same SCC/dummy/sweep mechanism to those surfaces is a
-follow-up only after the group-internal implementation passes the repository CI
-and the `example-workflows` corpus is re-measured.
+The engine still deliberately changes structural ordering only inside movable
+groups. Ungrouped linked flows and top-level group ordering continue to use the
+legacy placement.
+
+If Phase 1.5 removes the boundary regression without sacrificing the current
+within-group gains, the next step is a weighted group-level Sugiyama pass:
+SCC condensation, group dependency layers, weighted inter-group edges, dummy
+vertices for long group edges, repeated sweeps, and local transpose refinement.
 
 ## Validation
 
@@ -114,17 +189,20 @@ npm run typecheck
 npm run build
 ```
 
-New regression tests cover:
+Regression tests now cover:
 
 - SCC condensation and downstream longest-path assignment;
 - dummy-vertex participation for long crossing edges;
 - port-aware right-to-left detection;
 - pinned-group refinement blocking;
-- graph/link preservation through v2 candidate selection.
+- graph/link preservation through v2 candidate selection;
+- crossing-first candidate ordering;
+- boundary-anchor influence from external socket geometry;
+- rejection and exact rollback of a group refinement that increases incident
+  crossings.
 
-Before merging v2, reproduce the read-only corpus reports for both layout-only
-and Optimize + Layout and compare them with the documented baseline in
-`docs/OPTIMIZER_NOTES.md`.
+Before merging v2, reproduce the read-only corpus reports for both Layout Only
+and Optimize + Layout and compare them with `master` on the same workflow set.
 
 ## Documentation Status
 
