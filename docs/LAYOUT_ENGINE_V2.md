@@ -1,128 +1,115 @@
 # Layout Engine v2
 
 This document describes the experimental second-generation layout engine on the
-`layout-engine-v2` branch. It is intentionally separate from the release-facing
-README until corpus validation is complete.
+`layout-engine-v2` branch. It remains separate from release-facing documentation
+until corpus validation is complete.
 
 ## Goal
 
-The legacy layout pipeline has mature handling for ComfyUI-specific geometry:
+The legacy layout pipeline already contains mature ComfyUI-specific handling for
 groups, pinned surfaces, ungrouped bridge nodes, controls, text previews,
-virtual Set/Get hubs, node compaction, and collision clearance. The v2 work does
-not replace those contracts. It replaces the weakest part of the layout search:
-structural crossing minimization and candidate scoring.
+virtual Set/Get hubs, node compaction, collision clearance, and serialization.
+Layout engine v2 keeps those contracts and replaces the weakest part of the
+pipeline: structural crossing minimization and candidate selection.
 
-The design goal is that a v2 structural refinement is never mandatory. For each
-spacing/wrapping candidate, FlowForge first produces the normal legacy layout,
-then tries the v2 refinement on a copy. The refined copy is kept only when the
-v2 selection policy improves. This keeps the legacy candidate as a local safety
-fallback.
+The safety rule is simple: every new structural pass works on a copy and may be
+rejected in favour of the already valid baseline layout.
 
-## Current v2 Pipeline
+## Active Pipeline
 
-For every legacy layout candidate:
+The active runtime now has two refinement levels.
 
-1. Run the existing six-phase layout pass.
-2. Find fully movable groups whose internal graph contains links.
-3. Condense strongly connected components (SCCs) with Tarjan's algorithm.
-4. Assign longest-path layers on the condensed DAG.
-5. Preserve the existing debug/control sidecar layer compression rules.
-6. Expand links that skip layers with in-memory dummy vertices.
-7. Add fixed boundary anchors for physical links entering or leaving a group.
-8. Expand boundary links across intermediate layers with in-memory dummy chains.
-9. Run repeated directional median sweeps over adjacent layers.
-10. Run local adjacent-node transposition passes while crossings improve,
-    including the fixed boundary layers in the local crossing count.
-11. Reject a group refinement if its physical incident crossing count increases.
-12. Remove dummy and boundary vertices from the physical layout and assign node
-    coordinates.
-13. Re-run the existing bounding-box, group-overlap, pinned-clearance,
-    control, text-preview, and virtual-hub geometry contracts.
-14. Compare the legacy and refined versions with crossing-first candidate gates.
-15. Select the best candidate with the same crossing-first policy.
+### 1. Node-level v2 refinement
 
-Dummy and boundary vertices are layout-only objects. They never become ComfyUI
-nodes and are never serialized.
+For every normal layout candidate FlowForge:
 
-## Boundary-Aware Group Refinement
+1. runs the established six-phase layout pass;
+2. finds fully movable groups with internal links;
+3. condenses strongly connected components with Tarjan's algorithm;
+4. assigns longest-path layers on the SCC DAG;
+5. preserves debug/control sidecar compression rules;
+6. expands long internal edges with virtual dummy vertices;
+7. runs repeated directional median sweeps;
+8. runs local adjacent transposition while crossings improve;
+9. assigns physical node coordinates;
+10. re-runs the established group, pin, control, preview, and virtual-hub
+    geometry contracts;
+11. compares refined and baseline candidates with port-aware metrics.
 
-The first v2 implementation optimized only links whose source and target were
-inside the same group. Corpus comparison showed that this reduced pure
-within-group crossings but could move an otherwise well-placed boundary node
-away from its external neighbours.
+Dummy vertices exist only in the ordering graph and are never serialized.
 
-Phase 1.5 models incoming and outgoing physical links as fixed anchors outside
-the left and right group boundaries. Their vertical order comes from the actual
-external socket geometry. Dummy chains carry that order through every internal
-layer to the connected node.
+### 2. Weighted group-level refinement
 
-After the proposed node order is placed, FlowForge counts all physical
-crossings where at least one segment touches the group. If the count increased,
-the group geometry is restored exactly to its pre-refinement state.
+After the best node-level v2 result is selected, FlowForge treats whole movable
+groups as a second graph:
 
-This local guard is intentionally stricter than a weighted score: a shorter or
-more compact group cannot buy an increase in incident crossings.
+1. build the existing inter-group dependency graph, including dependencies that
+   pass through ungrouped bridge nodes;
+2. condense SCCs and assign group flow layers;
+3. weight direct group dependencies by physical wire multiplicity;
+4. retain bridge-only group dependencies with unit weight;
+5. expand long group dependencies through intermediate layers with virtual
+   group dummy vertices;
+6. run repeated weighted-median sweeps;
+7. run weighted local transposition, where a crossing between edges of weights
+   `a` and `b` contributes `a * b`;
+8. change only the vertical order of movable groups inside an existing flow
+   layer, preserving each group's x coordinate and internal geometry;
+9. skip a physical layer when it contains a pinned/fixed group;
+10. re-run the normal geometry finalizers;
+11. accept the group-level result only when the global port-aware quality key
+    improves.
 
-## Crossing-First Candidate Selection
-
-The port-aware v2 metrics are still collected for diagnostics, but candidate
-selection is now lexicographic instead of relying only on a weighted sum:
+The active Phase 2 quality comparison is lexicographic:
 
 1. movable overlaps;
 2. straight-line port-to-port crossings;
-3. right-to-left physical links;
+3. right-to-left links;
 4. total Manhattan cable length;
-5. workflow area;
-6. width plus height;
-7. the original weighted v2 score as the final tie-breaker.
+5. width plus height;
+6. width;
+7. height.
 
-This means a candidate with fewer right-to-left links, shorter cables, or a
-smaller canvas cannot replace another candidate if it introduces an additional
+This prevents a compact layout or shorter cables from buying an additional
 physical crossing at the same overlap count.
 
-## Port-Aware Geometry
+## Port-Aware Metrics
 
-The legacy candidate scorer measures physical links between node centres. The
-v2 metrics measure each physical link from the source output socket to the
-target input socket using the same port geometry helpers used by FlowForge's
-placement code.
-
-The metrics include:
+The v2 scorer measures physical links from the actual source output socket to
+the actual target input socket rather than from node centre to node centre.
+Metrics include:
 
 - straight-line port-to-port crossings;
 - right-to-left physical links;
 - overlaps between movable, non-decorative, non-virtual nodes;
 - total Manhattan cable length;
 - workflow width and height;
-- a wide-aspect penalty used by the diagnostic weighted score.
+- a wide-aspect diagnostic penalty.
 
 ## SCC Handling
 
 The legacy longest-path layerer falls cyclic leftovers back to layer zero. v2
-instead computes strongly connected components first. Every SCC is treated as a
-single vertex while assigning global layers. Nodes inside an SCC share the same
-layer because a cycle cannot be represented as strictly left-to-right without
-breaking at least one edge.
+first computes strongly connected components. Every SCC shares one layer while
+the condensed component graph receives normal longest-path layers.
 
-This prevents an unrelated cycle from collapsing the rest of a connected
-subgraph back into the source layer.
+The same SCC-aware layer assignment is reused at group level so a group cycle
+does not collapse unrelated downstream group structure.
 
 ## Long-Edge Dummy Vertices
 
-A link from layer 0 to layer 4 participates in crossing minimization at every
-intermediate boundary:
+A dependency from layer 0 to layer 4 participates in every intermediate crossing
+boundary:
 
 ```text
 source -> dummy@1 -> dummy@2 -> dummy@3 -> target
 ```
 
-The dummy chain exists only while calculating vertical order. This makes a long
-wire influence layers 1, 2, and 3 instead of appearing only as a distant
-source/target relationship.
+The same mechanism is used for node-level and group-level ordering. Dummy
+vertices never become ComfyUI workflow objects.
 
 ## Safety Constraints
 
-The structural refiner currently skips a group when:
+Node-level structural refinement skips a group when:
 
 - the group is pinned;
 - any member node is pinned;
@@ -130,52 +117,89 @@ The structural refiner currently skips a group when:
 - the group has no internal physical links;
 - the group contains decorative or virtual Set/Get hub nodes.
 
-Existing bridge, local-control, text-preview, virtual-hub, pinned-surface, and
-group-overlap passes remain authoritative after refinement.
+Group-level refinement:
 
-In addition, Phase 1.5 rejects an individual group refinement when its incident
-physical crossing count increases, and final candidate selection rejects a
-crossing regression when overlap safety is unchanged.
+- preserves group x coordinates and internal node geometry;
+- skips physical layers that contain a fixed/pinned group;
+- does not change graph topology;
+- is accepted only when its global port-aware quality key improves.
 
-## Corpus Baseline and First v2 Comparison
+The existing bridge, local-control, text-preview, virtual-hub, pinned-surface,
+and group-overlap passes remain authoritative after every refinement.
+
+## Corpus Results
 
 The current local corpus contains 81 UI workflows, 3,793 nodes, and 4,357
-physical links. The same corpus was measured on `master` and on the first v2
-implementation before Phase 1.5.
+physical links.
+
+### Master vs first v2 implementation
 
 | Mode | Master crossings | v2 crossings | Master RTL | v2 RTL |
 | --- | ---: | ---: | ---: | ---: |
 | Layout only | 6,390 | 6,068 | 461 | 379 |
 | Optimize + Layout | 4,320 | 4,395 | 372 | 318 |
 
-The first v2 implementation therefore improved layout-only crossings by 322 and
-RTL links by 82, while Optimize + Layout regressed by 75 crossings despite
-improving RTL by 54.
+The first v2 implementation therefore improved Layout Only by 322 crossings and
+82 RTL links, but Optimize + Layout regressed by 75 crossings while still
+reducing RTL by 54.
 
-Category comparison identified the main boundary problem:
+The strongest node-level gain was:
 
-- `within_group x within_group`: 873 -> 607 in layout-only;
-- `group->group x group->group`: 1,485 -> 1,301 in layout-only;
-- `group->group x within_group`: 941 -> 1,153 in layout-only;
-- `group->group x within_group`: 799 -> 940 with Optimize + Layout.
+- `within_group x within_group`: 873 -> 607 in Layout Only.
 
-The SDXL workflow `Jibs_Ultimate_SD_Upscale_SDXL_V18_Workflow.json` was the
-largest single regression: v2 added about 100 crossings relative to master in
-both modes. It is the primary real-world regression case for Phase 1.5.
+The main remaining categories were inter-group related, especially:
 
-Phase 1.5 must now be re-measured on the same 81-workflow corpus before the
-engine proceeds to top-level group ordering.
+- `group->group x group->group`;
+- `group->group x within_group`;
+- `group->group x ungrouped->group`.
+
+### Rejected Phase 1.5 boundary experiment
+
+A boundary-anchor experiment was tested and removed from the active runtime after
+corpus measurement.
+
+Its measured result was:
+
+| Mode | Phase 1.5 crossings | Phase 1.5 RTL |
+| --- | ---: | ---: |
+| Layout only | 5,921 | 428 |
+| Optimize + Layout | 4,443 | 359 |
+
+Although it improved Layout Only crossings relative to the first v2 pass, it
+made Optimize + Layout worse than both master and the first v2 result. It also
+did not solve the main real-world regression:
+`Jibs_Ultimate_SD_Upscale_SDXL_V18_Workflow.json` remained at 1,167 crossings in
+Layout Only and 1,055 crossings with Optimize + Layout.
+
+The experiment and its tests were therefore removed instead of accumulating
+dead layout logic in the branch. Git history preserves the implementation and
+benchmark evidence.
+
+### Current Phase 2 gate
+
+The weighted group-level pass must now be measured on the same 81-workflow corpus
+using both commands:
+
+```powershell
+uv run python tools/report_layout_quality.py example-workflows --top 20
+uv run python tools/report_layout_quality.py example-workflows --optimize --top 20
+```
+
+The primary comparisons are against:
+
+- master: 6,390 / 461 and 4,320 / 372;
+- first v2: 6,068 / 379 and 4,395 / 318;
+- the `Jibs_Ultimate_SD_Upscale_SDXL_V18_Workflow.json` regression.
 
 ## Current Scope Boundary
 
-The engine still deliberately changes structural ordering only inside movable
-groups. Ungrouped linked flows and top-level group ordering continue to use the
-legacy placement.
+The active engine now refines movable group internals and top-level group order.
+Ungrouped linked dataflow still uses the legacy placement, including its bridge
+and external-source special cases.
 
-If Phase 1.5 removes the boundary regression without sacrificing the current
-within-group gains, the next step is a weighted group-level Sugiyama pass:
-SCC condensation, group dependency layers, weighted inter-group edges, dummy
-vertices for long group edges, repeated sweeps, and local transpose refinement.
+If the weighted group-level pass improves the corpus without introducing new
+large regressions, the next structural target is ungrouped linked flow ordering
+using the same SCC/dummy/sweep core.
 
 ## Validation
 
@@ -189,24 +213,22 @@ npm run typecheck
 npm run build
 ```
 
-Regression tests now cover:
+Regression coverage includes:
 
 - SCC condensation and downstream longest-path assignment;
-- dummy-vertex participation for long crossing edges;
-- port-aware right-to-left detection;
-- pinned-group refinement blocking;
-- graph/link preservation through v2 candidate selection;
-- crossing-first candidate ordering;
-- boundary-anchor influence from external socket geometry;
-- rejection and exact rollback of a group refinement that increases incident
-  crossings.
-
-Before merging v2, reproduce the read-only corpus reports for both Layout Only
-and Optimize + Layout and compare them with `master` on the same workflow set.
+- dummy-vertex participation for long node edges;
+- port-aware RTL detection;
+- pinned-group node-level refinement blocking;
+- graph/link preservation through v2 selection;
+- direct group-edge wire multiplicity;
+- weighted group medians;
+- weighted group crossing elimination;
+- fixed-group protection at group level;
+- crossing-first group-level candidate selection.
 
 ## Documentation Status
 
-The release-facing README is intentionally unchanged while this branch remains
-experimental. If corpus validation confirms v2 as the new default, README.md,
-CHANGELOG.md, and any affected frontend documentation must be updated before the
-PR is marked ready for review.
+README.md and CHANGELOG.md remain intentionally unchanged while this branch is
+experimental. If corpus validation confirms v2 as the new default, release-facing
+documentation and any affected frontend documentation must be updated before the
+pull request is marked ready for review.
