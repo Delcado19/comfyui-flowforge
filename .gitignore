@@ -67,8 +67,9 @@ htmlcov/
 *.cover
 coverage.xml
 
-# Kilo
+# Local AI/tooling state
 .kilo/
+.superpowers/
 
 # Frontend
 frontend/node_modules/
