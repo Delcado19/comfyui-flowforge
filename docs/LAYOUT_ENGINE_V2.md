@@ -201,6 +201,14 @@ If the weighted group-level pass improves the corpus without introducing new
 large regressions, the next structural target is ungrouped linked flow ordering
 using the same SCC/dummy/sweep core.
 
+## Deferred TODOs
+
+- Add user-facing Undo/Redo for destructive workflow transformations such as
+  Layout and Optimize. The implementation should restore the complete workflow
+  state from before the action rather than trying to reverse individual geometry
+  mutations. This is intentionally deferred until the v2 layout engine and its
+  frontend integration are stable.
+
 ## Validation
 
 Repository CI must remain green:
