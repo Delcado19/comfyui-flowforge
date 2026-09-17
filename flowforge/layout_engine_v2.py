@@ -56,7 +56,7 @@ from .layout import (
     _update_bounding_boxes,
 )
 from .logger import setup_logger
-from .model import Group, Link, Node, Workflow
+from .model import Group, Link, Workflow
 
 logger = setup_logger(__name__)
 
