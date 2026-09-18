@@ -46,6 +46,10 @@ def test_build_workflow_quality_report_counts_geometry_and_layout_metrics():
     assert sum(report.laid_out_right_to_left_categories.values()) == report.laid_out.right_to_left_links
     assert report.layout_candidate_count is not None
     assert report.layout_score is not None
+    assert report.structure.group_span_width > 0
+    assert report.structure.group_columns >= 1
+    assert report.structure.left_edge_owner is not None
+    assert report.structure.right_edge_owner is not None
 
 
 def test_build_workflow_quality_report_can_optimize_before_layout():
@@ -125,3 +129,14 @@ def test_summarize_quality_text_includes_category_breakdowns(tmp_path):
     assert "- within_group x group->group: 2" in text
     assert "Top laid-out right-to-left categories:" in text
     assert "- within_group: 1" in text
+
+
+def test_summarize_quality_text_can_include_structure_diagnostics(tmp_path):
+    (tmp_path / "workflow.json").write_text(json.dumps(WORKFLOW), encoding="utf-8")
+    summary = build_quality_summary(tmp_path)
+
+    text = summarize_quality_text(summary, include_structure=True)
+
+    assert "structure: groups span=" in text
+    assert "ungrouped span=" in text
+    assert "edges=" in text
