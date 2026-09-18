@@ -17,8 +17,9 @@ Phase 5 evaluates both weighted graph order and baseline-stable order, each with
 conservative vertical-gap profiles derived from the existing layout settings.
 
 The acceptance gate is deliberately strict: no additional movable overlaps,
-crossings, or right-to-left links; at least 8% workflow-width reduction; and no
-workflow-area growth.
+crossings, or right-to-left links in either the port-aware engine metric or the
+node-center corpus metric; at least 8% workflow-width reduction; and no workflow
+area growth.
 """
 
 from __future__ import annotations
@@ -44,6 +45,7 @@ from .layout_engine_v2 import (
     _assign_scc_longest_path_layers,
     _finalize_refinement,
     _score_engine_v2,
+    _segment_crossing_count,
 )
 from .layout_engine_v2_phase4 import (
     _eligible_ungrouped_nodes,
@@ -91,6 +93,18 @@ class Phase5Diagnostics:
     proposed_crossings: int | None
     baseline_rtl: int
     proposed_rtl: int | None
+    baseline_center_crossings: int
+    proposed_center_crossings: int | None
+    baseline_center_rtl: int
+    proposed_center_rtl: int | None
+
+
+@dataclass(frozen=True)
+class _CenterFlowMetrics:
+    """Corpus-compatible node-center crossing and RTL metrics."""
+
+    crossings: int
+    right_to_left_links: int
 
 
 @dataclass
@@ -100,6 +114,7 @@ class _Phase5Candidate:
     name: str
     workflow: Workflow
     score: EngineV2Score
+    center_metrics: _CenterFlowMetrics
 
 
 def apply_best_layout(
@@ -111,15 +126,21 @@ def apply_best_layout(
     settings = settings or LayoutSettings()
     baseline = _apply_phase4_best_layout(workflow, settings, candidate_count)
     baseline_score = _score_engine_v2(baseline)
+    baseline_center = _center_flow_metrics(baseline)
     if baseline_score.width < MIXED_GLOBAL_MIN_WIDTH:
         return baseline
 
     candidates = _phase5_candidate_variants(baseline, settings, baseline_score)
-    selected = _select_accepted_phase5_candidate(candidates, baseline_score)
+    selected = _select_accepted_phase5_candidate(
+        candidates,
+        baseline_score,
+        baseline_center,
+    )
     if selected is not None:
         logger.info(
             "Phase 5 mixed global-flow accepted (%s): "
-            "size %.0fx%.0f -> %.0fx%.0f, crossings %s -> %s, rtl %s -> %s",
+            "size %.0fx%.0f -> %.0fx%.0f, port crossings %s -> %s, "
+            "center crossings %s -> %s, port rtl %s -> %s, center rtl %s -> %s",
             selected.name,
             baseline_score.width,
             baseline_score.height,
@@ -127,16 +148,25 @@ def apply_best_layout(
             selected.score.height,
             baseline_score.crossings,
             selected.score.crossings,
+            baseline_center.crossings,
+            selected.center_metrics.crossings,
             baseline_score.right_to_left_links,
             selected.score.right_to_left_links,
+            baseline_center.right_to_left_links,
+            selected.center_metrics.right_to_left_links,
         )
         return selected.workflow
 
-    rejected = _best_diagnostic_candidate(candidates, baseline_score)
+    rejected = _best_diagnostic_candidate(
+        candidates,
+        baseline_score,
+        baseline_center,
+    )
     if rejected is not None:
         logger.info(
             "Phase 5 mixed global-flow rejected (%s): "
-            "size %.0fx%.0f -> %.0fx%.0f, crossings %s -> %s, rtl %s -> %s; "
+            "size %.0fx%.0f -> %.0fx%.0f, port crossings %s -> %s, "
+            "center crossings %s -> %s, port rtl %s -> %s, center rtl %s -> %s; "
             "reason=%s",
             rejected.name,
             baseline_score.width,
@@ -145,9 +175,18 @@ def apply_best_layout(
             rejected.score.height,
             baseline_score.crossings,
             rejected.score.crossings,
+            baseline_center.crossings,
+            rejected.center_metrics.crossings,
             baseline_score.right_to_left_links,
             rejected.score.right_to_left_links,
-            _mixed_rejection_reason(rejected.score, baseline_score),
+            baseline_center.right_to_left_links,
+            rejected.center_metrics.right_to_left_links,
+            _mixed_rejection_reason(
+                rejected.score,
+                baseline_score,
+                rejected.center_metrics,
+                baseline_center,
+            ),
         )
     return baseline
 
@@ -159,6 +198,7 @@ def diagnose_phase5(
     """Return a read-only explanation of the Phase 5 decision."""
     settings = settings or LayoutSettings()
     baseline_score = _score_engine_v2(workflow)
+    baseline_center = _center_flow_metrics(workflow)
     specs, spec_by_vertex, adjacency, edge_weights = _build_mixed_graph(workflow)
     group_count = sum(1 for kind, _value in specs if kind == "group")
     ungrouped_count = sum(1 for kind, _value in specs if kind == "node")
@@ -196,11 +236,23 @@ def diagnose_phase5(
             proposed_crossings=None,
             baseline_rtl=baseline_score.right_to_left_links,
             proposed_rtl=None,
+            baseline_center_crossings=baseline_center.crossings,
+            proposed_center_crossings=None,
+            baseline_center_rtl=baseline_center.right_to_left_links,
+            proposed_center_rtl=None,
         )
 
     candidates = _phase5_candidate_variants(workflow, settings, baseline_score)
-    selected = _select_accepted_phase5_candidate(candidates, baseline_score)
-    proposal = selected or _best_diagnostic_candidate(candidates, baseline_score)
+    selected = _select_accepted_phase5_candidate(
+        candidates,
+        baseline_score,
+        baseline_center,
+    )
+    proposal = selected or _best_diagnostic_candidate(
+        candidates,
+        baseline_score,
+        baseline_center,
+    )
     if proposal is None:
         return Phase5Diagnostics(
             group_vertices=group_count,
@@ -220,6 +272,10 @@ def diagnose_phase5(
             proposed_crossings=None,
             baseline_rtl=baseline_score.right_to_left_links,
             proposed_rtl=None,
+            baseline_center_crossings=baseline_center.crossings,
+            proposed_center_crossings=None,
+            baseline_center_rtl=baseline_center.right_to_left_links,
+            proposed_center_rtl=None,
         )
 
     accepted = selected is not None
@@ -235,7 +291,12 @@ def diagnose_phase5(
         rejection_reason=(
             "accepted"
             if accepted
-            else _mixed_rejection_reason(proposal.score, baseline_score)
+            else _mixed_rejection_reason(
+                proposal.score,
+                baseline_score,
+                proposal.center_metrics,
+                baseline_center,
+            )
         ),
         baseline_width=baseline_score.width,
         baseline_height=baseline_score.height,
@@ -245,6 +306,10 @@ def diagnose_phase5(
         proposed_crossings=proposal.score.crossings,
         baseline_rtl=baseline_score.right_to_left_links,
         proposed_rtl=proposal.score.right_to_left_links,
+        baseline_center_crossings=baseline_center.crossings,
+        proposed_center_crossings=proposal.center_metrics.crossings,
+        baseline_center_rtl=baseline_center.right_to_left_links,
+        proposed_center_rtl=proposal.center_metrics.right_to_left_links,
     )
 
 
@@ -272,6 +337,7 @@ def _phase5_candidate_variants(
                     name=f"{order_mode}-gap-{vertical_gap:g}",
                     workflow=candidate,
                     score=_score_engine_v2(candidate),
+                    center_metrics=_center_flow_metrics(candidate),
                 )
             )
     return candidates
@@ -295,11 +361,17 @@ def _phase5_vertical_gaps(settings: LayoutSettings) -> list[float]:
 def _select_accepted_phase5_candidate(
     candidates: list[_Phase5Candidate],
     baseline: EngineV2Score,
+    baseline_center: _CenterFlowMetrics,
 ) -> _Phase5Candidate | None:
     accepted = [
         candidate
         for candidate in candidates
-        if _mixed_candidate_is_better(candidate.score, baseline)
+        if _mixed_candidate_is_better(
+            candidate.score,
+            baseline,
+            candidate.center_metrics,
+            baseline_center,
+        )
     ]
     if not accepted:
         return None
@@ -308,12 +380,15 @@ def _select_accepted_phase5_candidate(
 
 def _phase5_candidate_quality_key(
     candidate: _Phase5Candidate,
-) -> tuple[int, int, int, float, float, float, str]:
+) -> tuple[int, int, int, int, int, float, float, float, str]:
     score = candidate.score
+    center = candidate.center_metrics
     return (
         score.movable_overlaps,
         score.crossings,
+        center.crossings,
         score.right_to_left_links,
+        center.right_to_left_links,
         score.width * score.height,
         score.width,
         score.height,
@@ -324,6 +399,7 @@ def _phase5_candidate_quality_key(
 def _best_diagnostic_candidate(
     candidates: list[_Phase5Candidate],
     baseline: EngineV2Score,
+    baseline_center: _CenterFlowMetrics,
 ) -> _Phase5Candidate | None:
     if not candidates:
         return None
@@ -332,21 +408,40 @@ def _best_diagnostic_candidate(
         "accepted": 0,
         "area_regression": 1,
         "insufficient_final_width_reduction": 2,
-        "rtl_regression": 3,
-        "crossing_regression": 4,
-        "movable_overlap_regression": 5,
-        "invalid_baseline_width": 6,
+        "center_rtl_regression": 3,
+        "rtl_regression": 4,
+        "center_crossing_regression": 5,
+        "crossing_regression": 6,
+        "movable_overlap_regression": 7,
+        "invalid_baseline_width": 8,
     }
 
-    def key(candidate: _Phase5Candidate) -> tuple[int, int, int, float, float, str]:
-        reason = _mixed_rejection_reason(candidate.score, baseline)
+    def key(
+        candidate: _Phase5Candidate,
+    ) -> tuple[int, int, int, int, float, float, str]:
+        reason = _mixed_rejection_reason(
+            candidate.score,
+            baseline,
+            candidate.center_metrics,
+            baseline_center,
+        )
         return (
             reason_rank.get(reason, 99),
             max(0, candidate.score.crossings - baseline.crossings),
             max(
                 0,
+                candidate.center_metrics.crossings
+                - baseline_center.crossings,
+            ),
+            max(
+                0,
                 candidate.score.right_to_left_links
                 - baseline.right_to_left_links,
+            )
+            + max(
+                0,
+                candidate.center_metrics.right_to_left_links
+                - baseline_center.right_to_left_links,
             ),
             candidate.score.width * candidate.score.height,
             candidate.score.width,
@@ -354,6 +449,33 @@ def _best_diagnostic_candidate(
         )
 
     return min(candidates, key=key)
+
+
+def _center_flow_metrics(workflow: Workflow) -> _CenterFlowMetrics:
+    """Measure the same center-to-center geometry used by corpus reporting."""
+    centers = {
+        node.id: (
+            node.x + (float(node.size[0]) if len(node.size) >= 1 else 0.0) / 2.0,
+            node.y + (float(node.size[1]) if len(node.size) >= 2 else 0.0) / 2.0,
+        )
+        for node in workflow.nodes.values()
+    }
+    segments: list[
+        tuple[int, int, tuple[float, float], tuple[float, float]]
+    ] = []
+    right_to_left = 0
+    for link in workflow.links.values():
+        start = centers.get(link.source)
+        end = centers.get(link.target)
+        if start is None or end is None:
+            continue
+        segments.append((link.source, link.target, start, end))
+        if end[0] < start[0]:
+            right_to_left += 1
+    return _CenterFlowMetrics(
+        crossings=_segment_crossing_count(segments),
+        right_to_left_links=right_to_left,
+    )
 
 
 def _mixed_precheck_reason(
@@ -925,21 +1047,46 @@ def _mixed_order_key(vertex: MixedOrderVertex) -> str:
 def _mixed_candidate_is_better(
     candidate: EngineV2Score,
     baseline: EngineV2Score,
+    candidate_center: _CenterFlowMetrics | None = None,
+    baseline_center: _CenterFlowMetrics | None = None,
 ) -> bool:
     """Require strict graph-quality preservation plus real width/area gain."""
-    return _mixed_rejection_reason(candidate, baseline) == "accepted"
+    return (
+        _mixed_rejection_reason(
+            candidate,
+            baseline,
+            candidate_center,
+            baseline_center,
+        )
+        == "accepted"
+    )
 
 
 def _mixed_rejection_reason(
     candidate: EngineV2Score,
     baseline: EngineV2Score,
+    candidate_center: _CenterFlowMetrics | None = None,
+    baseline_center: _CenterFlowMetrics | None = None,
 ) -> str:
     if candidate.movable_overlaps > baseline.movable_overlaps:
         return "movable_overlap_regression"
     if candidate.crossings > baseline.crossings:
         return "crossing_regression"
+    if (
+        candidate_center is not None
+        and baseline_center is not None
+        and candidate_center.crossings > baseline_center.crossings
+    ):
+        return "center_crossing_regression"
     if candidate.right_to_left_links > baseline.right_to_left_links:
         return "rtl_regression"
+    if (
+        candidate_center is not None
+        and baseline_center is not None
+        and candidate_center.right_to_left_links
+        > baseline_center.right_to_left_links
+    ):
+        return "center_rtl_regression"
     if baseline.width <= 0:
         return "invalid_baseline_width"
 

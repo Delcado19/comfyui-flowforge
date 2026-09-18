@@ -519,23 +519,33 @@ With default spacing this yields 100, 80, and 40 px gap variants. The strict
 acceptance gate is unchanged; no candidate can trade crossings, RTL, overlaps,
 width, or area outside the existing limits.
 
-The targeted multi-variant rerun produced the first accepted Phase 5 result:
+The targeted multi-variant rerun produced the first result accepted by the
+original Phase 5 gate:
 
 - Jibs: the best diagnostic proposal was `stable-gap-100`,
-  `5,977 x 12,448 -> 8,747 x 8,895`, crossings `756 -> 493`, RTL
+  `5,977 x 12,448 -> 8,747 x 8,895`, port crossings `756 -> 493`, port RTL
   `41 -> 29`. It was correctly rejected because width increased instead of
   falling by at least 8%.
 - Flux2 VTON 6.0.2: the best diagnostic proposal was `stable-gap-40`,
-  `6,723 x 4,861 -> 6,107 x 4,869`, crossings `31 -> 40`, RTL
-  `6 -> 4`. It was correctly rejected for crossing regression.
-- Flux2 VTON 6.0.2.7: `weighted-gap-40` was accepted,
-  `9,162 x 3,510 -> 7,746 x 4,032`, crossings `44 -> 43`, RTL
-  `11 -> 8`. Width fell by about 15.5%, workflow area also fell, and all
-  strict graph-quality constraints were preserved.
+  `6,723 x 4,861 -> 6,107 x 4,869`, port crossings `31 -> 40`, port RTL
+  `6 -> 4`. It was correctly rejected for port-aware crossing regression.
+- Flux2 VTON 6.0.2.7: `weighted-gap-40` was accepted by the port-aware gate,
+  `9,162 x 3,510 -> 7,746 x 4,032`, port crossings `44 -> 43`, port RTL
+  `11 -> 8`.
 
-This is the first evidence that shared mixed-flow placement can improve a real
-wide corpus workflow without relaxing the safety gate. No further placement
-heuristics should be added before measuring the complete corpus.
+The subsequent full 81-workflow Optimize + Layout corpus exposed an important
+metric mismatch. The historical corpus reference uses straight center-to-center
+node segments, while the v2 engine score uses actual output/input port
+positions. The Phase 5 run measured `4,138` center crossings and `331` center
+RTL links versus the Phase 4 reference of `4,127 / 339`. In other words, the
+port-aware gate allowed an aggregate `+11` regression in the benchmark crossing
+metric even though port-aware crossings were locally protected.
+
+Phase 5 therefore protects both geometries. A candidate must not increase
+port-aware crossings or RTL links and must also not increase the node-center
+crossings or RTL links used by the corpus reporter. The width and area gates are
+unchanged. This keeps the engine's more realistic port-aware metric while making
+the historical corpus reference an explicit safety constraint.
 
 A group always moves as one rectangle with every member node, preserving its
 internal geometry. The established finalizer then re-applies control, text
@@ -548,12 +558,15 @@ hard constraints and excludes Amazing Z-Image from automatic reorganization.
 Phase 5 uses a strict acceptance gate:
 
 - movable overlaps may not increase;
-- crossings may not increase;
-- RTL links may not increase;
+- port-aware crossings may not increase;
+- node-center corpus crossings may not increase;
+- port-aware RTL links may not increase;
+- node-center corpus RTL links may not increase;
 - workflow width must fall by at least 8%;
 - workflow area may not increase.
 
-Crossing or RTL improvements do not bypass the width/area requirements.
+Crossing or RTL improvements in either metric do not bypass the width/area
+requirements.
 
 Targeted diagnostics are available with:
 
@@ -571,12 +584,17 @@ baseline, and Phase 3 remains underneath it. Bridge, external-source, control,
 text-preview, virtual-hub, decorative, and pin-specific contracts are still
 authoritative after mixed placement.
 
-Phase 5 is still experimental. The targeted gate has now passed because
-Flux2 VTON 6.0.2.7 satisfies the complete strict acceptance contract with the
-`weighted-gap-40` variant. The next gate is the full 81-workflow Optimize +
-Layout corpus. The aggregate structural reference remains 4,127 crossings /
-339 RTL until that corpus measurement is reviewed. No additional Phase 5
-heuristics should be introduced before the corpus result is known.
+Phase 5 is still experimental. The first full 81-workflow corpus run measured
+4,138 center crossings / 331 center RTL links, which missed the Phase 4 crossing
+reference of 4,127 / 339 by 11 crossings while improving RTL by 8. That run
+revealed the port-aware versus center-metric acceptance mismatch described
+above.
+
+The next gate is to rerun the targeted Jibs/Flux2 diagnostics with both metrics
+visible, then rerun the full 81-workflow Optimize + Layout corpus. The Phase 4
+reference remains 4,127 center crossings / 339 center RTL links. No additional
+placement heuristics should be introduced until the dual-metric gate is
+validated against that corpus.
 
 ## Deferred TODOs
 

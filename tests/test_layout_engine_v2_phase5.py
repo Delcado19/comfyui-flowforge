@@ -3,7 +3,9 @@
 from flowforge.layout import LayoutSettings
 from flowforge.layout_engine_v2 import EngineV2Score, _assign_scc_longest_path_layers
 from flowforge.layout_engine_v2_phase5 import (
+    _CenterFlowMetrics,
     _build_mixed_graph,
+    _center_flow_metrics,
     _mixed_candidate_is_better,
     _mixed_rejection_reason,
     _phase5_vertical_gaps,
@@ -179,6 +181,75 @@ def test_phase5_candidate_requires_full_strict_gate():
         == "insufficient_final_width_reduction"
     )
     assert _mixed_rejection_reason(area_regression, baseline) == "area_regression"
+
+
+def test_phase5_candidate_rejects_corpus_center_metric_regressions():
+    baseline = _score(crossings=100, rtl=20, width=6_000, height=4_000)
+    candidate = _score(crossings=90, rtl=18, width=5_000, height=4_100)
+    baseline_center = _CenterFlowMetrics(crossings=44, right_to_left_links=11)
+
+    crossing_regression = _CenterFlowMetrics(
+        crossings=45,
+        right_to_left_links=8,
+    )
+    rtl_regression = _CenterFlowMetrics(
+        crossings=43,
+        right_to_left_links=12,
+    )
+    safe_center = _CenterFlowMetrics(
+        crossings=43,
+        right_to_left_links=8,
+    )
+
+    assert (
+        _mixed_rejection_reason(
+            candidate,
+            baseline,
+            crossing_regression,
+            baseline_center,
+        )
+        == "center_crossing_regression"
+    )
+    assert (
+        _mixed_rejection_reason(
+            candidate,
+            baseline,
+            rtl_regression,
+            baseline_center,
+        )
+        == "center_rtl_regression"
+    )
+    assert _mixed_candidate_is_better(
+        candidate,
+        baseline,
+        safe_center,
+        baseline_center,
+    )
+
+
+def test_center_flow_metrics_match_center_segment_geometry():
+    workflow = Workflow()
+    nodes = [
+        Node(id=1, x=0, y=0, size=[100, 100]),
+        Node(id=2, x=0, y=200, size=[100, 100]),
+        Node(id=3, x=400, y=0, size=[100, 100]),
+        Node(id=4, x=400, y=200, size=[100, 100]),
+    ]
+    workflow.nodes = {node.id: node for node in nodes}
+
+    _attach_link(
+        workflow,
+        Link(id=1, source=1, source_port=0, target=4, target_port=0),
+    )
+    _attach_link(
+        workflow,
+        Link(id=2, source=2, source_port=0, target=3, target_port=0),
+    )
+
+    metrics = _center_flow_metrics(workflow)
+
+    assert metrics.crossings == 1
+    assert metrics.right_to_left_links == 0
 
 
 

@@ -68,8 +68,13 @@ def main() -> int:
                 f"variant={diag.proposal_variant}; "
                 f"{diag.baseline_width:.0f}x{diag.baseline_height:.0f} -> "
                 f"{diag.proposed_width:.0f}x{diag.proposed_height:.0f}; "
-                f"crossings={diag.baseline_crossings}->{diag.proposed_crossings}; "
-                f"rtl={diag.baseline_rtl}->{diag.proposed_rtl}; "
+                f"port-crossings={diag.baseline_crossings}"
+                f"->{diag.proposed_crossings}; "
+                f"center-crossings={diag.baseline_center_crossings}"
+                f"->{diag.proposed_center_crossings}; "
+                f"port-rtl={diag.baseline_rtl}->{diag.proposed_rtl}; "
+                f"center-rtl={diag.baseline_center_rtl}"
+                f"->{diag.proposed_center_rtl}; "
                 f"accepted={diag.accepted}; reason={diag.rejection_reason}"
             )
         else:
