@@ -598,6 +598,14 @@ uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
   --match "Reference Identity 1MP + 2x" `
   --export-variant "weighted-anchoredx-gap-40" `
   --output "phase5-review/Flux2-9B-anchoredx.json"
+
+# Experimental Anchored-X + original Phase 4 Y diagnostic.
+uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
+  --match "Reference Identity 1MP + 2x" --variants
+uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
+  --match "Reference Identity 1MP + 2x" `
+  --export-variant "weighted-anchoredxy" `
+  --output "phase5-review/Flux2-9B-anchoredxy.json"
 ```
 
 ## Current Scope Boundary
@@ -770,6 +778,20 @@ candidate's +10.3% to only +1.7%. Production selection still prefers Compact-X
 because its port crossing/RTL metrics are numerically lower. The diagnostic
 reporter can therefore export an exact named variant with `--export-variant`
 and `--output` for visual review without changing production candidate ranking.
+
+Visual review of that anchored-X export showed a substantial horizontal
+improvement, but still failed overall: QUALITY MODE remained far below the main
+workflow, FAST MODE remained below the central region, and long vertical/diagonal
+links crossed large empty bands. This isolates the remaining failure to the
+vertical realization. Phase 5 still rebuilds Y from a shared `base_y` and
+stacks every real vertex in each dependency layer, even when the Phase 4
+vertical positions were already coherent.
+
+For diagnosis only, the reporter now includes two experimental
+`*-anchoredxy` variants. They use the same Anchored-X realization but preserve
+the Phase 4 Y coordinate of every real mixed vertex before the normal finalizer.
+These variants are deliberately excluded from production Phase 5 selection
+until their metrics and visual output are reviewed.
 
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.

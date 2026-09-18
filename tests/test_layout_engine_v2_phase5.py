@@ -283,6 +283,31 @@ def test_anchored_horizontal_mode_uses_compact_width_with_baseline_slack():
         assert source.x + source.size[0] < target.x
 
 
+def test_baseline_vertical_mode_preserves_phase4_y_positions():
+    workflow = _parallel_mixed_workflow()
+    settings = LayoutSettings(node_x_distance=100, node_y_distance=80)
+    original_group_y = {group.id: group.bounding[1] for group in workflow.groups}
+    original_node_y = {node.id: node.y for node in workflow.ungrouped_nodes}
+
+    assert _place_mixed_global_flow(
+        workflow,
+        settings,
+        workflow_width=7_000,
+        order_mode="weighted",
+        horizontal_mode="anchored",
+        vertical_mode="baseline",
+    )
+
+    assert {
+        group.id: group.bounding[1]
+        for group in workflow.groups
+    } == original_group_y
+    assert {
+        node.id: node.y
+        for node in workflow.ungrouped_nodes
+    } == original_node_y
+
+
 def test_phase5_skips_pinned_group_geometry():
     workflow = _mixed_chain_workflow()
     extra = Node(id=12, type="Extra", x=6_500, y=450, size=[200, 100])

@@ -354,6 +354,40 @@ def _phase5_candidate_variants(
     return candidates
 
 
+def _phase5_baseline_y_candidate_variants(
+    baseline: Workflow,
+    settings: LayoutSettings,
+    baseline_score: EngineV2Score,
+) -> list[_Phase5Candidate]:
+    """Build diagnostic Anchored-X candidates that preserve Phase 4 Y positions.
+
+    These variants are intentionally excluded from normal Phase 5 selection
+    until visual review confirms that baseline-Y anchoring improves cohesion.
+    """
+    candidates: list[_Phase5Candidate] = []
+    for order_mode in ("weighted", "stable"):
+        candidate = deepcopy(baseline)
+        if not _place_mixed_global_flow(
+            candidate,
+            settings,
+            baseline_score.width,
+            order_mode=order_mode,
+            horizontal_mode="anchored",
+            vertical_mode="baseline",
+        ):
+            continue
+        _finalize_refinement(candidate, settings)
+        candidates.append(
+            _Phase5Candidate(
+                name=f"{order_mode}-anchoredxy",
+                workflow=candidate,
+                score=_score_engine_v2(candidate),
+                center_metrics=_center_flow_metrics(candidate),
+            )
+        )
+    return candidates
+
+
 def _phase5_vertical_gaps(settings: LayoutSettings) -> list[float]:
     """Return conservative spacing variants derived from existing layout settings."""
     standard = max(settings.group_v_gap, settings.node_v_gap)
@@ -615,6 +649,7 @@ def _place_mixed_global_flow(
     order_mode: str = "weighted",
     horizontal_mode: str = "layer",
     vertical_gap: float | None = None,
+    vertical_mode: str = "stacked",
 ) -> bool:
     """Place mixed-flow layers with conservative left-to-right geometry."""
     del workflow_width
@@ -711,16 +746,27 @@ def _place_mixed_global_flow(
         default=50.0,
     )
     vertex_y: dict[int, float] = {}
-    for layer in sorted(layer_to_real):
-        current_y = base_y
-        for vertex in layer_to_real[layer]:
-            vertex_y[vertex] = current_y
-            _width, height = _mixed_vertex_size(
-                spec_by_vertex[vertex],
-                groups_by_id,
-                nodes_by_id,
-            )
-            current_y += height + placement_vertical_gap
+    if vertical_mode == "stacked":
+        for layer in sorted(layer_to_real):
+            current_y = base_y
+            for vertex in layer_to_real[layer]:
+                vertex_y[vertex] = current_y
+                _width, height = _mixed_vertex_size(
+                    spec_by_vertex[vertex],
+                    groups_by_id,
+                    nodes_by_id,
+                )
+                current_y += height + placement_vertical_gap
+    elif vertical_mode == "baseline":
+        for vertices in layer_to_real.values():
+            for vertex in vertices:
+                vertex_y[vertex] = _mixed_vertex_xy(
+                    spec_by_vertex[vertex],
+                    groups_by_id,
+                    nodes_by_id,
+                )[1]
+    else:
+        raise ValueError(f"Unknown Phase 5 vertical mode: {vertical_mode}")
 
     if horizontal_mode == "layer":
         layer_positions = _monotonic_layer_positions(
