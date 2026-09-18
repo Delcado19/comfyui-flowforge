@@ -18,6 +18,8 @@ import math
 from .layout import (
     LayoutSettings,
     _is_decorative_node,
+    _is_pinned_node,
+    _node_visual_height,
     _node_visual_width,
     _position_groups_globally,
     _position_ungrouped_nodes,
@@ -55,45 +57,103 @@ def apply_best_layout(
     if baseline_score.width < COMPACT_GLOBAL_MIN_WIDTH:
         return baseline
 
-    compact = deepcopy(baseline)
     compact_settings = LayoutSettings(
         node_x_distance=settings.node_x_distance,
         node_y_distance=settings.node_y_distance,
         wrap_columns=True,
     )
-    _compact_global_flow(compact, compact_settings)
-    _refine_group_level_order(compact, compact_settings)
-    _finalize_refinement(compact, compact_settings)
-    compact_score = _score_engine_v2(compact)
 
-    if _compact_candidate_is_better(compact_score, baseline_score):
+    candidates: list[tuple[str, Workflow, EngineV2Score]] = []
+
+    decorative_compact = deepcopy(baseline)
+    if _compact_decorative_nodes_above(decorative_compact, compact_settings):
+        candidates.append(
+            (
+                "decorative",
+                decorative_compact,
+                _score_engine_v2(decorative_compact),
+            )
+        )
+
+    global_compact = deepcopy(baseline)
+    _compact_global_flow(global_compact, compact_settings)
+    _refine_group_level_order(global_compact, compact_settings)
+    _finalize_refinement(global_compact, compact_settings)
+    _compact_decorative_nodes_above(global_compact, compact_settings)
+    candidates.append(
+        ("global", global_compact, _score_engine_v2(global_compact))
+    )
+
+    best_workflow = baseline
+    best_score = baseline_score
+    best_name = "baseline"
+    for name, candidate, candidate_score in candidates:
+        if _compact_candidate_is_better(candidate_score, best_score):
+            best_workflow = candidate
+            best_score = candidate_score
+            best_name = name
+
+    if best_workflow is not baseline:
         logger.info(
-            "Compact global-flow candidate accepted: size %.0fx%.0f -> %.0fx%.0f, "
+            "Compact %s candidate accepted: size %.0fx%.0f -> %.0fx%.0f, "
             "crossings %s -> %s, rtl %s -> %s",
+            best_name,
             baseline_score.width,
             baseline_score.height,
-            compact_score.width,
-            compact_score.height,
+            best_score.width,
+            best_score.height,
             baseline_score.crossings,
-            compact_score.crossings,
+            best_score.crossings,
             baseline_score.right_to_left_links,
-            compact_score.right_to_left_links,
+            best_score.right_to_left_links,
         )
-        return compact
+        return best_workflow
 
     logger.info(
-        "Compact global-flow candidate rejected: size %.0fx%.0f -> %.0fx%.0f, "
-        "crossings %s -> %s, rtl %s -> %s",
+        "Compact candidates rejected: baseline size %.0fx%.0f, crossings=%s, rtl=%s",
         baseline_score.width,
         baseline_score.height,
-        compact_score.width,
-        compact_score.height,
         baseline_score.crossings,
-        compact_score.crossings,
         baseline_score.right_to_left_links,
-        compact_score.right_to_left_links,
     )
     return baseline
+
+
+def _compact_decorative_nodes_above(
+    workflow: Workflow,
+    settings: LayoutSettings,
+) -> bool:
+    """Move wide decorative annotations above the graph instead of beside it."""
+    decorative = [
+        node
+        for node in workflow.nodes.values()
+        if _is_decorative_node(node) and not _is_pinned_node(workflow, node)
+    ]
+    graph_nodes = [
+        node
+        for node in workflow.nodes.values()
+        if not _is_decorative_node(node)
+    ]
+    if not decorative or not graph_nodes:
+        return False
+
+    graph_left = min(node.x for node in graph_nodes)
+    graph_top = min(node.y for node in graph_nodes)
+    gap = max(settings.node_v_gap, settings.group_v_gap)
+
+    ordered = sorted(decorative, key=lambda node: (node.y, node.x, node.id))
+    total_height = sum(_node_visual_height(node) for node in ordered)
+    total_height += gap * max(0, len(ordered) - 1)
+
+    current_y = graph_top - gap - total_height
+    changed = False
+    for node in ordered:
+        if abs(node.x - graph_left) > 1e-9 or abs(node.y - current_y) > 1e-9:
+            changed = True
+        node.x = graph_left
+        node.y = current_y
+        current_y += _node_visual_height(node) + gap
+    return changed
 
 
 def _compact_global_flow(workflow: Workflow, settings: LayoutSettings) -> None:
