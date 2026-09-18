@@ -58,6 +58,14 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--attempted-only",
+        action="store_true",
+        help=(
+            "Print only workflows for which Phase 5 built physical candidates "
+            "and suppress routine INFO logging."
+        ),
+    )
+    parser.add_argument(
         "--geometry",
         action="store_true",
         help=(
@@ -67,7 +75,10 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.accepted_only:
+    if args.accepted_only and args.attempted_only:
+        parser.error("--accepted-only and --attempted-only are mutually exclusive")
+
+    if args.accepted_only or args.attempted_only:
         logging.disable(logging.INFO)
 
     files = discover_workflow_files(args.root)
@@ -87,6 +98,8 @@ def main() -> int:
     accepted_count = 0
     rejected_count = 0
     skipped_count = 0
+    attempted_reasons: dict[str, int] = {}
+    skipped_reasons: dict[str, int] = {}
 
     for path in selected:
         relative = path.relative_to(args.root)
@@ -103,10 +116,18 @@ def main() -> int:
                 accepted_count += 1
             else:
                 rejected_count += 1
+                attempted_reasons[diag.rejection_reason] = (
+                    attempted_reasons.get(diag.rejection_reason, 0) + 1
+                )
         else:
             skipped_count += 1
+            skipped_reasons[diag.rejection_reason] = (
+                skipped_reasons.get(diag.rejection_reason, 0) + 1
+            )
 
         if args.accepted_only and not diag.accepted:
+            continue
+        if args.attempted_only and not diag.attempted:
             continue
 
         print(relative)
@@ -150,7 +171,22 @@ def main() -> int:
         f"rejected={rejected_count} "
         f"skipped={skipped_count}"
     )
+    _print_reason_summary("Attempted rejection reasons", attempted_reasons)
+    _print_reason_summary("Skipped reasons", skipped_reasons)
     return 0
+
+
+def _print_reason_summary(title: str, reasons: dict[str, int]) -> None:
+    if not reasons:
+        return
+    values = " ".join(
+        f"{reason}={count}"
+        for reason, count in sorted(
+            reasons.items(),
+            key=lambda item: (-item[1], item[0]),
+        )
+    )
+    print(f"{title}: {values}")
 
 
 def _print_geometry_diagnostics(baseline: Workflow) -> None:

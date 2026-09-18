@@ -582,6 +582,9 @@ uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
 # Corpus review: print only Phase 5 candidates that pass the complete gate.
 uv run python tools/report_phase5_diagnostics.py example-workflows --optimize --accepted-only
 
+# Architecture review: print only workflows where Phase 5 built physical candidates.
+uv run python tools/report_phase5_diagnostics.py example-workflows --optimize --attempted-only
+
 # Geometry review for a selected workflow/proposal.
 uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
   --match "Virtual Try-On 6.0 (Codex)" --geometry
@@ -672,7 +675,10 @@ accepted corpus improvement after the visually invalid candidate was excluded.
 
 Further Phase 5 work should therefore focus on expanding what the mixed graph
 can model—most notably authored empty group rectangles—or on improving physical
-realization for the remaining 14 attempted workflows. The existing safety gates
+realization for the remaining 14 attempted workflows. The diagnostic reporter
+supports `--attempted-only` and prints aggregate attempted-rejection and skipped
+reason counts so the next architecture decision can be based on the dominant
+failure mode rather than another global heuristic. The existing safety gates
 should remain unchanged until a candidate produces both measurable and visually
 acceptable improvement.
 
