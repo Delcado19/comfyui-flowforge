@@ -148,6 +148,90 @@ def test_mixed_global_placement_preserves_group_internal_geometry():
     assert workflow.nodes[11].x < extra.x
 
 
+def _parallel_mixed_workflow() -> Workflow:
+    workflow = Workflow()
+    wide_source = Node(id=1, type="WideSource", x=150, y=125, size=[200, 50])
+    narrow_source = Node(id=2, type="NarrowSource", x=150, y=265, size=[200, 50])
+    top_mid = Node(id=10, type="TopMid", x=3_000, y=125, size=[200, 100])
+    bottom_mid = Node(id=11, type="BottomMid", x=3_000, y=265, size=[200, 100])
+    top_last = Node(id=13, type="TopLast", x=4_500, y=125, size=[20, 100])
+    bottom_last = Node(id=12, type="BottomLast", x=4_500, y=265, size=[200, 100])
+
+    workflow.nodes = {
+        wide_source.id: wide_source,
+        narrow_source.id: narrow_source,
+        top_mid.id: top_mid,
+        bottom_mid.id: bottom_mid,
+        top_last.id: top_last,
+        bottom_last.id: bottom_last,
+    }
+    workflow.groups = [
+        Group(
+            id=100,
+            name="Wide",
+            nodes=[wide_source],
+            bounding=[100, 100, 1_000, 100],
+        ),
+        Group(
+            id=200,
+            name="Narrow",
+            nodes=[narrow_source],
+            bounding=[100, 240, 300, 100],
+        ),
+    ]
+    workflow.ungrouped_nodes = [top_mid, bottom_mid, top_last, bottom_last]
+
+    _attach_link(
+        workflow,
+        Link(id=1, source=1, source_port=0, target=10, target_port=0, type="DATA"),
+    )
+    _attach_link(
+        workflow,
+        Link(id=2, source=2, source_port=0, target=11, target_port=0, type="DATA"),
+    )
+    _attach_link(
+        workflow,
+        Link(id=3, source=10, source_port=0, target=13, target_port=0, type="DATA"),
+    )
+    _attach_link(
+        workflow,
+        Link(id=4, source=11, source_port=0, target=12, target_port=0, type="DATA"),
+    )
+    return workflow
+
+
+def test_compact_horizontal_mode_does_not_inherit_widest_parallel_layer():
+    layer_workflow = _parallel_mixed_workflow()
+    compact_workflow = _parallel_mixed_workflow()
+    settings = LayoutSettings(node_x_distance=100, node_y_distance=80)
+
+    assert _place_mixed_global_flow(
+        layer_workflow,
+        settings,
+        workflow_width=7_000,
+        order_mode="stable",
+        horizontal_mode="layer",
+        vertical_gap=40,
+    )
+    assert _place_mixed_global_flow(
+        compact_workflow,
+        settings,
+        workflow_width=7_000,
+        order_mode="stable",
+        horizontal_mode="compact",
+        vertical_gap=40,
+    )
+
+    assert compact_workflow.nodes[11].x < layer_workflow.nodes[11].x
+    assert compact_workflow.nodes[12].x < layer_workflow.nodes[12].x
+    assert compact_workflow.nodes[10].x == layer_workflow.nodes[10].x
+
+    for link in compact_workflow.links.values():
+        source = compact_workflow.nodes[link.source]
+        target = compact_workflow.nodes[link.target]
+        assert source.x + source.size[0] < target.x
+
+
 def test_phase5_skips_pinned_group_geometry():
     workflow = _mixed_chain_workflow()
     extra = Node(id=12, type="Extra", x=6_500, y=450, size=[200, 100])

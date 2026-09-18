@@ -675,12 +675,36 @@ accepted corpus improvement after the visually invalid candidate was excluded.
 
 Further Phase 5 work should therefore focus on expanding what the mixed graph
 can model—most notably authored empty group rectangles—or on improving physical
-realization for the remaining 14 attempted workflows. The diagnostic reporter
+realization for the remaining attempted workflows. The diagnostic reporter
 supports `--attempted-only` and prints aggregate attempted-rejection and skipped
 reason counts so the next architecture decision can be based on the dominant
-failure mode rather than another global heuristic. The existing safety gates
-should remain unchanged until a candidate produces both measurable and visually
-acceptable improvement.
+failure mode rather than another global heuristic.
+
+The first attempted-only rerun after the empty-group guard produced 14 physical
+candidate workflows:
+
+- 8 rejected for port-aware crossing regression;
+- 6 rejected for insufficient final width reduction.
+
+Several width-rejected workflows already improved crossings and RTL materially,
+including Qwen VTON v11/v12/v15 and ZIT multi-style. Inspection of the physical
+realizer showed a concrete width mechanism: every real vertex in one mixed
+dependency layer shared the same X coordinate, and the next layer advanced by
+the widest rectangle in the entire previous layer. A single wide group could
+therefore push an unrelated narrow parallel chain to the right.
+
+Phase 5 now evaluates an additional `compactx` physical realization for every
+existing weighted/stable order and vertical-gap variant. It preserves the same
+layer assignment and vertical order, but assigns X per real vertex. Each vertex
+is placed only as far right as required by already placed forward predecessors
+and vertically overlapping geometry. Unrelated vertical lanes may therefore use
+different X positions instead of inheriting the widest rectangle in their
+dependency layer. Direct forward dependencies remain left-to-right, and the
+complete existing Phase 5 acceptance gate remains authoritative. The original
+shared-layer X realization is retained unchanged as a baseline variant.
+
+The existing safety gates should remain unchanged until a candidate produces
+both measurable and visually acceptable improvement.
 
 ## Deferred TODOs
 

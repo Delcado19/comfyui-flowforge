@@ -324,25 +324,32 @@ def _phase5_candidate_variants(
     """Build scored physical variants without changing the mixed dependency graph."""
     candidates: list[_Phase5Candidate] = []
     for order_mode in ("weighted", "stable"):
-        for vertical_gap in _phase5_vertical_gaps(settings):
-            candidate = deepcopy(baseline)
-            if not _place_mixed_global_flow(
-                candidate,
-                settings,
-                baseline_score.width,
-                order_mode=order_mode,
-                vertical_gap=vertical_gap,
-            ):
-                continue
-            _finalize_refinement(candidate, settings)
-            candidates.append(
-                _Phase5Candidate(
-                    name=f"{order_mode}-gap-{vertical_gap:g}",
-                    workflow=candidate,
-                    score=_score_engine_v2(candidate),
-                    center_metrics=_center_flow_metrics(candidate),
+        for horizontal_mode in ("layer", "compact"):
+            for vertical_gap in _phase5_vertical_gaps(settings):
+                candidate = deepcopy(baseline)
+                if not _place_mixed_global_flow(
+                    candidate,
+                    settings,
+                    baseline_score.width,
+                    order_mode=order_mode,
+                    horizontal_mode=horizontal_mode,
+                    vertical_gap=vertical_gap,
+                ):
+                    continue
+                _finalize_refinement(candidate, settings)
+                variant_name = (
+                    f"{order_mode}-gap-{vertical_gap:g}"
+                    if horizontal_mode == "layer"
+                    else f"{order_mode}-compactx-gap-{vertical_gap:g}"
                 )
-            )
+                candidates.append(
+                    _Phase5Candidate(
+                        name=variant_name,
+                        workflow=candidate,
+                        score=_score_engine_v2(candidate),
+                        center_metrics=_center_flow_metrics(candidate),
+                    )
+                )
     return candidates
 
 
@@ -605,9 +612,10 @@ def _place_mixed_global_flow(
     workflow_width: float,
     *,
     order_mode: str = "weighted",
+    horizontal_mode: str = "layer",
     vertical_gap: float | None = None,
 ) -> bool:
-    """Place mixed-flow layers in monotonic left-to-right columns."""
+    """Place mixed-flow layers with conservative left-to-right geometry."""
     del workflow_width
     specs, spec_by_vertex, adjacency, edge_weights = _build_mixed_graph(workflow)
     group_count = sum(1 for kind, _value in specs if kind == "group")
@@ -701,34 +709,61 @@ def _place_mixed_global_flow(
         ),
         default=50.0,
     )
-    layer_positions = _monotonic_layer_positions(
-        layer_sizes,
-        base_x,
-        base_y,
-        horizontal_gap,
-    )
+    vertex_y: dict[int, float] = {}
+    for layer in sorted(layer_to_real):
+        current_y = base_y
+        for vertex in layer_to_real[layer]:
+            vertex_y[vertex] = current_y
+            _width, height = _mixed_vertex_size(
+                spec_by_vertex[vertex],
+                groups_by_id,
+                nodes_by_id,
+            )
+            current_y += height + placement_vertical_gap
+
+    if horizontal_mode == "layer":
+        layer_positions = _monotonic_layer_positions(
+            layer_sizes,
+            base_x,
+            base_y,
+            horizontal_gap,
+        )
+        vertex_x = {
+            vertex: layer_positions[layer][0]
+            for layer, vertices in layer_to_real.items()
+            for vertex in vertices
+        }
+    elif horizontal_mode == "compact":
+        vertex_x = _compact_mixed_vertex_x_positions(
+            layer_to_real,
+            layers,
+            edge_weights,
+            spec_by_vertex,
+            groups_by_id,
+            nodes_by_id,
+            vertex_y,
+            base_x,
+            horizontal_gap,
+        )
+    else:
+        raise ValueError(f"Unknown Phase 5 horizontal mode: {horizontal_mode}")
 
     changed = False
     for layer in sorted(layer_to_real):
-        x, current_y = layer_positions[layer]
         for vertex in layer_to_real[layer]:
             spec = spec_by_vertex[vertex]
+            x = vertex_x[vertex]
+            y = vertex_y[vertex]
             old_x, old_y = _mixed_vertex_xy(spec, groups_by_id, nodes_by_id)
-            if abs(old_x - x) > 1e-9 or abs(old_y - current_y) > 1e-9:
+            if abs(old_x - x) > 1e-9 or abs(old_y - y) > 1e-9:
                 changed = True
             _move_mixed_vertex(
                 spec,
                 groups_by_id,
                 nodes_by_id,
                 x,
-                current_y,
+                y,
             )
-            _width, height = _mixed_vertex_size(
-                spec,
-                groups_by_id,
-                nodes_by_id,
-            )
-            current_y += height + placement_vertical_gap
     return changed
 
 
@@ -744,6 +779,81 @@ def _monotonic_layer_positions(
     for layer in sorted(layer_sizes):
         positions[layer] = (current_x, base_y)
         current_x += layer_sizes[layer][0] + horizontal_gap
+    return positions
+
+
+def _compact_mixed_vertex_x_positions(
+    layer_to_real: dict[int, list[int]],
+    layers: dict[int, int],
+    edge_weights: dict[tuple[int, int], int],
+    spec_by_vertex: dict[int, MixedSpec],
+    groups_by_id: dict[int, Group],
+    nodes_by_id: dict[int, Node],
+    vertex_y: dict[int, float],
+    base_x: float,
+    horizontal_gap: float,
+) -> dict[int, float]:
+    """Compact independent flow lanes without weakening edge direction.
+
+    The legacy Phase 5 realization gives every real vertex in one dependency
+    layer the same X coordinate and advances the next layer by the widest
+    rectangle in the layer. That is simple and safe, but one wide group can
+    needlessly push unrelated narrow chains to the right.
+
+    This variant keeps the same layer assignment and vertical order. Each vertex
+    starts at the leftmost X allowed by its already placed predecessors, then
+    moves right only as needed to clear already placed geometry whose vertical
+    span overlaps its own. Direct forward dependencies therefore remain
+    left-to-right while unrelated vertical lanes may use different X positions.
+    """
+    predecessors: dict[int, list[int]] = {}
+    for source, target in edge_weights:
+        if layers.get(source, 0) >= layers.get(target, 0):
+            continue
+        predecessors.setdefault(target, []).append(source)
+
+    positions: dict[int, float] = {}
+    placed_rects: list[tuple[float, float, float, float]] = []
+
+    for layer in sorted(layer_to_real):
+        for vertex in layer_to_real[layer]:
+            spec = spec_by_vertex[vertex]
+            width, height = _mixed_vertex_size(
+                spec,
+                groups_by_id,
+                nodes_by_id,
+            )
+            y = vertex_y[vertex]
+            x = base_x
+
+            for source in predecessors.get(vertex, []):
+                source_x = positions.get(source)
+                if source_x is None:
+                    continue
+                source_width, _source_height = _mixed_vertex_size(
+                    spec_by_vertex[source],
+                    groups_by_id,
+                    nodes_by_id,
+                )
+                x = max(x, source_x + source_width + horizontal_gap)
+
+            while True:
+                next_x = x
+                for left, top, right, bottom in placed_rects:
+                    if y >= bottom or top >= y + height:
+                        continue
+                    if x >= right + horizontal_gap:
+                        continue
+                    if left >= x + width + horizontal_gap:
+                        continue
+                    next_x = max(next_x, right + horizontal_gap)
+                if next_x <= x + 1e-9:
+                    break
+                x = next_x
+
+            positions[vertex] = x
+            placed_rects.append((x, y, x + width, y + height))
+
     return positions
 
 
