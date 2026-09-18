@@ -207,9 +207,9 @@ selection also adds width guardrails:
 
 - reject more than 35% width growth when the candidate provides only a minor
   crossing/RTL improvement;
-- allow width growth for a significant graph-quality gain;
-- prefer at least 25% compaction when crossings and RTL regress only within
-  small bounded tolerances.
+- allow width growth for a significant graph-quality gain or when it completely
+  eliminates crossings/RTL links;
+- do not let compactness override existing structural flow invariants on its own.
 
 The intent is to remove pathological horizontal expansion without replacing the
 crossing-aware ordering logic with a purely geometric packing heuristic.
