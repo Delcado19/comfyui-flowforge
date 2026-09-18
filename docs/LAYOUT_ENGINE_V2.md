@@ -808,6 +808,17 @@ The full Y-band review on Flux 9B produced the best visual result so far at `wei
 
 To measure that trade-off instead of inventing another Y heuristic, diagnostics now include `yband25`, `yband50`, and `yband75` at the compact 40 px internal gap. They apply 25%, 50%, or 75% of the layer-level Phase 4 Y shift. A strength of 0% is the existing stacked Anchored-X placement; 100% is the full Y-band placement. These compressed Y-band candidates remain diagnostic-only.
 
+The first 25/50/75% sweep showed that `weighted-anchoredx-yband25-gap-40`
+is closest to the strict gate: 4,850 x 3,414, port crossings 81, center
+crossings 91, and weighted mixed-edge growth +2.4%. Its only rejection is area,
+which is just about +2.7% above the Phase 4 baseline. The 50% and 75% variants
+increase area by about +5.9% and +9.1% respectively.
+
+Before considering any area-gate relaxation, diagnostics now also evaluate the
+same 25/50/75% anchor strengths at the existing hard minimum Phase 5 vertical
+gap of 12 px. This tests whether the remaining area excess can be recovered by
+tighter within-layer spacing while preserving the Y-band locality signal.
+
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.
 

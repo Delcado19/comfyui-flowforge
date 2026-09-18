@@ -1,7 +1,11 @@
 """Regression tests for Phase 5 mixed global-flow refinement."""
 
 from flowforge.layout import LayoutSettings
-from flowforge.layout_engine_v2 import EngineV2Score, _assign_scc_longest_path_layers
+from flowforge.layout_engine_v2 import (
+    EngineV2Score,
+    _assign_scc_longest_path_layers,
+    _score_engine_v2,
+)
 from flowforge.layout_engine_v2_phase5 import (
     _CenterFlowMetrics,
     _build_mixed_graph,
@@ -9,6 +13,7 @@ from flowforge.layout_engine_v2_phase5 import (
     _has_phase5_unmodeled_group_geometry,
     _mixed_candidate_is_better,
     _mixed_rejection_reason,
+    _phase5_compressed_yband_candidate_variants,
     _phase5_vertical_gaps,
     _place_mixed_global_flow,
 )
@@ -480,6 +485,24 @@ def test_center_flow_metrics_match_center_segment_geometry():
     assert metrics.crossings == 1
     assert metrics.right_to_left_links == 0
 
+
+
+def test_compressed_yband_variants_include_minimum_gap():
+    workflow = _parallel_mixed_workflow()
+    settings = LayoutSettings(node_x_distance=100, node_y_distance=80)
+
+    candidates = _phase5_compressed_yband_candidate_variants(
+        workflow,
+        settings,
+        _score_engine_v2(workflow),
+    )
+    names = {candidate.name for candidate in candidates}
+
+    assert len(candidates) == 12
+    assert "weighted-anchoredx-yband25-gap-40" in names
+    assert "weighted-anchoredx-yband25-gap-12" in names
+    assert "stable-anchoredx-yband75-gap-40" in names
+    assert "stable-anchoredx-yband75-gap-12" in names
 
 
 def test_phase5_vertical_gap_profiles_use_existing_spacing_controls():

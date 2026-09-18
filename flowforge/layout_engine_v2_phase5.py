@@ -425,36 +425,41 @@ def _phase5_compressed_yband_candidate_variants(
     settings: LayoutSettings,
     baseline_score: EngineV2Score,
 ) -> list[_Phase5Candidate]:
-    """Build diagnostic partial Y-band anchor candidates at compact spacing."""
+    """Build diagnostic partial Y-band anchors at compact and minimum spacing."""
     candidates: list[_Phase5Candidate] = []
     compact_gap = _phase5_vertical_gaps(settings)[-1]
+    vertical_gaps = [compact_gap]
+    if not math.isclose(compact_gap, MIXED_GLOBAL_MIN_VERTICAL_GAP):
+        vertical_gaps.append(MIXED_GLOBAL_MIN_VERTICAL_GAP)
+
     for order_mode in ("weighted", "stable"):
-        for anchor_strength in (0.25, 0.5, 0.75):
-            candidate = deepcopy(baseline)
-            if not _place_mixed_global_flow(
-                candidate,
-                settings,
-                baseline_score.width,
-                order_mode=order_mode,
-                horizontal_mode="anchored",
-                vertical_gap=compact_gap,
-                vertical_mode="layer_anchor",
-                vertical_anchor_strength=anchor_strength,
-            ):
-                continue
-            _finalize_refinement(candidate, settings)
-            percent = int(round(anchor_strength * 100))
-            candidates.append(
-                _Phase5Candidate(
-                    name=(
-                        f"{order_mode}-anchoredx-yband{percent}"
-                        f"-gap-{compact_gap:g}"
-                    ),
-                    workflow=candidate,
-                    score=_score_engine_v2(candidate),
-                    center_metrics=_center_flow_metrics(candidate),
+        for vertical_gap in vertical_gaps:
+            for anchor_strength in (0.25, 0.5, 0.75):
+                candidate = deepcopy(baseline)
+                if not _place_mixed_global_flow(
+                    candidate,
+                    settings,
+                    baseline_score.width,
+                    order_mode=order_mode,
+                    horizontal_mode="anchored",
+                    vertical_gap=vertical_gap,
+                    vertical_mode="layer_anchor",
+                    vertical_anchor_strength=anchor_strength,
+                ):
+                    continue
+                _finalize_refinement(candidate, settings)
+                percent = int(round(anchor_strength * 100))
+                candidates.append(
+                    _Phase5Candidate(
+                        name=(
+                            f"{order_mode}-anchoredx-yband{percent}"
+                            f"-gap-{vertical_gap:g}"
+                        ),
+                        workflow=candidate,
+                        score=_score_engine_v2(candidate),
+                        center_metrics=_center_flow_metrics(candidate),
+                    )
                 )
-            )
     return candidates
 
 
