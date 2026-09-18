@@ -654,6 +654,28 @@ cp1252 when workflow or group names contain Unicode symbols or emoji. Long
 local report captures should be written below `logs/`, which is already
 gitignored.
 
+### Final Phase 5 safety validation
+
+After the empty-group scope guard, the accepted-only corpus diagnostic reported:
+
+- selected: 81;
+- attempted: 14;
+- accepted: 0;
+- rejected: 14;
+- skipped: 67.
+
+The final full 81-workflow Optimize + Layout corpus then measured exactly
+`4,127` center crossings and `339` center RTL links, with 0 failures. This is
+identical to the Phase 4 reference. Phase 5 is therefore currently a safe
+no-op on the corpus: it introduces no structural regression, but it also has no
+accepted corpus improvement after the visually invalid candidate was excluded.
+
+Further Phase 5 work should therefore focus on expanding what the mixed graph
+can model—most notably authored empty group rectangles—or on improving physical
+realization for the remaining 14 attempted workflows. The existing safety gates
+should remain unchanged until a candidate produces both measurable and visually
+acceptable improvement.
+
 ## Deferred TODOs
 
 - Add user-facing Undo/Redo for destructive workflow transformations such as
