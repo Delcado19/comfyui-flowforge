@@ -288,6 +288,34 @@ For every printed large workflow it reports:
 The next layout change should be based on these measurements rather than making
 global wrap thresholds more aggressive.
 
+## Width root-cause findings
+
+The structural diagnostics showed that workflow width is not caused by one
+single mechanism.
+
+Representative Optimize + Layout results:
+
+- Flux Edit Ultra: groups span 7,031 px, ungrouped span 8,318 px;
+- Z-Image Base Ultra: groups span 8,720 px, ungrouped span only 440 px;
+- Luneva: groups span 7,826 px, ungrouped span 5,822 px;
+- Amazing Z-Image: ungrouped span 12,220 px across 20 flow layers / 43 columns;
+- Jibs: groups span 3,090 px while ungrouped flow spans 5,977 px.
+
+The legacy pipeline also places all decorative Note/Markdown/Label nodes in a
+left annotation column and then starts every group and ungrouped flow to the
+right of the widest annotation. Very wide documentation nodes can therefore
+create a large empty horizontal margin even though they carry no dataflow.
+
+Phase 3 now evaluates a separate decorative-compaction candidate for workflows
+that are already at least 7,000 px wide. It moves movable decorative annotations
+above the graph while preserving every non-decorative node/group coordinate.
+Because decorative nodes carry no graph ordering, this candidate does not alter
+crossings or RTL by itself and is still subject to the normal compactness gate.
+
+The structure reporter also prints decorative-node count/span and the widest
+decorative node so corpus measurements can confirm how much width comes from
+annotations versus actual flow geometry.
+
 ## Current Scope Boundary
 
 The active engine now refines movable group internals and top-level group order,
