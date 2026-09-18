@@ -344,17 +344,25 @@ than decorative margins:
 
 Phase 4 is an isolated post-process on top of the complete Phase 3 result.
 
-The first implementation deliberately targets only linked ungrouped components
-that are safe to move independently. It excludes:
+The first implementation started with only linked ungrouped components that
+were safe to move independently. Corpus diagnostics showed that this was too
+conservative: the remaining width hotspots are mixed group/ungrouped flows, so
+excluding every node with a direct physical group link fragmented Jibs and the
+Flux2 VTON workflows into useless islands.
+
+Phase 4 therefore keeps these exclusions:
 
 - pinned nodes;
 - decorative nodes;
 - virtual Set/Get hubs;
 - local primitive/control sources;
-- terminal text previews;
-- nodes with a direct physical link to a group.
+- terminal text previews.
 
-Remaining pure ungrouped components are SCC-layered, wrapped into a bounded
+Direct group incidence is now allowed. Groups themselves remain fixed
+obstacles/anchors, and the candidate is still rejected globally if crossings,
+RTL links, or movable overlaps increase.
+
+Eligible mixed-flow components are SCC-layered, wrapped into a bounded
 horizontal band, and moved vertically only when needed to clear existing group
 and node geometry.
 
@@ -379,6 +387,27 @@ passes:
 This preserves Phase 3 as a safe fallback and lets the corpus show whether
 pure-ungrouped band compaction is useful before attempting a more invasive mixed
 group/ungrouped global layer model.
+
+### Phase 4 diagnostic findings
+
+The first corpus run produced no accepted Phase 4 changes. Targeted diagnostics
+showed why:
+
+- Jibs: 25 ungrouped nodes, but only 6 remained eligible after excluding
+  Set/Get hubs, controls, previews, and direct group incidence; those 6 formed
+  no linked component;
+- Flux2 VTON 6.0.2: 7 of 9 ungrouped nodes were directly group-incident, leaving
+  only one eligible node;
+- Flux2 VTON 6.0.2.7: the remaining 3-node pure component already fit inside the
+  target width band, so it offered 0% potential reduction;
+- Amazing Z-Image: all 114 ungrouped nodes are explicitly pinned in the source
+  workflow. The parser maps ComfyUI `flags.pinned` directly, so this is a real
+  hard layout constraint rather than a parser artifact.
+
+The Phase 4 experiment therefore now permits direct group incidence while still
+respecting pinned nodes and the established local-placement special cases.
+Amazing Z-Image is intentionally not compacted unless the product later gains an
+explicit user option to ignore authored pins.
 
 ## Current Scope Boundary
 
