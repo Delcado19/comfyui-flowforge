@@ -575,6 +575,9 @@ uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
   --match "Jibs_Ultimate" `
   --match "6.0.2.7" `
   --match "6.0.2 (Codex)"
+
+# Corpus review: print only Phase 5 candidates that pass the complete gate.
+uv run python tools/report_phase5_diagnostics.py example-workflows --optimize --accepted-only
 ```
 
 ## Current Scope Boundary
@@ -590,11 +593,26 @@ reference of 4,127 / 339 by 11 crossings while improving RTL by 8. That run
 revealed the port-aware versus center-metric acceptance mismatch described
 above.
 
-The next gate is to rerun the targeted Jibs/Flux2 diagnostics with both metrics
-visible, then rerun the full 81-workflow Optimize + Layout corpus. The Phase 4
-reference remains 4,127 center crossings / 339 center RTL links. No additional
-placement heuristics should be introduced until the dual-metric gate is
-validated against that corpus.
+The dual-metric rerun validated the safety contract:
+
+- Jibs remained rejected for insufficient width reduction even though both
+  crossing metrics and both RTL metrics improved.
+- Flux2 VTON 6.0.2 remained rejected for port-aware crossing regression; its
+  center crossings also regressed from 44 to 52.
+- Flux2 VTON 6.0.2.7 was rejected by the new center-crossing gate:
+  port crossings improved from 44 to 43 and port RTL from 11 to 8, but center
+  crossings regressed from 46 to 60.
+
+The full 81-workflow Optimize + Layout corpus then measured 4,124 center
+crossings / 335 center RTL links. This improves the Phase 4 reference of
+4,127 / 339 by 3 crossings and 4 RTL links, so the dual-metric Phase 5 gate
+passes the corpus safety check.
+
+Before changing placement heuristics again, the next review step is to identify
+the small set of workflows actually accepted by Phase 5 and inspect those
+layouts visually. The Phase 5 diagnostic reporter supports `--accepted-only`
+and prints corpus acceptance counts so this review does not require scanning all
+81 workflow blocks.
 
 ## Deferred TODOs
 

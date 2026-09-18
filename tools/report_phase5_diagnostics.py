@@ -29,6 +29,11 @@ def main() -> int:
         action="store_true",
         help="Run FlowForge Optimize before the Phase 4 baseline.",
     )
+    parser.add_argument(
+        "--accepted-only",
+        action="store_true",
+        help="Print only workflows whose Phase 5 candidate passes the full gate.",
+    )
     args = parser.parse_args()
 
     files = discover_workflow_files(args.root)
@@ -44,6 +49,11 @@ def main() -> int:
         print("No matching workflow files found.")
         return 1
 
+    attempted_count = 0
+    accepted_count = 0
+    rejected_count = 0
+    skipped_count = 0
+
     for path in selected:
         relative = path.relative_to(args.root)
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -52,6 +62,18 @@ def main() -> int:
             workflow = optimize_workflow(workflow)
         baseline = apply_phase4_layout(workflow)
         diag = diagnose_phase5(baseline)
+
+        if diag.attempted:
+            attempted_count += 1
+            if diag.accepted:
+                accepted_count += 1
+            else:
+                rejected_count += 1
+        else:
+            skipped_count += 1
+
+        if args.accepted_only and not diag.accepted:
+            continue
 
         print(relative)
         print(
@@ -83,6 +105,14 @@ def main() -> int:
                 f"reason={diag.rejection_reason}"
             )
 
+    print(
+        "Summary: "
+        f"selected={len(selected)} "
+        f"attempted={attempted_count} "
+        f"accepted={accepted_count} "
+        f"rejected={rejected_count} "
+        f"skipped={skipped_count}"
+    )
     return 0
 
 
