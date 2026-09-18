@@ -8,6 +8,7 @@ import logging
 import sys
 from pathlib import Path
 
+from flowforge.api import _workflow_to_comfyui_json
 from flowforge.layout import LayoutSettings, _node_visual_height, _node_visual_width
 from flowforge.layout_engine_v2 import _port_segments, _score_engine_v2
 from flowforge.layout_engine_v2_phase4 import apply_best_layout as apply_phase4_layout
@@ -85,10 +86,23 @@ def main() -> int:
             "mixed-graph edge-length diagnostics."
         ),
     )
+    parser.add_argument(
+        "--export-variant",
+        help=(
+            "Export one exact Phase 5 variant name for a single matched workflow."
+        ),
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        help="Output JSON path used with --export-variant.",
+    )
     args = parser.parse_args()
 
     if args.accepted_only and args.attempted_only:
         parser.error("--accepted-only and --attempted-only are mutually exclusive")
+    if bool(args.export_variant) != bool(args.output):
+        parser.error("--export-variant and --output must be used together")
 
     if args.accepted_only or args.attempted_only:
         logging.disable(logging.INFO)
@@ -105,6 +119,8 @@ def main() -> int:
     if not selected:
         print("No matching workflow files found.")
         return 1
+    if args.export_variant and len(selected) != 1:
+        parser.error("--export-variant requires exactly one selected workflow")
 
     attempted_count = 0
     accepted_count = 0
@@ -176,6 +192,12 @@ def main() -> int:
             _print_geometry_diagnostics(baseline)
         if args.variants and diag.attempted:
             _print_variant_diagnostics(baseline)
+        if args.export_variant:
+            _export_variant(
+                baseline,
+                args.export_variant,
+                args.output,
+            )
 
     print(
         "Summary: "
@@ -188,6 +210,37 @@ def main() -> int:
     _print_reason_summary("Attempted rejection reasons", attempted_reasons)
     _print_reason_summary("Skipped reasons", skipped_reasons)
     return 0
+
+
+def _export_variant(
+    baseline: Workflow,
+    variant_name: str,
+    output_path: Path,
+) -> None:
+    """Export one exact Phase 5 physical candidate without changing selection."""
+    baseline_score = _score_engine_v2(baseline)
+    candidates = _phase5_candidate_variants(
+        baseline,
+        settings=LayoutSettings(),
+        baseline_score=baseline_score,
+    )
+    candidate = next(
+        (item for item in candidates if item.name == variant_name),
+        None,
+    )
+    if candidate is None:
+        available = ", ".join(sorted(item.name for item in candidates))
+        raise SystemExit(
+            f"Unknown Phase 5 variant {variant_name!r}. Available: {available}"
+        )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = _workflow_to_comfyui_json(candidate.workflow)
+    output_path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    print(f"  exported: {candidate.name} -> {output_path}")
 
 
 def _print_reason_summary(title: str, reasons: dict[str, int]) -> None:

@@ -592,6 +592,12 @@ uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
 # Compare every physical Phase 5 variant for one selected workflow.
 uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
   --match "Reference Identity 1MP + 2x" --variants
+
+# Export one exact diagnostic candidate without changing production selection.
+uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
+  --match "Reference Identity 1MP + 2x" `
+  --export-variant "weighted-anchoredx-gap-40" `
+  --output "phase5-review/Flux2-9B-anchoredx.json"
 ```
 
 ## Current Scope Boundary
@@ -756,6 +762,14 @@ back toward their Phase 4 X positions. This targets weakly constrained branches
 that Compact-X otherwise drags all the way to the left while preserving the
 compact width envelope. The existing `layer` and `compactx` realizations remain
 unchanged for comparison.
+
+On the Flux 9B review case, `weighted-anchoredx-gap-40` also passes the full
+existing gate at the same 4,850 x 3,308 size. It keeps center crossings at 92,
+has 81 port crossings, and reduces weighted mixed-edge growth from the Compact-X
+candidate's +10.3% to only +1.7%. Production selection still prefers Compact-X
+because its port crossing/RTL metrics are numerically lower. The diagnostic
+reporter can therefore export an exact named variant with `--export-variant`
+and `--output` for visual review without changing production candidate ranking.
 
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.
