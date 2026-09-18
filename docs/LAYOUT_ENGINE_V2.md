@@ -858,6 +858,41 @@ RTL metrics, and size. This prevents a visually fragmented candidate from
 winning solely because it removes a few more port crossings while preserving
 the corpus safety floor.
 
+
+### Production Phase 5 corpus gate
+
+After promoting the visually validated minimum-gap Y-band candidates and the
+center-first/cohesion-aware accepted-candidate ranking, the production corpus
+gate passes:
+
+- discovered workflows: 81;
+- checked UI workflows: 81;
+- failures: 0;
+- center crossings: 5,723 -> 4,124;
+- center RTL links: 568 -> 339.
+
+The Phase 4 structural reference remains 4,127 center crossings / 339 center RTL
+links. Production Phase 5 therefore improves the corpus by 3 crossings while
+holding RTL exactly at the reference floor.
+
+The production Phase 5 diagnostic attempts 14 workflows and accepts exactly one:
+`Flux.2 klein 9B Reference Identity 1MP + 2x`, using
+`weighted-anchoredx-yband15-gap-12`. That candidate reduces size from
+5,810 x 2,774 to 4,850 x 3,311, port crossings from 82 to 81, and center
+crossings from 93 to 90 while keeping port/center RTL at 12 / 6. Visual review
+confirmed the result is coherent and compact enough to accept.
+
+The remaining 13 attempted workflows are still rejected by the unchanged safety
+gate: 6 for insufficient final width reduction, 5 for crossing regression, 1
+for area regression, and 1 for center-crossing regression. The remaining 67
+workflows are skipped by established scope constraints (minimum width, unmodeled
+empty-group geometry, pinned geometry, or too few eligible ungrouped nodes).
+
+This is the first Phase 5 corpus state that is both structurally non-regressing
+and backed by a visually accepted production candidate. Phase 5 can therefore
+be treated as complete for the current modeled scope; future work should expand
+scope or improve currently rejected workflows without weakening these gates.
+
 ## Deferred TODOs
 
 - Add user-facing Undo/Redo for destructive workflow transformations such as
