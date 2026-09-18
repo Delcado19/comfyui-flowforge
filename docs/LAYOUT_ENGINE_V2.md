@@ -608,6 +608,16 @@ uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
   --output "phase5-review/Flux2-9B-anchoredxy.json"
 ```
 
+### Diagnostic logging
+
+FlowForge module loggers write to the console by default and do not create
+per-module files during ordinary CLI, API, or diagnostic runs. File logging is
+opt-in through `setup_logger(..., log_dir=...)`; explicit file handlers are
+delayed until the first record is emitted, so unused handlers do not leave empty
+log files behind. Long corpus/report captures should continue to be redirected
+explicitly into the ignored `logs/` directory with PowerShell redirection or
+`Tee-Object`.
+
 ## Current Scope Boundary
 
 The active runtime now reaches Phase 5. Phase 4 remains the complete fallback

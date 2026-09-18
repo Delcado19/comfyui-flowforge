@@ -1,39 +1,66 @@
-import logging
+"""Project logging helpers."""
+
+from __future__ import annotations
+
 from datetime import datetime
+import logging
 from pathlib import Path
 
-def setup_logger(name: str, log_dir: str = "logs") -> logging.Logger:
+
+_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+
+
+def setup_logger(
+    name: str,
+    log_dir: str | Path | None = None,
+) -> logging.Logger:
+    """Return a FlowForge logger.
+
+    Console logging is enabled by default. File logging is opt-in via
+    ``log_dir`` so ordinary CLI, API, and diagnostic runs do not create one
+    timestamped file per imported module.
+
+    Explicit file handlers use ``delay=True``: the path is not created until
+    the logger actually emits a file-level record.
     """
-    Set up a logger that writes to a timestamped file in the log directory.
-    Filename format: YYYY-MM-DD_HH-mm-ss_Fehlerhaftes {name}.log
-    """
-    # Create log directory if it doesn't exist
-    log_path = Path(log_dir)
-    log_path.mkdir(exist_ok=True)
-    
-    # Generate timestamp
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    # Ensure name is safe for filename
-    safe_name = "".join(c for c in name if c.isalnum() or c in (" ", "_", "-")).rstrip()
-    filename = f"{timestamp}_Fehlerhaftes {safe_name}.log"
-    log_file = log_path / filename
-    
     logger = logging.getLogger(name)
     logger.setLevel(logging.DEBUG)
-    
-    # Avoid adding multiple handlers
-    if not logger.handlers:
-        # File handler
-        fh = logging.FileHandler(log_file, encoding='utf-8')
-        fh.setLevel(logging.DEBUG)
-        # Console handler
-        ch = logging.StreamHandler()
-        ch.setLevel(logging.INFO)
-        # Formatter
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        fh.setFormatter(formatter)
-        ch.setFormatter(formatter)
-        logger.addHandler(fh)
-        logger.addHandler(ch)
-    
+    logger.propagate = False
+
+    formatter = logging.Formatter(_FORMAT)
+
+    if not any(
+        isinstance(handler, logging.StreamHandler)
+        and not isinstance(handler, logging.FileHandler)
+        for handler in logger.handlers
+    ):
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        console.setFormatter(formatter)
+        logger.addHandler(console)
+
+    if log_dir is not None:
+        path = Path(log_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        safe_name = "".join(
+            character
+            if character.isalnum() or character in ("_", "-")
+            else "_"
+            for character in name
+        ).strip("_")
+        log_file = path / f"{timestamp}_{safe_name or 'flowforge'}.log"
+        if not any(
+            isinstance(handler, logging.FileHandler)
+            for handler in logger.handlers
+        ):
+            file_handler = logging.FileHandler(
+                log_file,
+                encoding="utf-8",
+                delay=True,
+            )
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(formatter)
+            logger.addHandler(file_handler)
+
     return logger
