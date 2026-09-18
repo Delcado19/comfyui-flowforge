@@ -321,7 +321,7 @@ def _layout_structure_metrics(workflow) -> LayoutStructureMetrics:
         group_columns=len({round(group.bounding[0], 3) for group in groups}),
         ungrouped_columns=len({round(node.x, 3) for node in ungrouped}),
         widest_group_name=(
-            widest_group.name or f"group-{widest_group.id}"
+            (widest_group.name or f"group-{widest_group.id}")
             if widest_group is not None
             else None
         ),
