@@ -175,21 +175,44 @@ The experiment and its tests were therefore removed instead of accumulating
 dead layout logic in the branch. Git history preserves the implementation and
 benchmark evidence.
 
-### Current Phase 2 gate
+### Phase 2 corpus result
 
-The weighted group-level pass must now be measured on the same 81-workflow corpus
-using both commands:
+The weighted group-level pass was measured on the same 81-workflow corpus:
 
-```powershell
-uv run python tools/report_layout_quality.py example-workflows --top 20
-uv run python tools/report_layout_quality.py example-workflows --optimize --top 20
-```
+| Mode | Master | First v2 | Phase 2 |
+| --- | ---: | ---: | ---: |
+| Layout only crossings / RTL | 6,390 / 461 | 6,068 / 379 | 6,052 / 379 |
+| Optimize + Layout crossings / RTL | 4,320 / 372 | 4,395 / 318 | 4,153 / 318 |
 
-The primary comparisons are against:
+Phase 2 therefore preserves the first-v2 RTL gains, slightly improves Layout
+Only crossings, and improves Optimize + Layout by 242 crossings relative to the
+first v2 implementation and by 167 relative to master.
 
-- master: 6,390 / 461 and 4,320 / 372;
-- first v2: 6,068 / 379 and 4,395 / 318;
-- the `Jibs_Ultimate_SD_Upscale_SDXL_V18_Workflow.json` regression.
+The strongest real-world regression also changed materially after Optimize:
+`Jibs_Ultimate_SD_Upscale_SDXL_V18_Workflow.json` improved from 960 crossings
+on master and 1,056 on first v2 to 853 on Phase 2. Layout Only remains a known
+weak case at 1,168 crossings, so group ordering alone does not solve the
+unoptimized geometry.
+
+### Phase 2.5 compact placement
+
+Corpus inspection also exposed a strong left-to-right width bias. The node-level
+v2 refiner correctly computed SCC layers and crossing order, but then placed
+every physical layer into a fresh X column, discarding the compact internal
+layer placement already available in the legacy engine.
+
+Phase 2.5 keeps the v2 structural ordering but reuses the existing compact
+internal layer placement when assigning physical coordinates. Candidate
+selection also adds width guardrails:
+
+- reject more than 35% width growth when the candidate provides only a minor
+  crossing/RTL improvement;
+- allow width growth for a significant graph-quality gain;
+- prefer at least 25% compaction when crossings and RTL regress only within
+  small bounded tolerances.
+
+The intent is to remove pathological horizontal expansion without replacing the
+crossing-aware ordering logic with a purely geometric packing heuristic.
 
 ## Current Scope Boundary
 
@@ -197,9 +220,10 @@ The active engine now refines movable group internals and top-level group order.
 Ungrouped linked dataflow still uses the legacy placement, including its bridge
 and external-source special cases.
 
-If the weighted group-level pass improves the corpus without introducing new
-large regressions, the next structural target is ungrouped linked flow ordering
-using the same SCC/dummy/sweep core.
+After Phase 2.5 compactness is re-measured, the next structural target is
+ungrouped linked flow ordering using the same SCC/dummy/sweep core. Phase 3
+should not begin until the compactness guard is shown to preserve the Phase 2
+crossing and RTL gains.
 
 ## Deferred TODOs
 
