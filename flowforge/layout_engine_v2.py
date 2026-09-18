@@ -72,15 +72,10 @@ V2_LINK_WEIGHT = 0.02
 V2_ASPECT_WEIGHT = 160.0
 V2_TARGET_ASPECT_RATIO = 1.35
 V2_MAX_WIDTH_GROWTH_RATIO = 1.35
-V2_COMPACT_WIDTH_RATIO = 0.75
 V2_SIGNIFICANT_CROSSING_GAIN_RATIO = 0.05
 V2_SIGNIFICANT_CROSSING_GAIN_MIN = 8
 V2_SIGNIFICANT_RTL_GAIN_RATIO = 0.10
 V2_SIGNIFICANT_RTL_GAIN_MIN = 3
-V2_COMPACT_CROSSING_TOLERANCE_RATIO = 0.02
-V2_COMPACT_CROSSING_TOLERANCE_MIN = 3
-V2_COMPACT_RTL_TOLERANCE_RATIO = 0.05
-V2_COMPACT_RTL_TOLERANCE_MIN = 1
 
 Vertex = Hashable
 
@@ -188,13 +183,21 @@ def _candidate_is_better(candidate: EngineV2Score, incumbent: EngineV2Score) -> 
 
     crossing_gain = incumbent.crossings - candidate.crossings
     rtl_gain = incumbent.right_to_left_links - candidate.right_to_left_links
-    significant_crossing_gain = crossing_gain >= max(
-        V2_SIGNIFICANT_CROSSING_GAIN_MIN,
-        math.ceil(incumbent.crossings * V2_SIGNIFICANT_CROSSING_GAIN_RATIO),
+    significant_crossing_gain = (
+        candidate.crossings == 0 < incumbent.crossings
+        or crossing_gain
+        >= max(
+            V2_SIGNIFICANT_CROSSING_GAIN_MIN,
+            math.ceil(incumbent.crossings * V2_SIGNIFICANT_CROSSING_GAIN_RATIO),
+        )
     )
-    significant_rtl_gain = rtl_gain >= max(
-        V2_SIGNIFICANT_RTL_GAIN_MIN,
-        math.ceil(incumbent.right_to_left_links * V2_SIGNIFICANT_RTL_GAIN_RATIO),
+    significant_rtl_gain = (
+        candidate.right_to_left_links == 0 < incumbent.right_to_left_links
+        or rtl_gain
+        >= max(
+            V2_SIGNIFICANT_RTL_GAIN_MIN,
+            math.ceil(incumbent.right_to_left_links * V2_SIGNIFICANT_RTL_GAIN_RATIO),
+        )
     )
 
     if (
@@ -204,23 +207,6 @@ def _candidate_is_better(candidate: EngineV2Score, incumbent: EngineV2Score) -> 
         and not significant_rtl_gain
     ):
         return False
-
-    compact_crossing_tolerance = max(
-        V2_COMPACT_CROSSING_TOLERANCE_MIN,
-        math.ceil(incumbent.crossings * V2_COMPACT_CROSSING_TOLERANCE_RATIO),
-    )
-    compact_rtl_tolerance = max(
-        V2_COMPACT_RTL_TOLERANCE_MIN,
-        math.ceil(incumbent.right_to_left_links * V2_COMPACT_RTL_TOLERANCE_RATIO),
-    )
-    if (
-        incumbent.width > 0
-        and candidate.width <= incumbent.width * V2_COMPACT_WIDTH_RATIO
-        and candidate.crossings <= incumbent.crossings + compact_crossing_tolerance
-        and candidate.right_to_left_links
-        <= incumbent.right_to_left_links + compact_rtl_tolerance
-    ):
-        return True
 
     return candidate.total < incumbent.total
 
