@@ -588,6 +588,10 @@ uv run python tools/report_phase5_diagnostics.py example-workflows --optimize --
 # Geometry review for a selected workflow/proposal.
 uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
   --match "Virtual Try-On 6.0 (Codex)" --geometry
+
+# Compare every physical Phase 5 variant for one selected workflow.
+uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
+  --match "Reference Identity 1MP + 2x" --variants
 ```
 
 ## Current Scope Boundary
@@ -727,6 +731,13 @@ weighted mixed-edge Manhattan length, and the longest mixed edge. This avoids
 diluting top-level dispersion with many internal links inside large groups.
 These measurements remain diagnostic only; no new acceptance threshold is
 introduced until they are compared across the attempted corpus.
+
+The reporter also supports `--variants` for one targeted workflow. It prints
+all physical Phase 5 candidates, their existing gate result, and their mixed
+edge-length/max-edge metrics. This is intended to distinguish a bad candidate
+selection from a missing safety gate: if another already-generated variant
+passes the current gate with materially better cohesion, candidate ranking
+should be fixed before adding a new rejection rule.
 
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.

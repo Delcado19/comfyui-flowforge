@@ -15,6 +15,7 @@ from flowforge.layout_engine_v2_phase5 import (
     _best_diagnostic_candidate,
     _build_mixed_graph,
     _center_flow_metrics,
+    _mixed_rejection_reason,
     _mixed_vertex_size,
     _mixed_vertex_xy,
     _phase5_candidate_variants,
@@ -74,6 +75,14 @@ def main() -> int:
         help=(
             "Compare compact baseline/proposal geometry diagnostics, including "
             "empty groups, node gaps, density, and moved top-level items."
+        ),
+    )
+    parser.add_argument(
+        "--variants",
+        action="store_true",
+        help=(
+            "Print every Phase 5 physical candidate with gate result and "
+            "mixed-graph edge-length diagnostics."
         ),
     )
     args = parser.parse_args()
@@ -165,6 +174,8 @@ def main() -> int:
 
         if args.geometry and diag.attempted:
             _print_geometry_diagnostics(baseline)
+        if args.variants and diag.attempted:
+            _print_variant_diagnostics(baseline)
 
     print(
         "Summary: "
@@ -190,6 +201,43 @@ def _print_reason_summary(title: str, reasons: dict[str, int]) -> None:
         )
     )
     print(f"{title}: {values}")
+
+
+def _print_variant_diagnostics(baseline: Workflow) -> None:
+    """Print every physical Phase 5 proposal against the same Phase 4 baseline."""
+    baseline_score = _score_engine_v2(baseline)
+    baseline_center = _center_flow_metrics(baseline)
+    baseline_mixed = _mixed_geometry_summary(baseline)
+    candidates = _phase5_candidate_variants(
+        baseline,
+        settings=LayoutSettings(),
+        baseline_score=baseline_score,
+    )
+    print("  variants:")
+    for candidate in sorted(candidates, key=lambda item: item.name):
+        reason = _mixed_rejection_reason(
+            candidate.score,
+            baseline_score,
+            candidate.center_metrics,
+            baseline_center,
+        )
+        mixed = _mixed_geometry_summary(candidate.workflow)
+        edge_delta = (
+            (mixed["edge_length"] / baseline_mixed["edge_length"] - 1.0) * 100.0
+            if baseline_mixed["edge_length"] > 0
+            else 0.0
+        )
+        print(
+            f"    - {candidate.name}: "
+            f"{candidate.score.width:.0f}x{candidate.score.height:.0f}; "
+            f"port-crossings={candidate.score.crossings}; "
+            f"center-crossings={candidate.center_metrics.crossings}; "
+            f"port-rtl={candidate.score.right_to_left_links}; "
+            f"center-rtl={candidate.center_metrics.right_to_left_links}; "
+            f"mixed-edge={mixed['edge_length']:.0f} ({edge_delta:+.1f}%); "
+            f"max-mixed-edge={mixed['max_edge']:.0f}; "
+            f"reason={reason}"
+        )
 
 
 def _print_geometry_diagnostics(baseline: Workflow) -> None:
