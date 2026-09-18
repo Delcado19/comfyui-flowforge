@@ -804,6 +804,10 @@ one global `base_y` and restoring every individual Phase 4 Y coordinate. The
 Y-band candidates are also excluded from production Phase 5 selection until
 their metrics and visual output are reviewed.
 
+The full Y-band review on Flux 9B produced the best visual result so far at `weighted-anchoredx-yband-gap-40`: width remained 4,850 px, port crossings improved from 82 to 78, center crossings from 93 to 88, and weighted mixed-edge growth stayed at +1.5%. Its remaining failure is vertical extent: 4,850 x 3,731 grows total area by about 12.3%.
+
+To measure that trade-off instead of inventing another Y heuristic, diagnostics now include `yband25`, `yband50`, and `yband75` at the compact 40 px internal gap. They apply 25%, 50%, or 75% of the layer-level Phase 4 Y shift. A strength of 0% is the existing stacked Anchored-X placement; 100% is the full Y-band placement. These compressed Y-band candidates remain diagnostic-only.
+
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.
 

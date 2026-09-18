@@ -420,6 +420,44 @@ def _phase5_layer_anchor_candidate_variants(
     return candidates
 
 
+def _phase5_compressed_yband_candidate_variants(
+    baseline: Workflow,
+    settings: LayoutSettings,
+    baseline_score: EngineV2Score,
+) -> list[_Phase5Candidate]:
+    """Build diagnostic partial Y-band anchor candidates at compact spacing."""
+    candidates: list[_Phase5Candidate] = []
+    compact_gap = _phase5_vertical_gaps(settings)[-1]
+    for order_mode in ("weighted", "stable"):
+        for anchor_strength in (0.25, 0.5, 0.75):
+            candidate = deepcopy(baseline)
+            if not _place_mixed_global_flow(
+                candidate,
+                settings,
+                baseline_score.width,
+                order_mode=order_mode,
+                horizontal_mode="anchored",
+                vertical_gap=compact_gap,
+                vertical_mode="layer_anchor",
+                vertical_anchor_strength=anchor_strength,
+            ):
+                continue
+            _finalize_refinement(candidate, settings)
+            percent = int(round(anchor_strength * 100))
+            candidates.append(
+                _Phase5Candidate(
+                    name=(
+                        f"{order_mode}-anchoredx-yband{percent}"
+                        f"-gap-{compact_gap:g}"
+                    ),
+                    workflow=candidate,
+                    score=_score_engine_v2(candidate),
+                    center_metrics=_center_flow_metrics(candidate),
+                )
+            )
+    return candidates
+
+
 def _phase5_vertical_gaps(settings: LayoutSettings) -> list[float]:
     """Return conservative spacing variants derived from existing layout settings."""
     standard = max(settings.group_v_gap, settings.node_v_gap)
@@ -682,6 +720,7 @@ def _place_mixed_global_flow(
     horizontal_mode: str = "layer",
     vertical_gap: float | None = None,
     vertical_mode: str = "stacked",
+    vertical_anchor_strength: float = 1.0,
 ) -> bool:
     """Place mixed-flow layers with conservative left-to-right geometry."""
     del workflow_width
@@ -740,6 +779,10 @@ def _place_mixed_global_flow(
         if vertical_gap is None
         else max(MIXED_GLOBAL_MIN_VERTICAL_GAP, vertical_gap)
     )
+    if not 0.0 <= vertical_anchor_strength <= 1.0:
+        raise ValueError(
+            "Phase 5 vertical anchor strength must be between 0 and 1"
+        )
     horizontal_gap = max(settings.group_h_gap, settings.node_h_gap)
 
     for layer, vertices in layer_to_real.items():
@@ -826,8 +869,9 @@ def _place_mixed_global_flow(
                     ordered_offsets[middle - 1] + ordered_offsets[middle]
                 ) / 2.0
 
+            applied_shift = layer_shift * vertical_anchor_strength
             for vertex, stacked in stacked_y.items():
-                vertex_y[vertex] = stacked + layer_shift
+                vertex_y[vertex] = stacked + applied_shift
     else:
         raise ValueError(f"Unknown Phase 5 vertical mode: {vertical_mode}")
 

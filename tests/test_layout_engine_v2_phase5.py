@@ -329,6 +329,28 @@ def test_layer_anchor_vertical_mode_preserves_layer_spacing_near_baseline_band()
     assert (top_mid.y + bottom_mid.y) / 2.0 == 362.5
 
 
+def test_layer_anchor_strength_interpolates_toward_phase4_band():
+    workflow = _parallel_mixed_workflow()
+    workflow.nodes[11].y = 600
+    settings = LayoutSettings(node_x_distance=100, node_y_distance=80)
+
+    assert _place_mixed_global_flow(
+        workflow,
+        settings,
+        workflow_width=7_000,
+        order_mode="stable",
+        horizontal_mode="anchored",
+        vertical_gap=40,
+        vertical_mode="layer_anchor",
+        vertical_anchor_strength=0.5,
+    )
+
+    top_mid = workflow.nodes[10]
+    bottom_mid = workflow.nodes[11]
+    assert bottom_mid.y - top_mid.y == 140
+    assert (top_mid.y + bottom_mid.y) / 2.0 == 266.25
+
+
 def test_phase5_skips_pinned_group_geometry():
     workflow = _mixed_chain_workflow()
     extra = Node(id=12, type="Extra", x=6_500, y=450, size=[200, 100])
