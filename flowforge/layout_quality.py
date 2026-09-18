@@ -44,6 +44,10 @@ class LayoutStructureMetrics:
     ungrouped_flow_layers: int
     group_columns: int
     ungrouped_columns: int
+    decorative_count: int
+    decorative_span_width: float
+    widest_decorative_type: str | None
+    widest_decorative_width: float
     widest_group_name: str | None
     widest_group_width: float
     widest_ungrouped_type: str | None
@@ -309,6 +313,11 @@ def summarize_quality_text(
                         if structure.widest_ungrouped_type is not None
                         else "none"
                     )
+                    widest_decorative = (
+                        f"{structure.widest_decorative_type} ({structure.widest_decorative_width:.0f})"
+                        if structure.widest_decorative_type is not None
+                        else "none"
+                    )
                     lines.append(
                         "  structure: "
                         f"groups span={structure.group_span_width:.0f} "
@@ -317,6 +326,9 @@ def summarize_quality_text(
                         f"ungrouped span={structure.ungrouped_span_width:.0f} "
                         f"layers={structure.ungrouped_flow_layers} cols={structure.ungrouped_columns} "
                         f"widest={widest_ungrouped}; "
+                        f"decorative count={structure.decorative_count} "
+                        f"span={structure.decorative_span_width:.0f} "
+                        f"widest={widest_decorative}; "
                         f"edges={structure.left_edge_owner} -> {structure.right_edge_owner}"
                     )
     for failure in summary.failures[:20]:
@@ -337,6 +349,11 @@ def _layout_structure_metrics(workflow) -> LayoutStructureMetrics:
         for node in workflow.ungrouped_nodes
         if node.id in workflow.nodes and not _is_decorative_node(node)
     ]
+    decorative = [
+        node
+        for node in workflow.nodes.values()
+        if _is_decorative_node(node)
+    ]
 
     group_span_width = _span_width(
         (group.bounding[0], group.bounding[0] + group.bounding[2])
@@ -346,6 +363,10 @@ def _layout_structure_metrics(workflow) -> LayoutStructureMetrics:
         (node.x, node.x + _node_visual_width(node))
         for node in ungrouped
     )
+    decorative_span_width = _span_width(
+        (node.x, node.x + _node_visual_width(node))
+        for node in decorative
+    )
 
     group_layers = _group_flow_layers(workflow) if groups else {}
     ungrouped_layers = _ungrouped_flow_layers(workflow, ungrouped) if ungrouped else {}
@@ -353,6 +374,11 @@ def _layout_structure_metrics(workflow) -> LayoutStructureMetrics:
     widest_group = max(groups, key=lambda group: group.bounding[2], default=None)
     widest_ungrouped = max(
         ungrouped,
+        key=_node_visual_width,
+        default=None,
+    )
+    widest_decorative = max(
+        decorative,
         key=_node_visual_width,
         default=None,
     )
@@ -377,6 +403,16 @@ def _layout_structure_metrics(workflow) -> LayoutStructureMetrics:
         ungrouped_flow_layers=_layer_count(ungrouped_layers),
         group_columns=len({round(group.bounding[0], 3) for group in groups}),
         ungrouped_columns=len({round(node.x, 3) for node in ungrouped}),
+        decorative_count=len(decorative),
+        decorative_span_width=decorative_span_width,
+        widest_decorative_type=(
+            widest_decorative.type if widest_decorative is not None else None
+        ),
+        widest_decorative_width=(
+            _node_visual_width(widest_decorative)
+            if widest_decorative is not None
+            else 0.0
+        ),
         widest_group_name=(
             (widest_group.name or f"group-{widest_group.id}")
             if widest_group is not None
