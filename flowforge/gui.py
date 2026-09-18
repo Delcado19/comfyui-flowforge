@@ -9,6 +9,8 @@ import threading
 import time
 import webbrowser
 import http.client
+import os
+import shutil
 import socket
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -244,20 +246,40 @@ def _port_candidates(preferred_port: int, max_attempts: int):
     return range(preferred_port, preferred_port + max_attempts)
 
 
+def _resolve_npm_command() -> list[str]:
+    """Return a subprocess command prefix that can launch npm cross-platform."""
+    if os.name == "nt":
+        npm = shutil.which("npm.cmd") or shutil.which("npm")
+        if npm is None:
+            raise RuntimeError("npm was not found on PATH")
+
+        command_processor = os.environ.get("COMSPEC") or shutil.which("cmd.exe")
+        if command_processor is None:
+            raise RuntimeError("Windows command processor was not found")
+
+        return [command_processor, "/d", "/c", npm]
+
+    npm = shutil.which("npm")
+    if npm is None:
+        raise RuntimeError("npm was not found on PATH")
+    return [npm]
+
+
 def _run_frontend_dev(port: int, api_port: int):
     """Run the Vue dev server."""
     import subprocess
-    import os
+
+    npm_command = _resolve_npm_command()
 
     if not (FRONTEND_DIR / "node_modules").exists():
         logger.info("Installing frontend dependencies...")
-        subprocess.run(["npm", "install"], cwd=FRONTEND_DIR, check=True)
+        subprocess.run([*npm_command, "install"], cwd=FRONTEND_DIR, check=True)
 
     logger.info(f"Starting Vue dev server on http://{FRONTEND_HOST}:{port}...")
     env = os.environ.copy()
     env["FLOWFORGE_API_PORT"] = str(api_port)
     subprocess.Popen(
-        ["npm", "run", "dev", "--", "--host", FRONTEND_HOST, "--port", str(port)],
+        [*npm_command, "run", "dev", "--", "--host", FRONTEND_HOST, "--port", str(port)],
         cwd=FRONTEND_DIR,
         env=env,
     )
