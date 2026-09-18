@@ -5,8 +5,10 @@ from flowforge.layout_engine_v2 import EngineV2Score
 from flowforge.layout_engine_v2_phase4 import (
     _compact_pure_ungrouped_components,
     _eligible_ungrouped_nodes,
+    _group_bridged_component_rows,
     _phase4_exclusion_counts,
     _ungrouped_candidate_is_better,
+    _ungrouped_rejection_reason,
 )
 from flowforge.model import Group, Link, Node, Workflow
 
@@ -36,15 +38,37 @@ def _attach_link(workflow: Workflow, link: Link) -> None:
     workflow.nodes[link.target].input_links.append(link.id)
 
 
-def test_ungrouped_candidate_requires_crossing_and_rtl_preservation():
+def test_ungrouped_candidate_requires_full_compaction_gate():
     baseline = _score(crossings=100, rtl=20, width=6_000, height=4_000)
     compact = _score(crossings=100, rtl=20, width=5_000, height=4_200)
     crossing_regression = _score(crossings=101, rtl=20, width=4_000, height=4_000)
     rtl_regression = _score(crossings=100, rtl=21, width=4_000, height=4_000)
+    quality_gain_too_narrow = _score(
+        crossings=90,
+        rtl=20,
+        width=5_800,
+        height=3_800,
+    )
+    quality_gain_area_regression = _score(
+        crossings=90,
+        rtl=20,
+        width=5_000,
+        height=5_000,
+    )
 
     assert _ungrouped_candidate_is_better(compact, baseline)
     assert not _ungrouped_candidate_is_better(crossing_regression, baseline)
     assert not _ungrouped_candidate_is_better(rtl_regression, baseline)
+    assert not _ungrouped_candidate_is_better(quality_gain_too_narrow, baseline)
+    assert not _ungrouped_candidate_is_better(quality_gain_area_regression, baseline)
+    assert (
+        _ungrouped_rejection_reason(quality_gain_too_narrow, baseline)
+        == "insufficient_final_width_reduction"
+    )
+    assert (
+        _ungrouped_rejection_reason(quality_gain_area_regression, baseline)
+        == "area_regression"
+    )
 
 
 def test_eligible_ungrouped_nodes_include_direct_group_incident_nodes():
@@ -180,3 +204,53 @@ def test_phase4_diagnostics_report_group_incidence_without_excluding_it():
 
     assert counts["direct_group_nodes"] == 1
     assert incident.id in eligible_ids
+
+
+def test_group_bridged_diagnostics_connect_ungrouped_nodes_through_fixed_groups():
+    workflow = Workflow()
+    group_a_node = Node(id=1, type="GroupA", x=500, y=100, size=[200, 100])
+    group_b_node = Node(id=2, type="GroupB", x=1_500, y=100, size=[200, 100])
+    first = Node(id=10, type="First", x=100, y=100, size=[200, 100])
+    middle = Node(id=11, type="Middle", x=1_000, y=100, size=[200, 100])
+    last = Node(id=12, type="Last", x=2_000, y=100, size=[200, 100])
+    workflow.nodes = {
+        group_a_node.id: group_a_node,
+        group_b_node.id: group_b_node,
+        first.id: first,
+        middle.id: middle,
+        last.id: last,
+    }
+    workflow.groups = [
+        Group(id=100, name="A", nodes=[group_a_node], bounding=[450, 50, 300, 220]),
+        Group(id=200, name="B", nodes=[group_b_node], bounding=[1_450, 50, 300, 220]),
+    ]
+    workflow.ungrouped_nodes = [first, middle, last]
+
+    _attach_link(
+        workflow,
+        Link(id=1, source=10, source_port=0, target=1, target_port=0, type="DATA"),
+    )
+    _attach_link(
+        workflow,
+        Link(id=2, source=1, source_port=0, target=11, target_port=0, type="DATA"),
+    )
+    _attach_link(
+        workflow,
+        Link(id=3, source=11, source_port=0, target=2, target_port=0, type="DATA"),
+    )
+    _attach_link(
+        workflow,
+        Link(id=4, source=2, source_port=0, target=12, target_port=0, type="DATA"),
+    )
+
+    eligible = _eligible_ungrouped_nodes(workflow)
+    rows = _group_bridged_component_rows(
+        workflow,
+        {node.id: node for node in eligible},
+    )
+
+    assert len(rows) == 1
+    node_ids, group_ids, span = rows[0]
+    assert node_ids == {10, 11, 12}
+    assert group_ids == {100, 200}
+    assert span == 2_100

@@ -362,9 +362,11 @@ Direct group incidence is now allowed. Groups themselves remain fixed
 obstacles/anchors, and the candidate is still rejected globally if crossings,
 RTL links, or movable overlaps increase.
 
-Eligible mixed-flow components are SCC-layered, wrapped into a bounded
+Eligible ungrouped components are SCC-layered, wrapped into a bounded
 horizontal band, and moved vertically only when needed to clear existing group
-and node geometry.
+and node geometry. Direct group incidence no longer excludes a node, but the
+active compaction graph still connects only eligible ungrouped nodes to each
+other; groups are not yet structural vertices in the placement pass.
 
 The width target for a component is constrained by:
 
@@ -381,8 +383,12 @@ passes:
 - movable overlaps may not increase;
 - crossings may not increase;
 - RTL links may not increase;
-- if graph quality is unchanged, workflow width must fall by at least 8%;
+- workflow width must fall by at least 8%;
 - workflow area may not increase.
+
+Crossing or RTL improvements do not bypass the width or area requirements. This
+keeps Phase 4 a compaction pass rather than allowing a structurally better but
+nearly equally wide candidate to enter through a separate acceptance path.
 
 This preserves Phase 3 as a safe fallback and lets the corpus show whether
 pure-ungrouped band compaction is useful before attempting a more invasive mixed
@@ -409,6 +415,35 @@ respecting pinned nodes and the established local-placement special cases.
 Amazing Z-Image is intentionally not compacted unless the product later gains an
 explicit user option to ignore authored pins.
 
+A targeted rerun after enabling direct group incidence confirmed that the filter
+was only the first blocker:
+
+- Jibs: eligibility increased to 12 nodes. One 4-node component became
+  compactable with 11.8% estimated potential. Its proposal reduced crossings
+  from 756 to 674, but width only changed from 5,977 to 5,909 px and RTL rose
+  from 41 to 42, so it was rejected.
+- Flux2 VTON 6.0.2: 8 of 9 ungrouped nodes are eligible and 7 are directly
+  group-incident, but the pure eligible graph still has no component with the
+  minimum node count.
+- Flux2 VTON 6.0.2.7: 15 of 16 ungrouped nodes are eligible and 9 are directly
+  group-incident. The largest 6-node pure component spans 3,784 px but predicts
+  0% reduction inside the current target band.
+
+These results show that direct-group eligibility alone does not make Phase 4 a
+mixed structural graph. The diagnostics now additionally build a read-only
+group-bridged connectivity graph: eligible ungrouped nodes are normal vertices,
+groups are fixed connector supernodes, and physical group/group or
+group/ungrouped links preserve connectivity. The reporter prints the number of
+such mixed components plus the largest component's eligible-node count, group
+count, and horizontal span. This graph is diagnostic only and does not move
+groups.
+
+If the targeted workflows collapse from several pure eligible fragments into
+one large group-bridged component, that is evidence for the next architecture:
+a shared global dependency graph with fixed group supernodes and movable
+ungrouped nodes. Thresholds should not be relaxed to compensate for missing
+group connectivity.
+
 ## Current Scope Boundary
 
 The active engine now refines movable group internals and top-level group order,
@@ -416,9 +451,12 @@ then optionally compacts the global group and linked-ungrouped flow with the
 existing wrap geometry. Bridge, external-source, control, and virtual-hub
 special cases still remain authoritative.
 
-If the Phase 3 corpus confirms useful width reduction without losing the Phase 2
-quality gains, the next structural target is a true SCC/dummy/sweep ordering pass
-for ungrouped linked flow rather than only compact placement.
+The next structural decision is gated by the new group-bridged diagnostics. If
+they show that groups join the fragmented ungrouped islands in Jibs and Flux2
+VTON, the next target is a shared Group/Ungrouped dependency graph with group
+supernodes, SCC condensation, dummy vertices, weighted ordering, and separate
+physical band placement. Until then, Phase 3 remains the fallback and Phase 4
+stays conservative.
 
 ## Deferred TODOs
 

@@ -1,12 +1,18 @@
 """Ungrouped-flow compaction for FlowForge layout engine v2.
 
 Phase 4 keeps the complete Phase 3 result as a baseline and tries to compact
-pure linked ungrouped components into a shared horizontal band. Components that
-are directly incident to groups or belong to established local-placement
-special cases remain untouched.
+eligible linked ungrouped components into a shared horizontal band. Direct
+group incidence is eligible, but groups remain fixed geometry and are not part
+of the active compaction graph.
 
-The first Phase 4 gate is intentionally strict: no additional crossings, RTL
-links, or movable overlaps are allowed.
+Diagnostics also build a read-only group-bridged connectivity graph that treats
+groups as connector supernodes. This measures whether fixed groups are what
+join otherwise fragmented ungrouped flow before a more invasive global graph is
+considered.
+
+The Phase 4 gate is intentionally strict: no additional crossings, RTL links,
+or movable overlaps are allowed, workflow width must fall by at least 8%, and
+workflow area may not increase.
 """
 
 from __future__ import annotations
@@ -59,6 +65,10 @@ class Phase4Diagnostics:
     excluded_text_preview: int
     direct_group_nodes: int
     linked_components: int
+    group_bridged_components: int
+    largest_group_bridged_ungrouped_nodes: int
+    largest_group_bridged_groups: int
+    largest_group_bridged_span: float
     candidate_components: int
     compactable_components: int
     largest_component_nodes: int
@@ -138,6 +148,12 @@ def diagnose_phase4(
         for component in _connected_components(undirected)
         if any(adjacency[node_id] for node_id in component)
     ]
+    group_bridged_rows = _group_bridged_component_rows(workflow, eligible_by_id)
+    largest_group_bridged = max(
+        group_bridged_rows,
+        key=lambda row: row[2],
+        default=(set(), set(), 0.0),
+    )
     candidate_components = [
         component
         for component in linked_components
@@ -183,6 +199,10 @@ def diagnose_phase4(
             total_ungrouped=len(workflow.ungrouped_nodes),
             eligible_nodes=len(eligible),
             linked_components=len(linked_components),
+            group_bridged_components=len(group_bridged_rows),
+            largest_group_bridged_ungrouped_nodes=len(largest_group_bridged[0]),
+            largest_group_bridged_groups=len(largest_group_bridged[1]),
+            largest_group_bridged_span=largest_group_bridged[2],
             candidate_components=len(candidate_components),
             compactable_components=len(compactable),
             largest_component_nodes=len(largest[0]),
@@ -209,6 +229,10 @@ def diagnose_phase4(
         total_ungrouped=len(workflow.ungrouped_nodes),
         eligible_nodes=len(eligible),
         linked_components=len(linked_components),
+        group_bridged_components=len(group_bridged_rows),
+        largest_group_bridged_ungrouped_nodes=len(largest_group_bridged[0]),
+        largest_group_bridged_groups=len(largest_group_bridged[1]),
+        largest_group_bridged_span=largest_group_bridged[2],
         candidate_components=len(candidate_components),
         compactable_components=len(compactable),
         largest_component_nodes=len(largest[0]),
@@ -276,6 +300,91 @@ def _eligible_graph(
     return adjacency, undirected
 
 
+def _group_bridged_component_rows(
+    workflow: Workflow,
+    eligible_by_id: dict[int, Node],
+) -> list[tuple[set[int], set[int], float]]:
+    """Describe eligible-node connectivity when groups act as fixed connectors."""
+    group_by_node_id = _group_by_node_id(workflow)
+    graph: dict[tuple[str, int], set[tuple[str, int]]] = {
+        ("node", node_id): set() for node_id in eligible_by_id
+    }
+
+    def endpoint_vertex(node_id: int) -> tuple[str, int] | None:
+        if node_id in eligible_by_id:
+            return ("node", node_id)
+        group = group_by_node_id.get(node_id)
+        if group is not None:
+            return ("group", group.id)
+        return None
+
+    for link in workflow.links.values():
+        source = endpoint_vertex(link.source)
+        target = endpoint_vertex(link.target)
+        if source is None or target is None or source == target:
+            continue
+        graph.setdefault(source, set()).add(target)
+        graph.setdefault(target, set()).add(source)
+
+    rows: list[tuple[set[int], set[int], float]] = []
+    for component in _mixed_connected_components(graph):
+        node_ids = {vertex_id for kind, vertex_id in component if kind == "node"}
+        group_ids = {vertex_id for kind, vertex_id in component if kind == "group"}
+        if not node_ids or not group_ids:
+            continue
+        rows.append(
+            (
+                node_ids,
+                group_ids,
+                _mixed_component_span(workflow, eligible_by_id, node_ids, group_ids),
+            )
+        )
+    return rows
+
+
+def _mixed_connected_components(
+    undirected: dict[tuple[str, int], set[tuple[str, int]]],
+) -> list[set[tuple[str, int]]]:
+    components: list[set[tuple[str, int]]] = []
+    unseen = set(undirected)
+    while unseen:
+        start = min(unseen)
+        stack = [start]
+        component: set[tuple[str, int]] = set()
+        while stack:
+            vertex = stack.pop()
+            if vertex in component:
+                continue
+            component.add(vertex)
+            unseen.discard(vertex)
+            stack.extend(sorted(undirected[vertex] - component, reverse=True))
+        components.append(component)
+    return components
+
+
+def _mixed_component_span(
+    workflow: Workflow,
+    eligible_by_id: dict[int, Node],
+    node_ids: set[int],
+    group_ids: set[int],
+) -> float:
+    bounds: list[tuple[float, float]] = []
+    for node_id in node_ids:
+        node = eligible_by_id[node_id]
+        bounds.append((node.x, node.x + _node_visual_width(node)))
+
+    groups_by_id = {group.id: group for group in workflow.groups}
+    for group_id in group_ids:
+        group = groups_by_id.get(group_id)
+        if group is None or not _has_positive_bounding(group):
+            continue
+        bounds.append((group.bounding[0], group.bounding[0] + group.bounding[2]))
+
+    if not bounds:
+        return 0.0
+    return max(right for _left, right in bounds) - min(left for left, _right in bounds)
+
+
 def _component_potential_reduction(
     workflow: Workflow,
     nodes: list[Node],
@@ -322,12 +431,6 @@ def _ungrouped_rejection_reason(
         return "crossing_regression"
     if candidate.right_to_left_links > baseline.right_to_left_links:
         return "rtl_regression"
-    if (
-        candidate.crossings < baseline.crossings
-        or candidate.right_to_left_links < baseline.right_to_left_links
-    ):
-        return "accepted_quality_gain"
-
     if baseline.width <= 0:
         return "invalid_baseline_width"
     width_reduction = 1.0 - candidate.width / baseline.width
@@ -349,7 +452,7 @@ def _compact_pure_ungrouped_components(
     settings: LayoutSettings,
     workflow_width: float,
 ) -> bool:
-    """Compact linked ungrouped components that do not touch group geometry."""
+    """Compact eligible linked ungrouped components around fixed group geometry."""
     eligible = _eligible_ungrouped_nodes(workflow)
     if len(eligible) < UNGROUPED_COMPACT_MIN_COMPONENT_NODES:
         return False
@@ -651,12 +754,6 @@ def _ungrouped_candidate_is_better(
         return False
     if candidate.right_to_left_links > baseline.right_to_left_links:
         return False
-
-    if (
-        candidate.crossings < baseline.crossings
-        or candidate.right_to_left_links < baseline.right_to_left_links
-    ):
-        return True
 
     if baseline.width <= 0:
         return False

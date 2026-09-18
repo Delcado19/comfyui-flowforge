@@ -70,6 +70,13 @@ def main() -> int:
             f"largest_span={diag.largest_component_span:.0f} "
             f"max_potential={diag.max_potential_reduction * 100:.1f}%"
         )
+        print(
+            "  group-bridged: "
+            f"components={diag.group_bridged_components} "
+            f"largest_ungrouped={diag.largest_group_bridged_ungrouped_nodes} "
+            f"largest_groups={diag.largest_group_bridged_groups} "
+            f"largest_span={diag.largest_group_bridged_span:.0f}"
+        )
         if diag.attempted:
             print(
                 "  proposal: "
