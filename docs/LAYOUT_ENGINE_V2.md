@@ -716,9 +716,17 @@ protect visual cohesion or link-span growth.
 
 The optional `--geometry` diagnostic now also reports total Manhattan
 port-to-port link length and the longest individual port link before/after the
-proposal. These measurements are diagnostic only; no new acceptance threshold
-is introduced until the corpus shows how strongly they separate visually valid
-and invalid candidates.
+proposal. On the visually rejected `Flux.2 klein 9B Reference Identity 1MP +
+2x` candidate, however, those all-link metrics increased by only about 1.8%
+and 1.1% respectively, so they do not explain the severe visual islanding well.
+
+The diagnostic therefore also measures the geometry at the exact abstraction
+level Phase 5 moves: real mixed-graph vertices and mixed edges. It reports
+mixed-vertex bounds, approximate mixed-vertex density, largest free X/Y bands,
+weighted mixed-edge Manhattan length, and the longest mixed edge. This avoids
+diluting top-level dispersion with many internal links inside large groups.
+These measurements remain diagnostic only; no new acceptance threshold is
+introduced until they are compared across the attempted corpus.
 
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.
