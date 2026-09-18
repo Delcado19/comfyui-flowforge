@@ -821,14 +821,32 @@ Its only rejection is area, now just about +0.84% above the Phase 4 baseline.
 At the same width, no-area-growth would require a height of roughly 3,323 px,
 so the candidate misses the gate by only about 28 px.
 
-Before considering any area-gate relaxation or spacing below the established
-12 px floor, diagnostics now refine the minimum-gap sweep with 10%, 15%, and
-20% Y-band anchor strengths in addition to 25/50/75%. These finer points target
-the narrow interval where the visual locality signal may survive while the
-strict area gate still passes.
+The minimum-gap refinement found two fully gate-compliant candidates:
+`weighted-anchoredx-yband10-gap-12` at 4,850 x 3,292 and
+`weighted-anchoredx-yband15-gap-12` at 4,850 x 3,311. The 10% variant reaches
+81 port crossings, 92 center crossings, and about +0.7% weighted mixed-edge
+length. The 15% variant reaches 81 port crossings, 90 center crossings, and
+about +0.8% weighted mixed-edge length. Both preserve the strict overlap,
+crossing/RTL, width-reduction, and no-area-growth gates.
 
-The existing safety gates should remain unchanged until a candidate produces
-both measurable and visually acceptable improvement.
+Visual review found both minimum-gap variants coherent and compact. The 15%
+variant was preferred by a small margin: its extra 19 px of height is not
+visually significant, while the center-crossing metric improves from 92 to 90.
+The previously selected Compact-X candidate remains narrower by no additional
+amount, but its top-level mixed-edge length grew by about +10.3% and it failed
+visual review because weakly constrained branches formed detached-looking
+islands.
+
+The validated 10% and 15% minimum-gap Y-band variants are therefore promoted
+into normal Phase 5 candidate generation. Unvalidated Y-band strengths remain
+diagnostic only. The hard acceptance gate is unchanged.
+
+When multiple candidates pass that gate, selection now ranks the
+corpus-compatible center-crossing metric first, then weighted mixed-graph edge
+length as a top-level cohesion tie-breaker, followed by port-aware crossings,
+RTL metrics, and size. This prevents a visually fragmented candidate from
+winning solely because it removes a few more port crossings while preserving
+the corpus safety floor.
 
 ## Deferred TODOs
 
@@ -865,6 +883,8 @@ Regression coverage includes:
 - shared Group/Ungrouped dependency layering;
 - preservation of group-internal geometry during mixed placement;
 - strict Phase 5 width/area and crossing/RTL acceptance gates;
+- production minimum-gap 10%/15% Y-band candidate generation;
+- center-first accepted-candidate ranking with mixed-graph cohesion tie-break;
 - Phase 5 pin-constraint blocking.
 
 ## Documentation Status

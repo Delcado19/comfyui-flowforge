@@ -8,14 +8,18 @@ from flowforge.layout_engine_v2 import (
 )
 from flowforge.layout_engine_v2_phase5 import (
     _CenterFlowMetrics,
+    _Phase5Candidate,
     _build_mixed_graph,
     _center_flow_metrics,
     _has_phase5_unmodeled_group_geometry,
     _mixed_candidate_is_better,
     _mixed_rejection_reason,
+    _phase5_candidate_variants,
     _phase5_compressed_yband_candidate_variants,
     _phase5_vertical_gaps,
     _place_mixed_global_flow,
+    _select_accepted_phase5_candidate,
+    _weighted_mixed_edge_length,
 )
 from flowforge.model import Group, Link, Node, Workflow
 
@@ -487,7 +491,7 @@ def test_center_flow_metrics_match_center_segment_geometry():
 
 
 
-def test_compressed_yband_variants_include_minimum_gap():
+def test_compressed_yband_variants_keep_unvalidated_strengths_diagnostic():
     workflow = _parallel_mixed_workflow()
     settings = LayoutSettings(node_x_distance=100, node_y_distance=80)
 
@@ -498,15 +502,71 @@ def test_compressed_yband_variants_include_minimum_gap():
     )
     names = {candidate.name for candidate in candidates}
 
-    assert len(candidates) == 18
+    assert len(candidates) == 14
     assert "weighted-anchoredx-yband25-gap-40" in names
-    assert "weighted-anchoredx-yband10-gap-12" in names
-    assert "weighted-anchoredx-yband15-gap-12" in names
     assert "weighted-anchoredx-yband20-gap-12" in names
     assert "weighted-anchoredx-yband25-gap-12" in names
     assert "stable-anchoredx-yband75-gap-40" in names
     assert "stable-anchoredx-yband75-gap-12" in names
-    assert "weighted-anchoredx-yband10-gap-40" not in names
+    assert "weighted-anchoredx-yband10-gap-12" not in names
+    assert "weighted-anchoredx-yband15-gap-12" not in names
+
+
+def test_phase5_production_candidates_include_validated_minimum_gap_ybands():
+    workflow = _parallel_mixed_workflow()
+    settings = LayoutSettings(node_x_distance=100, node_y_distance=80)
+
+    candidates = _phase5_candidate_variants(
+        workflow,
+        settings,
+        _score_engine_v2(workflow),
+    )
+    names = {candidate.name for candidate in candidates}
+
+    assert "weighted-anchoredx-yband10-gap-12" in names
+    assert "weighted-anchoredx-yband15-gap-12" in names
+    assert "stable-anchoredx-yband10-gap-12" in names
+    assert "stable-anchoredx-yband15-gap-12" in names
+
+
+def test_phase5_selection_prefers_center_geometry_and_mixed_cohesion():
+    baseline = _score(crossings=82, rtl=12, width=5_810, height=2_774)
+    baseline_center = _CenterFlowMetrics(crossings=93, right_to_left_links=6)
+
+    compact_workflow = _parallel_mixed_workflow()
+    compact_workflow.nodes[11].x += 1_000
+    compact_workflow.nodes[12].x += 1_000
+    yband_workflow = _parallel_mixed_workflow()
+
+    compact = _Phase5Candidate(
+        name="weighted-compactx-gap-40",
+        workflow=compact_workflow,
+        score=_score(crossings=78, rtl=10, width=4_850, height=3_308),
+        center_metrics=_CenterFlowMetrics(
+            crossings=92,
+            right_to_left_links=4,
+        ),
+    )
+    yband = _Phase5Candidate(
+        name="weighted-anchoredx-yband15-gap-12",
+        workflow=yband_workflow,
+        score=_score(crossings=81, rtl=12, width=4_850, height=3_311),
+        center_metrics=_CenterFlowMetrics(
+            crossings=90,
+            right_to_left_links=6,
+        ),
+    )
+
+    assert _weighted_mixed_edge_length(yband.workflow) < _weighted_mixed_edge_length(
+        compact.workflow
+    )
+    selected = _select_accepted_phase5_candidate(
+        [compact, yband],
+        baseline,
+        baseline_center,
+    )
+
+    assert selected is yband
 
 
 def test_phase5_vertical_gap_profiles_use_existing_spacing_controls():

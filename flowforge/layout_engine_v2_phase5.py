@@ -351,6 +351,51 @@ def _phase5_candidate_variants(
                         center_metrics=_center_flow_metrics(candidate),
                     )
                 )
+    candidates.extend(
+        _phase5_production_yband_candidate_variants(
+            baseline,
+            settings,
+            baseline_score,
+        )
+    )
+    return candidates
+
+
+def _phase5_production_yband_candidate_variants(
+    baseline: Workflow,
+    settings: LayoutSettings,
+    baseline_score: EngineV2Score,
+) -> list[_Phase5Candidate]:
+    """Build the visually validated minimum-gap partial Y-band candidates."""
+    candidates: list[_Phase5Candidate] = []
+    vertical_gap = MIXED_GLOBAL_MIN_VERTICAL_GAP
+    for order_mode in ("weighted", "stable"):
+        for anchor_strength in (0.10, 0.15):
+            candidate = deepcopy(baseline)
+            if not _place_mixed_global_flow(
+                candidate,
+                settings,
+                baseline_score.width,
+                order_mode=order_mode,
+                horizontal_mode="anchored",
+                vertical_gap=vertical_gap,
+                vertical_mode="layer_anchor",
+                vertical_anchor_strength=anchor_strength,
+            ):
+                continue
+            _finalize_refinement(candidate, settings)
+            percent = int(round(anchor_strength * 100))
+            candidates.append(
+                _Phase5Candidate(
+                    name=(
+                        f"{order_mode}-anchoredx-yband{percent}"
+                        f"-gap-{vertical_gap:g}"
+                    ),
+                    workflow=candidate,
+                    score=_score_engine_v2(candidate),
+                    center_metrics=_center_flow_metrics(candidate),
+                )
+            )
     return candidates
 
 
@@ -436,7 +481,7 @@ def _phase5_compressed_yband_candidate_variants(
         for vertical_gap in vertical_gaps:
             anchor_strengths = [0.25, 0.5, 0.75]
             if math.isclose(vertical_gap, MIXED_GLOBAL_MIN_VERTICAL_GAP):
-                anchor_strengths = [0.10, 0.15, 0.20, *anchor_strengths]
+                anchor_strengths = [0.20, *anchor_strengths]
             for anchor_strength in anchor_strengths:
                 candidate = deepcopy(baseline)
                 if not _place_mixed_global_flow(
@@ -503,15 +548,17 @@ def _select_accepted_phase5_candidate(
 
 def _phase5_candidate_quality_key(
     candidate: _Phase5Candidate,
-) -> tuple[int, int, int, int, int, float, float, float, str]:
+) -> tuple[int, int, float, int, int, int, float, float, float, str]:
+    """Rank already-safe candidates by corpus geometry and top-level cohesion."""
     score = candidate.score
     center = candidate.center_metrics
     return (
         score.movable_overlaps,
-        score.crossings,
         center.crossings,
-        score.right_to_left_links,
+        _weighted_mixed_edge_length(candidate.workflow),
+        score.crossings,
         center.right_to_left_links,
+        score.right_to_left_links,
         score.width * score.height,
         score.width,
         score.height,
@@ -1141,6 +1188,32 @@ def _anchored_compact_mixed_vertex_x_positions(
         )
 
     return positions
+
+
+def _weighted_mixed_edge_length(workflow: Workflow) -> float:
+    """Return weighted Manhattan length between real mixed-graph vertex centers."""
+    _specs, spec_by_vertex, _adjacency, edge_weights = _build_mixed_graph(workflow)
+    if not edge_weights:
+        return 0.0
+
+    groups_by_id = {group.id: group for group in workflow.groups}
+    nodes_by_id = {node.id: node for node in workflow.nodes.values()}
+    centers: dict[int, tuple[float, float]] = {}
+    for vertex, spec in spec_by_vertex.items():
+        x, y = _mixed_vertex_xy(spec, groups_by_id, nodes_by_id)
+        width, height = _mixed_vertex_size(spec, groups_by_id, nodes_by_id)
+        centers[vertex] = (x + width / 2.0, y + height / 2.0)
+
+    total = 0.0
+    for (source, target), weight in edge_weights.items():
+        start = centers.get(source)
+        end = centers.get(target)
+        if start is None or end is None:
+            continue
+        total += (
+            abs(end[0] - start[0]) + abs(end[1] - start[1])
+        ) * max(1, weight)
+    return total
 
 
 def _mixed_vertex_size(
