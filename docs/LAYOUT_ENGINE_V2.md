@@ -578,6 +578,10 @@ uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
 
 # Corpus review: print only Phase 5 candidates that pass the complete gate.
 uv run python tools/report_phase5_diagnostics.py example-workflows --optimize --accepted-only
+
+# Geometry review for a selected workflow/proposal.
+uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
+  --match "Virtual Try-On 6.0 (Codex)" --geometry
 ```
 
 ## Current Scope Boundary
@@ -608,11 +612,24 @@ crossings / 335 center RTL links. This improves the Phase 4 reference of
 4,127 / 339 by 3 crossings and 4 RTL links, so the dual-metric Phase 5 gate
 passes the corpus safety check.
 
-Before changing placement heuristics again, the next review step is to identify
-the small set of workflows actually accepted by Phase 5 and inspect those
-layouts visually. The Phase 5 diagnostic reporter supports `--accepted-only`,
-suppresses routine INFO logging in that mode, and prints corpus acceptance
-counts so this review does not require scanning all 81 workflow blocks.
+The accepted-only corpus review found 37 attempted Phase 5 workflows but only
+one accepted result: `Flux.1 Kontext dev Virtual Try-On 6.0 (Codex)` with
+`stable-gap-80`. Its measured geometry improved width from 6,350 to 5,810 px,
+port crossings from 43 to 38, center crossings from 53 to 50, port RTL from 10
+to 6, and center RTL from 5 to 1.
+
+Visual inspection still rejected that result. The main flow was numerically
+cleaner, but the canvas was visibly fragmented by isolated top-level blocks,
+large empty vertical bands, and long cross-canvas wires. This is a false
+positive for the current numeric gate: width, area, crossings, and RTL are not
+sufficient to protect overall visual cohesion.
+
+No new acceptance threshold is added from the screenshot alone. The Phase 5
+diagnostic reporter now has an optional `--geometry` mode that compares the
+Phase 4 baseline with the exact Phase 5 proposal. It reports node-bounds,
+approximate node-density, largest empty X/Y bands, empty groups, and the
+top-level groups/ungrouped nodes that actually moved. That measurement should
+identify the fragmentation mechanism before the production gate changes.
 
 ## Deferred TODOs
 
