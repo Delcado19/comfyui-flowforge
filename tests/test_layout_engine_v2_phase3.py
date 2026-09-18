@@ -5,6 +5,7 @@ from flowforge.layout_engine_v2 import EngineV2Score
 from flowforge.layout_engine_v2_phase3 import (
     _compact_candidate_is_better,
     _compact_decorative_nodes_above,
+    _decorative_candidate_is_better,
     _compact_global_flow,
 )
 from flowforge.model import Group, Link, Node, Workflow
@@ -122,3 +123,52 @@ def test_compact_decorative_nodes_move_above_graph_without_moving_graph():
     assert (target.x, target.y) == target_before
     assert note.x == source.x
     assert note.y + note.size[1] < min(source.y, target.y)
+
+
+def test_decorative_candidate_requires_identical_graph_quality():
+    structural = _score(crossings=100, rtl=20, width=10_000, height=8_000)
+    decorative = EngineV2Score(
+        total=0.0,
+        crossings=100,
+        right_to_left_links=20,
+        movable_overlaps=0,
+        link_length=10_000.0,
+        width=7_000,
+        height=9_000,
+    )
+    regressed = EngineV2Score(
+        total=0.0,
+        crossings=101,
+        right_to_left_links=20,
+        movable_overlaps=0,
+        link_length=10_000.0,
+        width=6_000,
+        height=9_000,
+    )
+
+    assert _decorative_candidate_is_better(decorative, structural)
+    assert not _decorative_candidate_is_better(regressed, structural)
+
+
+def test_compact_decorative_nodes_pack_multiple_annotations_into_rows():
+    workflow = Workflow()
+    source = Node(id=10, type="Source", x=1000, y=1000, size=[600, 100])
+    target = Node(id=11, type="Target", x=2600, y=1000, size=[600, 100])
+    notes = [
+        Node(id=index, type="MarkdownNote", x=20, y=index * 100, size=[700, 120])
+        for index in range(1, 5)
+    ]
+    workflow.nodes = {source.id: source, target.id: target}
+    workflow.nodes.update({node.id: node for node in notes})
+    workflow.ungrouped_nodes = [*notes, source, target]
+
+    changed = _compact_decorative_nodes_above(
+        workflow,
+        LayoutSettings(node_x_distance=80, node_y_distance=80),
+    )
+
+    assert changed
+    distinct_y = {node.y for node in notes}
+    assert len(distinct_y) < len(notes)
+    assert max(node.x + node.size[0] for node in notes) <= target.x + target.size[0]
+    assert max(node.y + node.size[1] for node in notes) < source.y
