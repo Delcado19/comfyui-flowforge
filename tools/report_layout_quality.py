@@ -38,6 +38,11 @@ def main() -> int:
     parser.add_argument("--limit", type=int, help="Report only the first N discovered JSON files.")
     parser.add_argument("--top", type=int, default=10, help="Number of largest workflows to print.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+    parser.add_argument(
+        "--structure",
+        action="store_true",
+        help="Print structural width diagnostics for the largest laid-out workflows.",
+    )
     args = parser.parse_args()
 
     logging.disable(logging.INFO)
@@ -51,7 +56,13 @@ def main() -> int:
     if args.json:
         print(json.dumps(summary.to_json_dict(), indent=2))
     else:
-        print(summarize_quality_text(summary, top=max(0, args.top)))
+        print(
+            summarize_quality_text(
+                summary,
+                top=max(0, args.top),
+                include_structure=args.structure,
+            )
+        )
 
     return 0 if summary.ok else 1
 
