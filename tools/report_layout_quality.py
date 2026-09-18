@@ -51,6 +51,7 @@ def main() -> int:
         include_layouted=args.include_layouted,
         optimize_first=args.optimize,
         limit=args.limit,
+        structure_top=max(0, args.top) if args.structure else 0,
     )
 
     if args.json:
