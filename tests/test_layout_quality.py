@@ -133,10 +133,26 @@ def test_summarize_quality_text_includes_category_breakdowns(tmp_path):
 
 def test_summarize_quality_text_can_include_structure_diagnostics(tmp_path):
     (tmp_path / "workflow.json").write_text(json.dumps(WORKFLOW), encoding="utf-8")
-    summary = build_quality_summary(tmp_path)
+    summary = build_quality_summary(tmp_path, structure_top=1)
 
     text = summarize_quality_text(summary, include_structure=True)
 
     assert "structure: groups span=" in text
     assert "ungrouped span=" in text
     assert "edges=" in text
+
+
+def test_build_quality_summary_defers_structure_for_non_top_reports(tmp_path):
+    first = dict(WORKFLOW)
+    second = json.loads(json.dumps(WORKFLOW))
+    second["nodes"][2]["pos"] = [1200, 0]
+    second["nodes"][3]["pos"] = [1200, 200]
+    second["groups"][0]["bounding"] = [-20, -20, 1360, 340]
+
+    (tmp_path / "small.json").write_text(json.dumps(first), encoding="utf-8")
+    (tmp_path / "large.json").write_text(json.dumps(second), encoding="utf-8")
+
+    summary = build_quality_summary(tmp_path, structure_top=1)
+    structured = [report for report in summary.reports if report.structure is not None]
+
+    assert len(structured) == 1
