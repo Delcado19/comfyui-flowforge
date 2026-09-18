@@ -648,6 +648,12 @@ The `--geometry` diagnostic remains available for future false positives. It
 reports node bounds, approximate node density, largest empty X/Y bands, empty
 groups, and the top-level groups/ungrouped nodes that actually moved.
 
+The corpus and Phase 5 diagnostic reporters explicitly configure redirected
+stdout/stderr as UTF-8 so Windows PowerShell pipelines do not fall back to
+cp1252 when workflow or group names contain Unicode symbols or emoji. Long
+local report captures should be written below `logs/`, which is already
+gitignored.
+
 ## Deferred TODOs
 
 - Add user-facing Undo/Redo for destructive workflow transformations such as

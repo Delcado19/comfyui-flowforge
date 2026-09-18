@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import sys
 from pathlib import Path
 
 from flowforge.layout import LayoutSettings, _node_visual_height, _node_visual_width
@@ -23,7 +24,16 @@ from flowforge.parser import parse_comfyui_workflow
 from flowforge.workflow_validation import discover_workflow_files
 
 
+def _configure_utf8_output() -> None:
+    """Keep redirected Windows output UTF-8 safe for workflow names and labels."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> int:
+    _configure_utf8_output()
     parser = argparse.ArgumentParser(
         description="Explain why Phase 5 accepts or rejects selected workflows."
     )

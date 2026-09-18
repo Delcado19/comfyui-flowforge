@@ -14,7 +14,16 @@ from flowforge.layout_quality import build_quality_summary, summarize_quality_te
 DEFAULT_WORKFLOW_ROOT = Path("example-workflows")
 
 
+def _configure_utf8_output() -> None:
+    """Keep redirected Windows output UTF-8 safe for workflow names and labels."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> int:
+    _configure_utf8_output()
     parser = argparse.ArgumentParser(
         description="Report read-only FlowForge layout quality metrics for ComfyUI UI workflows.",
     )
