@@ -214,16 +214,52 @@ selection also adds width guardrails:
 The intent is to remove pathological horizontal expansion without replacing the
 crossing-aware ordering logic with a purely geometric packing heuristic.
 
+## Phase 2.5 corpus result
+
+The compact internal-layer change did not materially reduce the largest workflow
+dimensions. On the 81-workflow corpus:
+
+| Mode | Phase 2 | Phase 2.5 |
+| --- | ---: | ---: |
+| Layout only crossings / RTL | 6,052 / 379 | 6,049 / 386 |
+| Optimize + Layout crossings / RTL | 4,153 / 318 | 4,130 / 333 |
+
+The large workflow dimensions were essentially unchanged. This showed that the
+dominant width bias was not the node-level group refiner alone. The existing
+top-level group and linked ungrouped placement paths both create dataflow
+columns, and wrapping was only available through a candidate flag that was not
+winning for the problematic workflows.
+
+## Phase 3 compact global flow
+
+Phase 3 keeps the complete Phase 2 result as its baseline and creates one
+additional compact global-flow candidate when workflow width is at least 7,000
+pixels.
+
+The compact candidate:
+
+1. forces the existing boustrophedon wrap mode for top-level group flow;
+2. forces the same wrap mode for linked ungrouped dataflow;
+3. re-applies weighted Phase 2 group ordering;
+4. re-runs the normal geometry finalizers;
+5. is accepted immediately if the normal Phase 2 quality key improves;
+6. otherwise requires at least 18% width reduction while allowing only tightly
+   bounded crossing/RTL regressions and at most 15% growth in width+height.
+
+Small workflows therefore keep the existing layout path unchanged. The compact
+pass is an optional post-process candidate and cannot overwrite the Phase 2
+baseline unless its trade-off satisfies the explicit guardrails.
+
 ## Current Scope Boundary
 
-The active engine now refines movable group internals and top-level group order.
-Ungrouped linked dataflow still uses the legacy placement, including its bridge
-and external-source special cases.
+The active engine now refines movable group internals and top-level group order,
+then optionally compacts the global group and linked-ungrouped flow with the
+existing wrap geometry. Bridge, external-source, control, and virtual-hub
+special cases still remain authoritative.
 
-After Phase 2.5 compactness is re-measured, the next structural target is
-ungrouped linked flow ordering using the same SCC/dummy/sweep core. Phase 3
-should not begin until the compactness guard is shown to preserve the Phase 2
-crossing and RTL gains.
+If the Phase 3 corpus confirms useful width reduction without losing the Phase 2
+quality gains, the next structural target is a true SCC/dummy/sweep ordering pass
+for ungrouped linked flow rather than only compact placement.
 
 ## Deferred TODOs
 
