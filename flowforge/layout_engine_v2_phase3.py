@@ -63,51 +63,51 @@ def apply_best_layout(
         wrap_columns=True,
     )
 
-    candidates: list[tuple[str, Workflow, EngineV2Score]] = []
-
-    decorative_compact = deepcopy(baseline)
-    if _compact_decorative_nodes_above(decorative_compact, compact_settings):
-        candidates.append(
-            (
-                "decorative",
-                decorative_compact,
-                _score_engine_v2(decorative_compact),
-            )
-        )
+    structural_workflow = baseline
+    structural_score = baseline_score
+    structural_name = "baseline"
 
     global_compact = deepcopy(baseline)
     _compact_global_flow(global_compact, compact_settings)
     _refine_group_level_order(global_compact, compact_settings)
     _finalize_refinement(global_compact, compact_settings)
-    _compact_decorative_nodes_above(global_compact, compact_settings)
-    candidates.append(
-        ("global", global_compact, _score_engine_v2(global_compact))
-    )
+    global_score = _score_engine_v2(global_compact)
+    if _compact_candidate_is_better(global_score, baseline_score):
+        structural_workflow = global_compact
+        structural_score = global_score
+        structural_name = "global"
 
-    best_workflow = baseline
-    best_score = baseline_score
-    best_name = "baseline"
-    for name, candidate, candidate_score in candidates:
-        if _compact_candidate_is_better(candidate_score, best_score):
-            best_workflow = candidate
-            best_score = candidate_score
-            best_name = name
+    decorative_compact = deepcopy(structural_workflow)
+    if _compact_decorative_nodes_above(decorative_compact, compact_settings):
+        decorative_score = _score_engine_v2(decorative_compact)
+        if _decorative_candidate_is_better(decorative_score, structural_score):
+            logger.info(
+                "Compact %s+decorative candidate accepted: "
+                "size %.0fx%.0f -> %.0fx%.0f, crossings=%s, rtl=%s",
+                structural_name,
+                structural_score.width,
+                structural_score.height,
+                decorative_score.width,
+                decorative_score.height,
+                decorative_score.crossings,
+                decorative_score.right_to_left_links,
+            )
+            return decorative_compact
 
-    if best_workflow is not baseline:
+    if structural_workflow is not baseline:
         logger.info(
-            "Compact %s candidate accepted: size %.0fx%.0f -> %.0fx%.0f, "
-            "crossings %s -> %s, rtl %s -> %s",
-            best_name,
+            "Compact global candidate accepted without decorative compaction: "
+            "size %.0fx%.0f -> %.0fx%.0f, crossings %s -> %s, rtl %s -> %s",
             baseline_score.width,
             baseline_score.height,
-            best_score.width,
-            best_score.height,
+            structural_score.width,
+            structural_score.height,
             baseline_score.crossings,
-            best_score.crossings,
+            structural_score.crossings,
             baseline_score.right_to_left_links,
-            best_score.right_to_left_links,
+            structural_score.right_to_left_links,
         )
-        return best_workflow
+        return structural_workflow
 
     logger.info(
         "Compact candidates rejected: baseline size %.0fx%.0f, crossings=%s, rtl=%s",
@@ -123,7 +123,7 @@ def _compact_decorative_nodes_above(
     workflow: Workflow,
     settings: LayoutSettings,
 ) -> bool:
-    """Move wide decorative annotations above the graph instead of beside it."""
+    """Pack decorative annotations into rows above the non-decorative graph."""
     decorative = [
         node
         for node in workflow.nodes.values()
@@ -138,21 +138,46 @@ def _compact_decorative_nodes_above(
         return False
 
     graph_left = min(node.x for node in graph_nodes)
+    graph_right = max(
+        node.x + _node_visual_width(node)
+        for node in graph_nodes
+    )
     graph_top = min(node.y for node in graph_nodes)
-    gap = max(settings.node_v_gap, settings.group_v_gap)
+    h_gap = max(settings.node_h_gap, 24.0)
+    v_gap = max(settings.node_v_gap, settings.group_v_gap)
+    widest_decorative = max(_node_visual_width(node) for node in decorative)
+    row_width_cap = max(graph_right - graph_left, widest_decorative)
 
-    ordered = sorted(decorative, key=lambda node: (node.y, node.x, node.id))
-    total_height = sum(_node_visual_height(node) for node in ordered)
-    total_height += gap * max(0, len(ordered) - 1)
+    rows: list[list[Node]] = [[]]
+    row_widths = [0.0]
+    row_heights = [0.0]
+    for node in sorted(decorative, key=lambda item: (item.y, item.x, item.id)):
+        node_width = _node_visual_width(node)
+        addition = node_width if not rows[-1] else node_width + h_gap
+        if rows[-1] and row_widths[-1] + addition > row_width_cap:
+            rows.append([])
+            row_widths.append(0.0)
+            row_heights.append(0.0)
+            addition = node_width
+        rows[-1].append(node)
+        row_widths[-1] += addition
+        row_heights[-1] = max(row_heights[-1], _node_visual_height(node))
 
-    current_y = graph_top - gap - total_height
+    total_height = sum(row_heights)
+    total_height += v_gap * max(0, len(rows) - 1)
+    current_y = graph_top - v_gap - total_height
     changed = False
-    for node in ordered:
-        if abs(node.x - graph_left) > 1e-9 or abs(node.y - current_y) > 1e-9:
-            changed = True
-        node.x = graph_left
-        node.y = current_y
-        current_y += _node_visual_height(node) + gap
+
+    for row, row_height in zip(rows, row_heights):
+        current_x = graph_left
+        for node in row:
+            if abs(node.x - current_x) > 1e-9 or abs(node.y - current_y) > 1e-9:
+                changed = True
+            node.x = current_x
+            node.y = current_y
+            current_x += _node_visual_width(node) + h_gap
+        current_y += row_height + v_gap
+
     return changed
 
 
@@ -174,6 +199,27 @@ def _compact_global_flow(workflow: Workflow, settings: LayoutSettings) -> None:
         settings,
         start_x_floor=decorative_right + settings.group_h_gap,
     )
+
+
+def _decorative_candidate_is_better(
+    candidate: EngineV2Score,
+    structural: EngineV2Score,
+) -> bool:
+    """Accept decoration-only compaction without changing graph quality."""
+    if candidate.movable_overlaps != structural.movable_overlaps:
+        return False
+    if candidate.crossings != structural.crossings:
+        return False
+    if candidate.right_to_left_links != structural.right_to_left_links:
+        return False
+    if not math.isclose(candidate.link_length, structural.link_length, rel_tol=0.0, abs_tol=1e-6):
+        return False
+    if candidate.width >= structural.width:
+        return False
+
+    structural_area = structural.width * structural.height
+    candidate_area = candidate.width * candidate.height
+    return structural_area <= 0 or candidate_area < structural_area
 
 
 def _compact_candidate_is_better(
