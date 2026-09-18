@@ -250,6 +250,44 @@ Small workflows therefore keep the existing layout path unchanged. The compact
 pass is an optional post-process candidate and cannot overwrite the Phase 2
 baseline unless its trade-off satisfies the explicit guardrails.
 
+## Phase 3 corpus result
+
+The first compact global-flow pass produced only a narrow improvement:
+
+| Mode | Phase 2.5 | Phase 3 |
+| --- | ---: | ---: |
+| Layout only crossings / RTL | 6,049 / 386 | 6,044 / 386 |
+| Optimize + Layout crossings / RTL | 4,130 / 333 | 4,127 / 339 |
+
+The main visible geometry change was the Z-Image Base Ultra workflow:
+
+- Layout Only: `19,318 x 17,462` -> `19,190 x 12,160`;
+- Optimize + Layout: `19,062 x 16,116` -> `18,934 x 12,228`.
+
+Other major cases such as Flux Edit Ultra, Luneva, Qwen Edit, and Jibs remained
+essentially unchanged in size. This shows that simply forcing the existing wrap
+geometry is not a general solution for the width bias.
+
+### Structure diagnostics
+
+The quality reporter now supports an optional structural width diagnosis:
+
+```powershell
+uv run python tools/report_layout_quality.py example-workflows --top 20 --structure
+uv run python tools/report_layout_quality.py example-workflows --optimize --top 20 --structure
+```
+
+For every printed large workflow it reports:
+
+- horizontal span of groups and ungrouped nodes;
+- group-flow and ungrouped-flow layer counts;
+- number of distinct physical X columns;
+- widest group and widest ungrouped node;
+- which group/node owns the left and right horizontal workflow edges.
+
+The next layout change should be based on these measurements rather than making
+global wrap thresholds more aggressive.
+
 ## Current Scope Boundary
 
 The active engine now refines movable group internals and top-level group order,
