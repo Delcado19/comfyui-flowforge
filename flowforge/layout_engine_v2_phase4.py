@@ -389,7 +389,7 @@ def _compact_pure_ungrouped_components(
 
 
 def _eligible_ungrouped_nodes(workflow: Workflow) -> list[Node]:
-    """Return movable ungrouped nodes safe for independent band compaction."""
+    """Return movable ungrouped nodes safe for candidate band compaction."""
     group_by_node_id = _group_by_node_id(workflow)
     result: list[Node] = []
     for node in workflow.ungrouped_nodes:
@@ -403,8 +403,10 @@ def _eligible_ungrouped_nodes(workflow: Workflow) -> list[Node]:
             or _is_terminal_text_preview_node(node)
         ):
             continue
-        if _has_direct_group_incident_link(workflow, node, group_by_node_id):
-            continue
+        # Direct group incidence is allowed in Phase 4. Those nodes are part of
+        # the mixed group/ungrouped flow that causes the remaining width
+        # regressions. Groups themselves remain fixed obstacles, and the global
+        # acceptance gate rejects any crossing/RTL regression.
         result.append(node)
     return result
 
