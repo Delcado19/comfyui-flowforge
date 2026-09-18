@@ -438,25 +438,82 @@ such mixed components plus the largest component's eligible-node count, group
 count, and horizontal span. This graph is diagnostic only and does not move
 groups.
 
-If the targeted workflows collapse from several pure eligible fragments into
-one large group-bridged component, that is evidence for the next architecture:
-a shared global dependency graph with fixed group supernodes and movable
-ungrouped nodes. Thresholds should not be relaxed to compensate for missing
-group connectivity.
+The targeted group-bridged rerun confirmed that architecture:
+
+- Jibs: the pure eligible graph had 2 linked components, while the group-bridged
+  graph collapsed the relevant flow to 1 component containing 8 eligible
+  ungrouped nodes and 14 groups across a 4,202 px span.
+- Flux2 VTON 6.0.2: the pure eligible graph had no component large enough to
+  attempt compaction, while the group-bridged graph produced 1 component with
+  all 8 eligible ungrouped nodes, 4 groups, and a 6,175 px span.
+- Flux2 VTON 6.0.2.7: the pure eligible graph had 3 linked components and a
+  largest 6-node span of 3,784 px with 0% predicted reduction. The
+  group-bridged graph produced 1 component with 14 eligible ungrouped nodes,
+  5 groups, and a 7,982 px span.
+
+This is direct evidence that the remaining width problem is not a pure
+ungrouped-packing threshold issue. Groups are the structural connectors that
+join the wide flow, so further Phase 4 threshold tuning would optimize the
+wrong graph.
+
+## Phase 5 shared Group/Ungrouped global graph
+
+Phase 5 is now an isolated candidate on top of the complete Phase 4 result.
+
+Its real graph vertices are:
+
+- whole groups represented as supernodes;
+- eligible ungrouped nodes.
+
+Physical group/ungrouped links become directed mixed-graph edges. Existing
+group-flow dependencies are also retained so bridge-only group relationships
+are not lost. The graph then uses:
+
+1. SCC condensation and longest-path layers;
+2. virtual dummy vertices for long mixed edges;
+3. weighted median sweeps;
+4. weighted local transposition;
+5. shared physical layer placement;
+6. boustrophedon row wrapping.
+
+A group always moves as one rectangle with every member node, preserving its
+internal geometry. The established finalizer then re-applies control, text
+preview, virtual Set/Get, group-overlap, and pinned-geometry contracts.
+
+The first Phase 5 experiment deliberately skips any workflow that contains
+pinned group geometry or pinned ungrouped nodes. This keeps authored pins as
+hard constraints and excludes Amazing Z-Image from automatic reorganization.
+
+Phase 5 uses a strict acceptance gate:
+
+- movable overlaps may not increase;
+- crossings may not increase;
+- RTL links may not increase;
+- workflow width must fall by at least 8%;
+- workflow area may not increase.
+
+Crossing or RTL improvements do not bypass the width/area requirements.
+
+Targeted diagnostics are available with:
+
+```powershell
+uv run python tools/report_phase5_diagnostics.py example-workflows --optimize `
+  --match "Jibs_Ultimate" `
+  --match "6.0.2.7" `
+  --match "6.0.2 (Codex)"
+```
 
 ## Current Scope Boundary
 
-The active engine now refines movable group internals and top-level group order,
-then optionally compacts the global group and linked-ungrouped flow with the
-existing wrap geometry. Bridge, external-source, control, and virtual-hub
-special cases still remain authoritative.
+The active runtime now reaches Phase 5. Phase 4 remains the complete fallback
+baseline, and Phase 3 remains underneath it. Bridge, external-source, control,
+text-preview, virtual-hub, decorative, and pin-specific contracts are still
+authoritative after mixed placement.
 
-The next structural decision is gated by the new group-bridged diagnostics. If
-they show that groups join the fragmented ungrouped islands in Jibs and Flux2
-VTON, the next target is a shared Group/Ungrouped dependency graph with group
-supernodes, SCC condensation, dummy vertices, weighted ordering, and separate
-physical band placement. Until then, Phase 3 remains the fallback and Phase 4
-stays conservative.
+Phase 5 is still experimental. Its next gate is the targeted Jibs/Flux2
+diagnostic run followed by the full 81-workflow Optimize + Layout corpus. The
+aggregate structural reference remains 4,127 crossings / 339 RTL until corpus
+evidence justifies updating it.
 
 ## Deferred TODOs
 
@@ -489,7 +546,11 @@ Regression coverage includes:
 - weighted group medians;
 - weighted group crossing elimination;
 - fixed-group protection at group level;
-- crossing-first group-level candidate selection.
+- crossing-first group-level candidate selection;
+- shared Group/Ungrouped dependency layering;
+- preservation of group-internal geometry during mixed placement;
+- strict Phase 5 width/area and crossing/RTL acceptance gates;
+- Phase 5 pin-constraint blocking.
 
 ## Documentation Status
 
