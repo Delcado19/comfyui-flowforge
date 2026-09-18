@@ -31,7 +31,7 @@ from .layout_engine_v2_phase2 import (
     apply_best_layout as _apply_phase2_best_layout,
 )
 from .logger import setup_logger
-from .model import Workflow
+from .model import Node, Workflow
 
 logger = setup_logger(__name__)
 
