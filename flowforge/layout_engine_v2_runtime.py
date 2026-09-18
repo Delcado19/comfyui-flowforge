@@ -10,7 +10,7 @@ objects.
 from __future__ import annotations
 
 from .layout import LayoutSettings
-from .layout_engine_v2_phase3 import apply_best_layout
+from .layout_engine_v2_phase4 import apply_best_layout
 from .model import Workflow
 
 
