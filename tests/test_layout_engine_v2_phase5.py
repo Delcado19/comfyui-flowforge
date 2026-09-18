@@ -138,10 +138,10 @@ def test_mixed_global_placement_preserves_group_internal_geometry():
     assert changed
     assert new_span < original_span
     assert new_offset == original_offset
-    assert workflow.groups[0].bounding[0] < middle.x
-    assert middle.x < workflow.groups[1].bounding[0]
-    assert workflow.groups[1].bounding[0] < last.x
-    assert last.x < extra.x
+    assert workflow.groups[0].bounding[0] < workflow.nodes[10].x
+    assert workflow.nodes[10].x < workflow.groups[1].bounding[0]
+    assert workflow.groups[1].bounding[0] < workflow.nodes[11].x
+    assert workflow.nodes[11].x < extra.x
 
 
 def test_phase5_skips_pinned_group_geometry():
