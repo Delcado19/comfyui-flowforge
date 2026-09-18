@@ -5,6 +5,7 @@ from flowforge.layout_engine_v2 import EngineV2Score
 from flowforge.layout_engine_v2_phase4 import (
     _compact_pure_ungrouped_components,
     _eligible_ungrouped_nodes,
+    _phase4_exclusion_counts,
     _ungrouped_candidate_is_better,
 )
 from flowforge.model import Group, Link, Node, Workflow
@@ -158,3 +159,24 @@ def test_compact_pure_ungrouped_chain_reuses_group_horizontal_band():
             or node_rect[3] <= group_rect[1]
             or group_rect[3] <= node_rect[1]
         )
+
+
+def test_phase4_diagnostics_report_group_incidence_without_excluding_it():
+    workflow = Workflow()
+    grouped = Node(id=1, type="Grouped", x=100, y=100, size=[200, 100])
+    incident = Node(id=2, type="Incident", x=500, y=100, size=[200, 100])
+    workflow.nodes = {1: grouped, 2: incident}
+    workflow.groups = [
+        Group(id=10, name="Grouped", nodes=[grouped], bounding=[50, 50, 300, 220])
+    ]
+    workflow.ungrouped_nodes = [incident]
+    _attach_link(
+        workflow,
+        Link(id=1, source=1, source_port=0, target=2, target_port=0, type="DATA"),
+    )
+
+    counts = _phase4_exclusion_counts(workflow)
+    eligible_ids = {node.id for node in _eligible_ungrouped_nodes(workflow)}
+
+    assert counts["direct_group_nodes"] == 1
+    assert incident.id in eligible_ids
