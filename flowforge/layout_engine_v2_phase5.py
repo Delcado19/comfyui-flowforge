@@ -388,6 +388,38 @@ def _phase5_baseline_y_candidate_variants(
     return candidates
 
 
+def _phase5_layer_anchor_candidate_variants(
+    baseline: Workflow,
+    settings: LayoutSettings,
+    baseline_score: EngineV2Score,
+) -> list[_Phase5Candidate]:
+    """Build diagnostic Anchored-X candidates with layer-level Y anchoring."""
+    candidates: list[_Phase5Candidate] = []
+    for order_mode in ("weighted", "stable"):
+        for vertical_gap in _phase5_vertical_gaps(settings):
+            candidate = deepcopy(baseline)
+            if not _place_mixed_global_flow(
+                candidate,
+                settings,
+                baseline_score.width,
+                order_mode=order_mode,
+                horizontal_mode="anchored",
+                vertical_gap=vertical_gap,
+                vertical_mode="layer_anchor",
+            ):
+                continue
+            _finalize_refinement(candidate, settings)
+            candidates.append(
+                _Phase5Candidate(
+                    name=f"{order_mode}-anchoredx-yband-gap-{vertical_gap:g}",
+                    workflow=candidate,
+                    score=_score_engine_v2(candidate),
+                    center_metrics=_center_flow_metrics(candidate),
+                )
+            )
+    return candidates
+
+
 def _phase5_vertical_gaps(settings: LayoutSettings) -> list[float]:
     """Return conservative spacing variants derived from existing layout settings."""
     standard = max(settings.group_v_gap, settings.node_v_gap)
@@ -765,6 +797,37 @@ def _place_mixed_global_flow(
                     groups_by_id,
                     nodes_by_id,
                 )[1]
+    elif vertical_mode == "layer_anchor":
+        for layer in sorted(layer_to_real):
+            current_y = base_y
+            stacked_y: dict[int, float] = {}
+            offsets: list[float] = []
+            for vertex in layer_to_real[layer]:
+                stacked_y[vertex] = current_y
+                original_y = _mixed_vertex_xy(
+                    spec_by_vertex[vertex],
+                    groups_by_id,
+                    nodes_by_id,
+                )[1]
+                offsets.append(original_y - current_y)
+                _width, height = _mixed_vertex_size(
+                    spec_by_vertex[vertex],
+                    groups_by_id,
+                    nodes_by_id,
+                )
+                current_y += height + placement_vertical_gap
+
+            ordered_offsets = sorted(offsets)
+            middle = len(ordered_offsets) // 2
+            if len(ordered_offsets) % 2:
+                layer_shift = ordered_offsets[middle]
+            else:
+                layer_shift = (
+                    ordered_offsets[middle - 1] + ordered_offsets[middle]
+                ) / 2.0
+
+            for vertex, stacked in stacked_y.items():
+                vertex_y[vertex] = stacked + layer_shift
     else:
         raise ValueError(f"Unknown Phase 5 vertical mode: {vertical_mode}")
 

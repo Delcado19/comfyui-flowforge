@@ -787,11 +787,22 @@ vertical realization. Phase 5 still rebuilds Y from a shared `base_y` and
 stacks every real vertex in each dependency layer, even when the Phase 4
 vertical positions were already coherent.
 
-For diagnosis only, the reporter now includes two experimental
+For diagnosis only, the reporter includes two experimental
 `*-anchoredxy` variants. They use the same Anchored-X realization but preserve
 the Phase 4 Y coordinate of every real mixed vertex before the normal finalizer.
-These variants are deliberately excluded from production Phase 5 selection
-until their metrics and visual output are reviewed.
+On the Flux 9B case this exact-Y experiment failed strongly: the weighted
+variant expanded to 6,730 x 2,774, raised port crossings from 82 to 105 and
+center crossings from 93 to 113, and increased weighted mixed-edge length by
+19%. Preserving every original Y coordinate therefore creates too many vertical
+overlaps for compact X placement and simply pushes geometry back out horizontally.
+
+A second diagnostic-only Y experiment, `*-anchoredx-yband-gap-*`, preserves
+the Phase 5 vertical order and spacing inside each dependency layer but shifts
+the entire stacked layer toward its Phase 4 vertical band using the median
+per-vertex Y offset. This is a middle ground between rebuilding every layer from
+one global `base_y` and restoring every individual Phase 4 Y coordinate. The
+Y-band candidates are also excluded from production Phase 5 selection until
+their metrics and visual output are reviewed.
 
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.

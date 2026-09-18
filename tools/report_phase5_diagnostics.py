@@ -16,6 +16,7 @@ from flowforge.layout_engine_v2_phase5 import (
     _best_diagnostic_candidate,
     _build_mixed_graph,
     _phase5_baseline_y_candidate_variants,
+    _phase5_layer_anchor_candidate_variants,
     _center_flow_metrics,
     _mixed_rejection_reason,
     _mixed_vertex_size,
@@ -232,6 +233,13 @@ def _export_variant(
             baseline_score=baseline_score,
         )
     )
+    candidates.extend(
+        _phase5_layer_anchor_candidate_variants(
+            baseline,
+            settings=LayoutSettings(),
+            baseline_score=baseline_score,
+        )
+    )
     candidate = next(
         (item for item in candidates if item.name == variant_name),
         None,
@@ -274,16 +282,26 @@ def _print_variant_diagnostics(baseline: Workflow) -> None:
         settings=LayoutSettings(),
         baseline_score=baseline_score,
     )
-    experimental_candidates = _phase5_baseline_y_candidate_variants(
+    baseline_y_candidates = _phase5_baseline_y_candidate_variants(
         baseline,
         settings=LayoutSettings(),
         baseline_score=baseline_score,
     )
-    candidates = [*standard_candidates, *experimental_candidates]
+    layer_anchor_candidates = _phase5_layer_anchor_candidate_variants(
+        baseline,
+        settings=LayoutSettings(),
+        baseline_score=baseline_score,
+    )
+    candidates = [
+        *standard_candidates,
+        *baseline_y_candidates,
+        *layer_anchor_candidates,
+    ]
     print(
         "  variants: "
         f"standard={len(standard_candidates)} "
-        f"experimental-baseline-y={len(experimental_candidates)}"
+        f"experimental-baseline-y={len(baseline_y_candidates)} "
+        f"experimental-yband={len(layer_anchor_candidates)}"
     )
     for candidate in sorted(candidates, key=lambda item: item.name):
         reason = _mixed_rejection_reason(
