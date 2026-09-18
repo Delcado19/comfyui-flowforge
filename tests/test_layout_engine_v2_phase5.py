@@ -6,6 +6,7 @@ from flowforge.layout_engine_v2_phase5 import (
     _build_mixed_graph,
     _mixed_candidate_is_better,
     _mixed_rejection_reason,
+    _phase5_vertical_gaps,
     _place_mixed_global_flow,
 )
 from flowforge.model import Group, Link, Node, Workflow
@@ -178,3 +179,39 @@ def test_phase5_candidate_requires_full_strict_gate():
         == "insufficient_final_width_reduction"
     )
     assert _mixed_rejection_reason(area_regression, baseline) == "area_regression"
+
+
+
+def test_phase5_vertical_gap_profiles_use_existing_spacing_controls():
+    settings = LayoutSettings(
+        node_x_distance=100,
+        node_y_distance=80,
+        wrap_columns=True,
+    )
+
+    assert _phase5_vertical_gaps(settings) == [100, 80, 40]
+
+
+def test_stable_order_supports_compact_vertical_gap():
+    workflow = _mixed_chain_workflow()
+    extra = Node(id=12, type="Extra", x=6_500, y=450, size=[200, 100])
+    workflow.nodes[extra.id] = extra
+    workflow.ungrouped_nodes.append(extra)
+    _attach_link(
+        workflow,
+        Link(id=4, source=11, source_port=0, target=12, target_port=0, type="DATA"),
+    )
+
+    changed = _place_mixed_global_flow(
+        workflow,
+        LayoutSettings(node_x_distance=100, node_y_distance=80),
+        workflow_width=7_000,
+        order_mode="stable",
+        vertical_gap=40,
+    )
+
+    assert changed
+    assert workflow.groups[0].bounding[0] < workflow.nodes[10].x
+    assert workflow.nodes[10].x < workflow.groups[1].bounding[0]
+    assert workflow.groups[1].bounding[0] < workflow.nodes[11].x
+    assert workflow.nodes[11].x < extra.x

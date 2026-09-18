@@ -494,6 +494,31 @@ separate concerns; row wrapping is no longer part of Phase 5 because reversing
 alternate rows inherently introduces right-to-left flow and long cross-row
 segments.
 
+The first monotonic rerun removed the catastrophic graph regressions and showed
+that the graph itself is useful:
+
+- Jibs: 5,977 x 12,448 -> 8,747 x 9,087, crossings 756 -> 475, RTL 41 -> 29.
+  Graph quality improved strongly, but the workflow became wider, so the strict
+  width gate rejected it.
+- Flux2 VTON 6.0.2: 6,723 x 4,861 -> 6,107 x 4,869, crossings 31 -> 41,
+  RTL 6 -> 4. Width and area improved, but physical crossings regressed.
+- Flux2 VTON 6.0.2.7: 9,162 x 3,510 -> 7,746 x 4,332, crossings 44 -> 36,
+  RTL 11 -> 8. Width fell by about 15.5% and graph quality improved, but area
+  grew by about 4.3%.
+
+This isolates the remaining problem to physical realization inside the monotonic
+layers rather than graph topology. Phase 5 now evaluates a small conservative
+candidate matrix over the same mixed graph:
+
+- weighted graph order and baseline-stable vertical order;
+- standard vertical gap;
+- node vertical gap;
+- a compact gap equal to half the node gap, clamped to a 12 px minimum.
+
+With default spacing this yields 100, 80, and 40 px gap variants. The strict
+acceptance gate is unchanged; no candidate can trade crossings, RTL, overlaps,
+width, or area outside the existing limits.
+
 A group always moves as one rectangle with every member node, preserving its
 internal geometry. The established finalizer then re-applies control, text
 preview, virtual Set/Get, group-overlap, and pinned-geometry contracts.
@@ -528,11 +553,13 @@ baseline, and Phase 3 remains underneath it. Bridge, external-source, control,
 text-preview, virtual-hub, decorative, and pin-specific contracts are still
 authoritative after mixed placement.
 
-Phase 5 is still experimental. Its next gate is a second targeted
-Jibs/Flux2 diagnostic run using monotonic mixed-layer placement. Only if that
-preserves graph quality while reducing width should the full 81-workflow
-Optimize + Layout corpus be run. The aggregate structural reference remains
-4,127 crossings / 339 RTL until corpus evidence justifies updating it.
+Phase 5 is still experimental. Its next gate is a targeted rerun of the
+Jibs/Flux2 diagnostics using the multi-variant monotonic placement search. The
+reporter now prints the number of evaluated candidates and the selected proposal
+variant. Only if at least one targeted workflow satisfies the full strict gate
+should the full 81-workflow Optimize + Layout corpus be run. The aggregate
+structural reference remains 4,127 crossings / 339 RTL until corpus evidence
+justifies updating it.
 
 ## Deferred TODOs
 

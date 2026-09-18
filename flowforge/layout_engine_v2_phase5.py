@@ -13,6 +13,8 @@ are re-applied by the normal refinement finalizer.
 Physical placement keeps dependency layers monotonic from left to right. This
 is intentionally separate from graph ordering: row wrapping is not used because
 reversing alternate rows creates right-to-left links and long cross-row wires.
+Phase 5 evaluates both weighted graph order and baseline-stable order, each with
+conservative vertical-gap profiles derived from the existing layout settings.
 
 The acceptance gate is deliberately strict: no additional movable overlaps,
 crossings, or right-to-left links; at least 8% workflow-width reduction; and no
@@ -57,6 +59,8 @@ MIXED_GLOBAL_MIN_GROUPS = 2
 MIXED_GLOBAL_MIN_UNGROUPED = 3
 MIXED_GLOBAL_MIN_ACCEPTED_WIDTH_REDUCTION_RATIO = 0.08
 MIXED_GLOBAL_MAX_AREA_RATIO = 1.0
+MIXED_GLOBAL_MIN_VERTICAL_GAP = 12.0
+MIXED_GLOBAL_COMPACT_GAP_RATIO = 0.5
 MIXED_SWEEP_ROUNDS = 6
 MIXED_TRANSPOSE_PASSES = 6
 
@@ -74,6 +78,8 @@ class Phase5Diagnostics:
     ungrouped_vertices: int
     graph_edges: int
     layers: int
+    candidate_count: int
+    proposal_variant: str | None
     attempted: bool
     accepted: bool
     rejection_reason: str
@@ -87,52 +93,62 @@ class Phase5Diagnostics:
     proposed_rtl: int | None
 
 
+@dataclass
+class _Phase5Candidate:
+    """One scored physical realization of the shared mixed dependency graph."""
+
+    name: str
+    workflow: Workflow
+    score: EngineV2Score
+
+
 def apply_best_layout(
     workflow: Workflow,
     settings: LayoutSettings | None = None,
     candidate_count: int | None = None,
 ) -> Workflow:
-    """Run Phase 4, then try one shared group/ungrouped global-flow candidate."""
+    """Run Phase 4, then evaluate conservative mixed-flow placement variants."""
     settings = settings or LayoutSettings()
     baseline = _apply_phase4_best_layout(workflow, settings, candidate_count)
     baseline_score = _score_engine_v2(baseline)
     if baseline_score.width < MIXED_GLOBAL_MIN_WIDTH:
         return baseline
 
-    candidate = deepcopy(baseline)
-    if not _place_mixed_global_flow(candidate, settings, baseline_score.width):
-        return baseline
-
-    _finalize_refinement(candidate, settings)
-    candidate_score = _score_engine_v2(candidate)
-    if _mixed_candidate_is_better(candidate_score, baseline_score):
+    candidates = _phase5_candidate_variants(baseline, settings, baseline_score)
+    selected = _select_accepted_phase5_candidate(candidates, baseline_score)
+    if selected is not None:
         logger.info(
-            "Phase 5 mixed global-flow accepted: "
+            "Phase 5 mixed global-flow accepted (%s): "
             "size %.0fx%.0f -> %.0fx%.0f, crossings %s -> %s, rtl %s -> %s",
+            selected.name,
             baseline_score.width,
             baseline_score.height,
-            candidate_score.width,
-            candidate_score.height,
+            selected.score.width,
+            selected.score.height,
             baseline_score.crossings,
-            candidate_score.crossings,
+            selected.score.crossings,
             baseline_score.right_to_left_links,
-            candidate_score.right_to_left_links,
+            selected.score.right_to_left_links,
         )
-        return candidate
+        return selected.workflow
 
-    logger.info(
-        "Phase 5 mixed global-flow rejected: "
-        "size %.0fx%.0f -> %.0fx%.0f, crossings %s -> %s, rtl %s -> %s; reason=%s",
-        baseline_score.width,
-        baseline_score.height,
-        candidate_score.width,
-        candidate_score.height,
-        baseline_score.crossings,
-        candidate_score.crossings,
-        baseline_score.right_to_left_links,
-        candidate_score.right_to_left_links,
-        _mixed_rejection_reason(candidate_score, baseline_score),
-    )
+    rejected = _best_diagnostic_candidate(candidates, baseline_score)
+    if rejected is not None:
+        logger.info(
+            "Phase 5 mixed global-flow rejected (%s): "
+            "size %.0fx%.0f -> %.0fx%.0f, crossings %s -> %s, rtl %s -> %s; "
+            "reason=%s",
+            rejected.name,
+            baseline_score.width,
+            baseline_score.height,
+            rejected.score.width,
+            rejected.score.height,
+            baseline_score.crossings,
+            rejected.score.crossings,
+            baseline_score.right_to_left_links,
+            rejected.score.right_to_left_links,
+            _mixed_rejection_reason(rejected.score, baseline_score),
+        )
     return baseline
 
 
@@ -167,6 +183,8 @@ def diagnose_phase5(
             ungrouped_vertices=ungrouped_count,
             graph_edges=len(edge_weights),
             layers=layer_count,
+            candidate_count=0,
+            proposal_variant=None,
             attempted=False,
             accepted=False,
             rejection_reason=precheck_reason,
@@ -180,14 +198,17 @@ def diagnose_phase5(
             proposed_rtl=None,
         )
 
-    candidate = deepcopy(workflow)
-    moved = _place_mixed_global_flow(candidate, settings, baseline_score.width)
-    if not moved:
+    candidates = _phase5_candidate_variants(workflow, settings, baseline_score)
+    selected = _select_accepted_phase5_candidate(candidates, baseline_score)
+    proposal = selected or _best_diagnostic_candidate(candidates, baseline_score)
+    if proposal is None:
         return Phase5Diagnostics(
             group_vertices=group_count,
             ungrouped_vertices=ungrouped_count,
             graph_edges=len(edge_weights),
             layers=layer_count,
+            candidate_count=0,
+            proposal_variant=None,
             attempted=False,
             accepted=False,
             rejection_reason="no_geometry_change",
@@ -201,30 +222,138 @@ def diagnose_phase5(
             proposed_rtl=None,
         )
 
-    _finalize_refinement(candidate, settings)
-    candidate_score = _score_engine_v2(candidate)
-    accepted = _mixed_candidate_is_better(candidate_score, baseline_score)
+    accepted = selected is not None
     return Phase5Diagnostics(
         group_vertices=group_count,
         ungrouped_vertices=ungrouped_count,
         graph_edges=len(edge_weights),
         layers=layer_count,
+        candidate_count=len(candidates),
+        proposal_variant=proposal.name,
         attempted=True,
         accepted=accepted,
         rejection_reason=(
             "accepted"
             if accepted
-            else _mixed_rejection_reason(candidate_score, baseline_score)
+            else _mixed_rejection_reason(proposal.score, baseline_score)
         ),
         baseline_width=baseline_score.width,
         baseline_height=baseline_score.height,
-        proposed_width=candidate_score.width,
-        proposed_height=candidate_score.height,
+        proposed_width=proposal.score.width,
+        proposed_height=proposal.score.height,
         baseline_crossings=baseline_score.crossings,
-        proposed_crossings=candidate_score.crossings,
+        proposed_crossings=proposal.score.crossings,
         baseline_rtl=baseline_score.right_to_left_links,
-        proposed_rtl=candidate_score.right_to_left_links,
+        proposed_rtl=proposal.score.right_to_left_links,
     )
+
+
+def _phase5_candidate_variants(
+    baseline: Workflow,
+    settings: LayoutSettings,
+    baseline_score: EngineV2Score,
+) -> list[_Phase5Candidate]:
+    """Build scored physical variants without changing the mixed dependency graph."""
+    candidates: list[_Phase5Candidate] = []
+    for order_mode in ("weighted", "stable"):
+        for vertical_gap in _phase5_vertical_gaps(settings):
+            candidate = deepcopy(baseline)
+            if not _place_mixed_global_flow(
+                candidate,
+                settings,
+                baseline_score.width,
+                order_mode=order_mode,
+                vertical_gap=vertical_gap,
+            ):
+                continue
+            _finalize_refinement(candidate, settings)
+            candidates.append(
+                _Phase5Candidate(
+                    name=f"{order_mode}-gap-{vertical_gap:g}",
+                    workflow=candidate,
+                    score=_score_engine_v2(candidate),
+                )
+            )
+    return candidates
+
+
+def _phase5_vertical_gaps(settings: LayoutSettings) -> list[float]:
+    """Return conservative spacing variants derived from existing layout settings."""
+    standard = max(settings.group_v_gap, settings.node_v_gap)
+    node_gap = settings.node_v_gap
+    compact = max(
+        MIXED_GLOBAL_MIN_VERTICAL_GAP,
+        min(standard, node_gap) * MIXED_GLOBAL_COMPACT_GAP_RATIO,
+    )
+    result: list[float] = []
+    for value in (standard, node_gap, compact):
+        if not any(math.isclose(value, existing) for existing in result):
+            result.append(value)
+    return result
+
+
+def _select_accepted_phase5_candidate(
+    candidates: list[_Phase5Candidate],
+    baseline: EngineV2Score,
+) -> _Phase5Candidate | None:
+    accepted = [
+        candidate
+        for candidate in candidates
+        if _mixed_candidate_is_better(candidate.score, baseline)
+    ]
+    if not accepted:
+        return None
+    return min(accepted, key=_phase5_candidate_quality_key)
+
+
+def _phase5_candidate_quality_key(
+    candidate: _Phase5Candidate,
+) -> tuple[int, int, int, float, float, float, str]:
+    score = candidate.score
+    return (
+        score.movable_overlaps,
+        score.crossings,
+        score.right_to_left_links,
+        score.width * score.height,
+        score.width,
+        score.height,
+        candidate.name,
+    )
+
+
+def _best_diagnostic_candidate(
+    candidates: list[_Phase5Candidate],
+    baseline: EngineV2Score,
+) -> _Phase5Candidate | None:
+    if not candidates:
+        return None
+
+    reason_rank = {
+        "accepted": 0,
+        "area_regression": 1,
+        "insufficient_final_width_reduction": 2,
+        "rtl_regression": 3,
+        "crossing_regression": 4,
+        "movable_overlap_regression": 5,
+        "invalid_baseline_width": 6,
+    }
+
+    def key(candidate: _Phase5Candidate) -> tuple[int, int, int, float, float, str]:
+        reason = _mixed_rejection_reason(candidate.score, baseline)
+        return (
+            reason_rank.get(reason, 99),
+            max(0, candidate.score.crossings - baseline.crossings),
+            max(
+                0,
+                candidate.score.right_to_left_links
+                - baseline.right_to_left_links,
+            ),
+            candidate.score.width * candidate.score.height,
+            candidate.score.width,
+            candidate.name,
+        )
+
+    return min(candidates, key=key)
 
 
 def _mixed_precheck_reason(
@@ -339,6 +468,9 @@ def _place_mixed_global_flow(
     workflow: Workflow,
     settings: LayoutSettings,
     workflow_width: float,
+    *,
+    order_mode: str = "weighted",
+    vertical_gap: float | None = None,
 ) -> bool:
     """Place mixed-flow layers in monotonic left-to-right columns."""
     del workflow_width
@@ -357,12 +489,17 @@ def _place_mixed_global_flow(
     if len(set(layers.values())) <= 1:
         return False
 
-    order = _weighted_mixed_order(
-        workflow,
-        spec_by_vertex,
-        layers,
-        edge_weights,
-    )
+    if order_mode == "weighted":
+        order = _weighted_mixed_order(
+            workflow,
+            spec_by_vertex,
+            layers,
+            edge_weights,
+        )
+    elif order_mode == "stable":
+        order = _stable_mixed_order(workflow, spec_by_vertex, layers)
+    else:
+        raise ValueError(f"Unknown Phase 5 order mode: {order_mode}")
     layer_to_real = {
         layer: [
             vertex
@@ -382,7 +519,11 @@ def _place_mixed_global_flow(
     groups_by_id = {group.id: group for group in workflow.groups}
     nodes_by_id = {node.id: node for node in workflow.nodes.values()}
     layer_sizes: dict[int, tuple[float, float]] = {}
-    vertical_gap = max(settings.group_v_gap, settings.node_v_gap)
+    placement_vertical_gap = (
+        max(settings.group_v_gap, settings.node_v_gap)
+        if vertical_gap is None
+        else max(MIXED_GLOBAL_MIN_VERTICAL_GAP, vertical_gap)
+    )
     horizontal_gap = max(settings.group_h_gap, settings.node_h_gap)
 
     for layer, vertices in layer_to_real.items():
@@ -398,7 +539,7 @@ def _place_mixed_global_flow(
             heights.append(height)
         layer_sizes[layer] = (
             max(widths),
-            sum(heights) + vertical_gap * max(0, len(heights) - 1),
+            sum(heights) + placement_vertical_gap * max(0, len(heights) - 1),
         )
 
     real_specs = [
@@ -447,7 +588,7 @@ def _place_mixed_global_flow(
                 groups_by_id,
                 nodes_by_id,
             )
-            current_y += height + vertical_gap
+            current_y += height + placement_vertical_gap
     return changed
 
 
@@ -522,6 +663,32 @@ def _move_mixed_vertex(
     node = nodes_by_id[value]
     node.x = x
     node.y = y
+
+
+def _stable_mixed_order(
+    workflow: Workflow,
+    spec_by_vertex: dict[int, MixedSpec],
+    layers: dict[int, int],
+) -> dict[int, list[MixedOrderVertex]]:
+    """Preserve baseline vertical order inside each mixed dependency layer."""
+    groups_by_id = {group.id: group for group in workflow.groups}
+    nodes_by_id = {node.id: node for node in workflow.nodes.values()}
+    layer_to_vertices: dict[int, list[MixedOrderVertex]] = {}
+    for vertex, layer in layers.items():
+        layer_to_vertices.setdefault(layer, []).append(vertex)
+
+    for vertices in layer_to_vertices.values():
+        vertices.sort(
+            key=lambda vertex: (
+                _mixed_vertex_center_y(
+                    spec_by_vertex[vertex],
+                    groups_by_id,
+                    nodes_by_id,
+                ),
+                _mixed_order_key(vertex),
+            )
+        )
+    return layer_to_vertices
 
 
 def _weighted_mixed_order(

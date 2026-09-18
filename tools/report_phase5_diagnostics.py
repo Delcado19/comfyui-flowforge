@@ -59,11 +59,13 @@ def main() -> int:
             f"groups={diag.group_vertices} "
             f"ungrouped={diag.ungrouped_vertices} "
             f"edges={diag.graph_edges} "
-            f"layers={diag.layers}"
+            f"layers={diag.layers} "
+            f"candidates={diag.candidate_count}"
         )
         if diag.attempted:
             print(
                 "  proposal: "
+                f"variant={diag.proposal_variant}; "
                 f"{diag.baseline_width:.0f}x{diag.baseline_height:.0f} -> "
                 f"{diag.proposed_width:.0f}x{diag.proposed_height:.0f}; "
                 f"crossings={diag.baseline_crossings}->{diag.proposed_crossings}; "
