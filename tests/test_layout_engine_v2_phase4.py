@@ -46,7 +46,7 @@ def test_ungrouped_candidate_requires_crossing_and_rtl_preservation():
     assert not _ungrouped_candidate_is_better(rtl_regression, baseline)
 
 
-def test_eligible_ungrouped_nodes_skip_direct_group_incident_nodes():
+def test_eligible_ungrouped_nodes_include_direct_group_incident_nodes():
     workflow = Workflow()
     grouped = Node(id=1, type="Grouped", x=100, y=100, size=[200, 100])
     pure_a = Node(id=2, type="PureA", x=2_000, y=100, size=[200, 100])
@@ -79,7 +79,7 @@ def test_eligible_ungrouped_nodes_skip_direct_group_incident_nodes():
 
     eligible_ids = {node.id for node in _eligible_ungrouped_nodes(workflow)}
 
-    assert eligible_ids == {2, 3}
+    assert eligible_ids == {2, 3, 4}
 
 
 def test_compact_pure_ungrouped_chain_reuses_group_horizontal_band():
