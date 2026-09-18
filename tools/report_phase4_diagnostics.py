@@ -59,7 +59,8 @@ def main() -> int:
             f"total={diag.total_ungrouped} eligible={diag.eligible_nodes} "
             f"excluded[pinned={diag.excluded_pinned}, deco={diag.excluded_decorative}, "
             f"hub={diag.excluded_virtual_hub}, control={diag.excluded_control}, "
-            f"preview={diag.excluded_text_preview}, direct_group={diag.excluded_direct_group}]"
+            f"preview={diag.excluded_text_preview}]; "
+            f"direct_group={diag.direct_group_nodes}"
         )
         print(
             "  components: "
