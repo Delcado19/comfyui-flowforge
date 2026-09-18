@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 from pathlib import Path
 
 from flowforge.layout_engine_v2_phase4 import apply_best_layout as apply_phase4_layout
@@ -32,9 +33,15 @@ def main() -> int:
     parser.add_argument(
         "--accepted-only",
         action="store_true",
-        help="Print only workflows whose Phase 5 candidate passes the full gate.",
+        help=(
+            "Print only workflows whose Phase 5 candidate passes the full gate "
+            "and suppress routine INFO logging."
+        ),
     )
     args = parser.parse_args()
+
+    if args.accepted_only:
+        logging.disable(logging.INFO)
 
     files = discover_workflow_files(args.root)
     matches = [value.casefold() for value in args.match]

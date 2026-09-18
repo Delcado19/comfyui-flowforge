@@ -610,9 +610,9 @@ passes the corpus safety check.
 
 Before changing placement heuristics again, the next review step is to identify
 the small set of workflows actually accepted by Phase 5 and inspect those
-layouts visually. The Phase 5 diagnostic reporter supports `--accepted-only`
-and prints corpus acceptance counts so this review does not require scanning all
-81 workflow blocks.
+layouts visually. The Phase 5 diagnostic reporter supports `--accepted-only`,
+suppresses routine INFO logging in that mode, and prints corpus acceptance
+counts so this review does not require scanning all 81 workflow blocks.
 
 ## Deferred TODOs
 
