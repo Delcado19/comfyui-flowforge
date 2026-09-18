@@ -559,9 +559,9 @@ def _weighted_mixed_order(
 
     predecessors: dict[MixedOrderVertex, list[tuple[MixedOrderVertex, int]]] = {}
     successors: dict[MixedOrderVertex, list[tuple[MixedOrderVertex, int]]] = {}
-    for source, target, weight in expanded_edges:
-        successors.setdefault(source, []).append((target, weight))
-        predecessors.setdefault(target, []).append((source, weight))
+    for expanded_source, expanded_target, weight in expanded_edges:
+        successors.setdefault(expanded_source, []).append((expanded_target, weight))
+        predecessors.setdefault(expanded_target, []).append((expanded_source, weight))
 
     for _ in range(MIXED_SWEEP_ROUNDS):
         for layer in range(1, max_layer + 1):
