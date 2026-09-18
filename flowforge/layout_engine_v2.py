@@ -39,6 +39,7 @@ from .layout import (
     _compress_debug_sidecar_layers,
     _group_bottom_padding,
     _group_top_padding,
+    _internal_layer_positions,
     _is_decorative_node,
     _is_pinned_node,
     _is_virtual_hub_node,
@@ -70,6 +71,16 @@ V2_HEIGHT_WEIGHT = 1.0
 V2_LINK_WEIGHT = 0.02
 V2_ASPECT_WEIGHT = 160.0
 V2_TARGET_ASPECT_RATIO = 1.35
+V2_MAX_WIDTH_GROWTH_RATIO = 1.35
+V2_COMPACT_WIDTH_RATIO = 0.75
+V2_SIGNIFICANT_CROSSING_GAIN_RATIO = 0.05
+V2_SIGNIFICANT_CROSSING_GAIN_MIN = 8
+V2_SIGNIFICANT_RTL_GAIN_RATIO = 0.10
+V2_SIGNIFICANT_RTL_GAIN_MIN = 3
+V2_COMPACT_CROSSING_TOLERANCE_RATIO = 0.02
+V2_COMPACT_CROSSING_TOLERANCE_MIN = 3
+V2_COMPACT_RTL_TOLERANCE_RATIO = 0.05
+V2_COMPACT_RTL_TOLERANCE_MIN = 1
 
 Vertex = Hashable
 
@@ -120,7 +131,7 @@ def apply_best_layout(
         if changed:
             _finalize_refinement(refined, variant)
             refined_score = _score_engine_v2(refined)
-            if refined_score.total < baseline_score.total:
+            if _candidate_is_better(refined_score, baseline_score):
                 candidate = refined
                 candidate_score = refined_score
             else:
@@ -143,7 +154,7 @@ def apply_best_layout(
             candidate_score.height,
         )
 
-        if best_score is None or candidate_score.total < best_score.total:
+        if best_score is None or _candidate_is_better(candidate_score, best_score):
             best_workflow = candidate
             best_score = candidate_score
             best_index = index
@@ -168,6 +179,50 @@ def apply_best_layout(
     )
     return best_workflow
 
+
+
+def _candidate_is_better(candidate: EngineV2Score, incumbent: EngineV2Score) -> bool:
+    """Prefer quality gains without allowing small gains to explode workflow width."""
+    if candidate.movable_overlaps != incumbent.movable_overlaps:
+        return candidate.movable_overlaps < incumbent.movable_overlaps
+
+    crossing_gain = incumbent.crossings - candidate.crossings
+    rtl_gain = incumbent.right_to_left_links - candidate.right_to_left_links
+    significant_crossing_gain = crossing_gain >= max(
+        V2_SIGNIFICANT_CROSSING_GAIN_MIN,
+        math.ceil(incumbent.crossings * V2_SIGNIFICANT_CROSSING_GAIN_RATIO),
+    )
+    significant_rtl_gain = rtl_gain >= max(
+        V2_SIGNIFICANT_RTL_GAIN_MIN,
+        math.ceil(incumbent.right_to_left_links * V2_SIGNIFICANT_RTL_GAIN_RATIO),
+    )
+
+    if (
+        incumbent.width > 0
+        and candidate.width > incumbent.width * V2_MAX_WIDTH_GROWTH_RATIO
+        and not significant_crossing_gain
+        and not significant_rtl_gain
+    ):
+        return False
+
+    compact_crossing_tolerance = max(
+        V2_COMPACT_CROSSING_TOLERANCE_MIN,
+        math.ceil(incumbent.crossings * V2_COMPACT_CROSSING_TOLERANCE_RATIO),
+    )
+    compact_rtl_tolerance = max(
+        V2_COMPACT_RTL_TOLERANCE_MIN,
+        math.ceil(incumbent.right_to_left_links * V2_COMPACT_RTL_TOLERANCE_RATIO),
+    )
+    if (
+        incumbent.width > 0
+        and candidate.width <= incumbent.width * V2_COMPACT_WIDTH_RATIO
+        and candidate.crossings <= incumbent.crossings + compact_crossing_tolerance
+        and candidate.right_to_left_links
+        <= incumbent.right_to_left_links + compact_rtl_tolerance
+    ):
+        return True
+
+    return candidate.total < incumbent.total
 
 def _refine_movable_group_internals(workflow: Workflow, settings: LayoutSettings) -> bool:
     """Re-layout fully movable groups with SCC-aware, dummy-edge ordering."""
@@ -217,30 +272,48 @@ def _refine_group(workflow: Workflow, group: Group, settings: LayoutSettings) ->
 
     base_x = group.bounding[0] + settings.group_padding
     base_y = group.bounding[1] + _group_top_padding(settings)
-    current_x = base_x
-    max_bottom = base_y
+    max_layer = max(layer_order)
+    physical_layers = {
+        layer: [
+            node_id
+            for node_id in layer_order.get(layer, [])
+            if isinstance(node_id, int)
+        ]
+        for layer in range(max_layer + 1)
+    }
+    layer_positions = _internal_layer_positions(
+        workflow,
+        physical_layers,
+        max_layer,
+        base_x,
+        base_y,
+        settings,
+    )
 
-    for layer in sorted(layer_order):
-        node_order = [node_id for node_id in layer_order[layer] if isinstance(node_id, int)]
+    placed_nodes = []
+    for layer in range(max_layer + 1):
+        node_order = physical_layers[layer]
         if not node_order:
             continue
 
-        layer_width = max(_node_visual_width(workflow.nodes[node_id]) for node_id in node_order)
-        current_y = base_y
+        layer_x, current_y = layer_positions[layer]
         for node_id in node_order:
             node = workflow.nodes[node_id]
-            node.x = current_x
+            node.x = layer_x
             node.y = current_y
+            placed_nodes.append(node)
             current_y += _node_visual_height(node) + settings.node_v_gap
-        max_bottom = max(max_bottom, current_y - settings.node_v_gap)
-        current_x += layer_width + settings.node_h_gap
 
-    content_right = current_x - settings.node_h_gap
+    if not placed_nodes:
+        return False
+
+    content_right = max(node.x + _node_visual_width(node) for node in placed_nodes)
+    content_bottom = max(node.y + _node_visual_height(node) for node in placed_nodes)
     group.bounding = [
         group.bounding[0],
         group.bounding[1],
         max(0.0, content_right - base_x) + 2.0 * settings.group_padding,
-        max(0.0, max_bottom - base_y)
+        max(0.0, content_bottom - base_y)
         + _group_top_padding(settings)
         + _group_bottom_padding(settings),
     ]
