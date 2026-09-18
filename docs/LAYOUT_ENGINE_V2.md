@@ -552,8 +552,11 @@ internal geometry. The established finalizer then re-applies control, text
 preview, virtual Set/Get, group-overlap, and pinned-geometry contracts.
 
 The first Phase 5 experiment deliberately skips any workflow that contains
-pinned group geometry or pinned ungrouped nodes. This keeps authored pins as
-hard constraints and excludes Amazing Z-Image from automatic reorganization.
+pinned group geometry or pinned ungrouped nodes. It also skips authored
+positive-size groups with no assigned nodes because those rectangles are not yet
+represented by the mixed graph. This keeps authored pins and unmodeled group
+surfaces as hard constraints and excludes Amazing Z-Image from automatic
+reorganization.
 
 Phase 5 uses a strict acceptance gate:
 
@@ -624,12 +627,26 @@ large empty vertical bands, and long cross-canvas wires. This is a false
 positive for the current numeric gate: width, area, crossings, and RTL are not
 sufficient to protect overall visual cohesion.
 
-No new acceptance threshold is added from the screenshot alone. The Phase 5
-diagnostic reporter now has an optional `--geometry` mode that compares the
-Phase 4 baseline with the exact Phase 5 proposal. It reports node-bounds,
-approximate node-density, largest empty X/Y bands, empty groups, and the
-top-level groups/ungrouped nodes that actually moved. That measurement should
-identify the fragmentation mechanism before the production gate changes.
+The geometry rerun isolated the false positive more precisely. Node geometry
+actually improved: node bounds fell from 6,300 x 3,236 to 5,810 x 2,568,
+approximate node density rose from 0.136 to 0.186, and the largest node-only
+horizontal gap fell from 460 to 300 px. The visible fragmentation instead came
+from three authored positive-size groups with no assigned member nodes:
+`Prompt`, `Sampler`, and `Reference Image 1`. The Phase 5 mixed graph did
+not represent those empty rectangles, but the normal overlap finalizer moved
+them downward by 1,128, 608, and 282 px respectively after the modeled flow was
+repositioned.
+
+Phase 5 therefore now treats positive-size empty groups as an explicit scope
+constraint, just like pinned geometry. Such workflows fall back to the complete
+Phase 4 result until mixed placement models those authored group rectangles as
+real obstacles/vertices. This is deliberately not a visual-density threshold or
+height heuristic: Phase 5 simply does not reorganize geometry that its graph
+cannot represent.
+
+The `--geometry` diagnostic remains available for future false positives. It
+reports node bounds, approximate node density, largest empty X/Y bands, empty
+groups, and the top-level groups/ungrouped nodes that actually moved.
 
 ## Deferred TODOs
 

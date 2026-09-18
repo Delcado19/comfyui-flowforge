@@ -6,6 +6,7 @@ from flowforge.layout_engine_v2_phase5 import (
     _CenterFlowMetrics,
     _build_mixed_graph,
     _center_flow_metrics,
+    _has_phase5_unmodeled_group_geometry,
     _mixed_candidate_is_better,
     _mixed_rejection_reason,
     _phase5_vertical_gaps,
@@ -153,6 +154,31 @@ def test_phase5_skips_pinned_group_geometry():
     workflow.nodes[extra.id] = extra
     workflow.ungrouped_nodes.append(extra)
     workflow.groups[0].pinned = True
+
+    changed = _place_mixed_global_flow(
+        workflow,
+        LayoutSettings(),
+        workflow_width=7_000,
+    )
+
+    assert not changed
+
+
+def test_phase5_skips_unmodeled_empty_group_geometry():
+    workflow = _mixed_chain_workflow()
+    extra = Node(id=12, type="Extra", x=6_500, y=450, size=[200, 100])
+    workflow.nodes[extra.id] = extra
+    workflow.ungrouped_nodes.append(extra)
+    workflow.groups.append(
+        Group(
+            id=300,
+            name="Authored Empty Panel",
+            nodes=[],
+            bounding=[900, 900, 1_200, 800],
+        )
+    )
+
+    assert _has_phase5_unmodeled_group_geometry(workflow)
 
     changed = _place_mixed_global_flow(
         workflow,

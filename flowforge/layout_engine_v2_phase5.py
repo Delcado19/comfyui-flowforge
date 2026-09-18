@@ -7,8 +7,11 @@ one rectangle together with all of its member nodes.
 
 Pinned geometry remains a hard constraint. Workflows with pinned groups or
 pinned ungrouped nodes are skipped entirely by this first Phase 5 experiment.
-Established local-placement special cases remain outside the mixed graph and
-are re-applied by the normal refinement finalizer.
+Authored positive-size groups with no assigned member nodes are also skipped:
+they are real canvas geometry but are not represented by the mixed dependency
+graph, so allowing the normal overlap finalizer to relocate them can fragment
+the visible workflow. Established local-placement special cases remain outside
+the mixed graph and are re-applied by the normal refinement finalizer.
 
 Physical placement keeps dependency layers monotonic from left to right. This
 is intentionally separate from graph ordering: row wrapping is not used because
@@ -490,6 +493,8 @@ def _mixed_precheck_reason(
         return "workflow_below_min_width"
     if _has_phase5_pin_constraint(workflow):
         return "pinned_geometry_constraint"
+    if _has_phase5_unmodeled_group_geometry(workflow):
+        return "unmodeled_empty_group_geometry"
     if group_count < MIXED_GLOBAL_MIN_GROUPS:
         return "too_few_groups"
     if ungrouped_count < MIXED_GLOBAL_MIN_UNGROUPED:
@@ -511,6 +516,14 @@ def _has_phase5_pin_constraint(workflow: Workflow) -> bool:
         _is_pinned_node(workflow, node)
         for node in workflow.ungrouped_nodes
         if node.id in workflow.nodes
+    )
+
+
+def _has_phase5_unmodeled_group_geometry(workflow: Workflow) -> bool:
+    """Return True for authored group rectangles that the mixed graph cannot model."""
+    return any(
+        not group.nodes and _has_positive_bounding(group)
+        for group in workflow.groups
     )
 
 
@@ -601,6 +614,7 @@ def _place_mixed_global_flow(
     ungrouped_count = sum(1 for kind, _value in specs if kind == "node")
     if (
         _has_phase5_pin_constraint(workflow)
+        or _has_phase5_unmodeled_group_geometry(workflow)
         or group_count < MIXED_GLOBAL_MIN_GROUPS
         or ungrouped_count < MIXED_GLOBAL_MIN_UNGROUPED
         or not edge_weights
