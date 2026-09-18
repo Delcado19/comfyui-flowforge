@@ -10,6 +10,10 @@ pinned ungrouped nodes are skipped entirely by this first Phase 5 experiment.
 Established local-placement special cases remain outside the mixed graph and
 are re-applied by the normal refinement finalizer.
 
+Physical placement keeps dependency layers monotonic from left to right. This
+is intentionally separate from graph ordering: row wrapping is not used because
+reversing alternate rows creates right-to-left links and long cross-row wires.
+
 The acceptance gate is deliberately strict: no additional movable overlaps,
 crossings, or right-to-left links; at least 8% workflow-width reduction; and no
 workflow-area growth.
@@ -32,8 +36,6 @@ from .layout import (
     _move_group_geometry,
     _node_visual_height,
     _node_visual_width,
-    _toplevel_wrap_row_width_cap,
-    _wrap_layer_columns,
 )
 from .layout_engine_v2 import (
     EngineV2Score,
@@ -53,7 +55,6 @@ logger = setup_logger(__name__)
 MIXED_GLOBAL_MIN_WIDTH = 5_000.0
 MIXED_GLOBAL_MIN_GROUPS = 2
 MIXED_GLOBAL_MIN_UNGROUPED = 3
-MIXED_GLOBAL_TARGET_WIDTH_RATIO = 0.70
 MIXED_GLOBAL_MIN_ACCEPTED_WIDTH_REDUCTION_RATIO = 0.08
 MIXED_GLOBAL_MAX_AREA_RATIO = 1.0
 MIXED_SWEEP_ROUNDS = 6
@@ -339,7 +340,8 @@ def _place_mixed_global_flow(
     settings: LayoutSettings,
     workflow_width: float,
 ) -> bool:
-    """Place groups and eligible ungrouped nodes in one shared layered flow."""
+    """Place mixed-flow layers in monotonic left-to-right columns."""
+    del workflow_width
     specs, spec_by_vertex, adjacency, edge_weights = _build_mixed_graph(workflow)
     group_count = sum(1 for kind, _value in specs if kind == "group")
     ungrouped_count = sum(1 for kind, _value in specs if kind == "node")
@@ -399,29 +401,30 @@ def _place_mixed_global_flow(
             sum(heights) + vertical_gap * max(0, len(heights) - 1),
         )
 
-    max_layer_width = max(width for width, _height in layer_sizes.values())
-    automatic_cap = _toplevel_wrap_row_width_cap(layer_sizes)
-    target_cap = max(
-        max_layer_width,
-        min(automatic_cap, workflow_width * MIXED_GLOBAL_TARGET_WIDTH_RATIO),
-    )
-
-    real_specs = [spec_by_vertex[vertex] for vertices in layer_to_real.values() for vertex in vertices]
+    real_specs = [
+        spec_by_vertex[vertex]
+        for vertices in layer_to_real.values()
+        for vertex in vertices
+    ]
     base_x = min(
-        (_mixed_vertex_xy(spec, groups_by_id, nodes_by_id)[0] for spec in real_specs),
+        (
+            _mixed_vertex_xy(spec, groups_by_id, nodes_by_id)[0]
+            for spec in real_specs
+        ),
         default=50.0,
     )
     base_y = min(
-        (_mixed_vertex_xy(spec, groups_by_id, nodes_by_id)[1] for spec in real_specs),
+        (
+            _mixed_vertex_xy(spec, groups_by_id, nodes_by_id)[1]
+            for spec in real_specs
+        ),
         default=50.0,
     )
-    layer_positions = _wrap_layer_columns(
+    layer_positions = _monotonic_layer_positions(
         layer_sizes,
-        target_cap,
         base_x,
         base_y,
         horizontal_gap,
-        vertical_gap,
     )
 
     changed = False
@@ -446,6 +449,21 @@ def _place_mixed_global_flow(
             )
             current_y += height + vertical_gap
     return changed
+
+
+def _monotonic_layer_positions(
+    layer_sizes: dict[int, tuple[float, float]],
+    base_x: float,
+    base_y: float,
+    horizontal_gap: float,
+) -> dict[int, tuple[float, float]]:
+    """Keep dependency layers monotonic in X while sharing one vertical band."""
+    positions: dict[int, tuple[float, float]] = {}
+    current_x = base_x
+    for layer in sorted(layer_sizes):
+        positions[layer] = (current_x, base_y)
+        current_x += layer_sizes[layer][0] + horizontal_gap
+    return positions
 
 
 def _mixed_vertex_size(

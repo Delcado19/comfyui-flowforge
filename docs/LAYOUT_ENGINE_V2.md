@@ -473,8 +473,26 @@ are not lost. The graph then uses:
 2. virtual dummy vertices for long mixed edges;
 3. weighted median sweeps;
 4. weighted local transposition;
-5. shared physical layer placement;
-6. boustrophedon row wrapping.
+5. shared physical layer placement.
+
+The first physical-placement prototype wrapped those layers into
+boustrophedon rows. Targeted diagnostics showed that this was structurally
+wrong for the strict Phase 5 quality contract:
+
+- Jibs: width improved from 5,977 to 4,697 px, but crossings rose from 756 to
+  1,411 and RTL from 41 to 46;
+- Flux2 VTON 6.0.2: width improved from 6,723 to 3,331 px, but crossings rose
+  from 31 to 62 and RTL from 6 to 13;
+- Flux2 VTON 6.0.2.7: width improved from 9,162 to 4,232 px, but crossings rose
+  from 44 to 82 and RTL from 11 to 21.
+
+The height also grew substantially, especially for Flux2 VTON 6.0.2.7
+(3,510 -> 9,444 px). The mixed dependency graph is therefore retained, but
+physical placement now keeps graph layers monotonic from left to right in one
+shared vertical band. Graph ordering and physical wrapping are treated as
+separate concerns; row wrapping is no longer part of Phase 5 because reversing
+alternate rows inherently introduces right-to-left flow and long cross-row
+segments.
 
 A group always moves as one rectangle with every member node, preserving its
 internal geometry. The established finalizer then re-applies control, text
@@ -510,10 +528,11 @@ baseline, and Phase 3 remains underneath it. Bridge, external-source, control,
 text-preview, virtual-hub, decorative, and pin-specific contracts are still
 authoritative after mixed placement.
 
-Phase 5 is still experimental. Its next gate is the targeted Jibs/Flux2
-diagnostic run followed by the full 81-workflow Optimize + Layout corpus. The
-aggregate structural reference remains 4,127 crossings / 339 RTL until corpus
-evidence justifies updating it.
+Phase 5 is still experimental. Its next gate is a second targeted
+Jibs/Flux2 diagnostic run using monotonic mixed-layer placement. Only if that
+preserves graph quality while reducing width should the full 81-workflow
+Optimize + Layout corpus be run. The aggregate structural reference remains
+4,127 crossings / 339 RTL until corpus evidence justifies updating it.
 
 ## Deferred TODOs
 
