@@ -12,6 +12,7 @@ links, or movable overlaps are allowed.
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 
 from .layout import (
     LayoutSettings,
@@ -43,6 +44,37 @@ UNGROUPED_COMPACT_TARGET_WORKFLOW_RATIO = 0.62
 UNGROUPED_COMPACT_MIN_POTENTIAL_REDUCTION_RATIO = 0.10
 UNGROUPED_COMPACT_MIN_ACCEPTED_WIDTH_REDUCTION_RATIO = 0.08
 UNGROUPED_COMPACT_MAX_AREA_RATIO = 1.0
+
+
+@dataclass(frozen=True)
+class Phase4Diagnostics:
+    """Explain whether conservative ungrouped compaction can affect a workflow."""
+
+    total_ungrouped: int
+    eligible_nodes: int
+    excluded_pinned: int
+    excluded_decorative: int
+    excluded_virtual_hub: int
+    excluded_control: int
+    excluded_text_preview: int
+    excluded_direct_group: int
+    linked_components: int
+    candidate_components: int
+    compactable_components: int
+    largest_component_nodes: int
+    largest_component_span: float
+    max_potential_reduction: float
+    attempted: bool
+    accepted: bool
+    rejection_reason: str
+    baseline_width: float
+    baseline_height: float
+    proposed_width: float | None
+    proposed_height: float | None
+    baseline_crossings: int
+    proposed_crossings: int | None
+    baseline_rtl: int
+    proposed_rtl: int | None
 
 
 def apply_best_layout(
@@ -89,6 +121,229 @@ def apply_best_layout(
     return baseline
 
 
+def diagnose_phase4(
+    workflow: Workflow,
+    settings: LayoutSettings | None = None,
+) -> Phase4Diagnostics:
+    """Return a read-only explanation of the Phase 4 decision for one layout."""
+    settings = settings or LayoutSettings()
+    baseline_score = _score_engine_v2(workflow)
+    counts = _phase4_exclusion_counts(workflow)
+    eligible = _eligible_ungrouped_nodes(workflow)
+    eligible_by_id = {node.id: node for node in eligible}
+    adjacency, undirected = _eligible_graph(workflow, eligible_by_id)
+
+    linked_components = [
+        component
+        for component in _connected_components(undirected)
+        if any(adjacency[node_id] for node_id in component)
+    ]
+    candidate_components = [
+        component
+        for component in linked_components
+        if len(component) >= UNGROUPED_COMPACT_MIN_COMPONENT_NODES
+    ]
+
+    component_rows: list[tuple[set[int], float, float]] = []
+    for component in candidate_components:
+        nodes = [eligible_by_id[node_id] for node_id in component]
+        span = _component_span(nodes)
+        potential = _component_potential_reduction(
+            workflow,
+            nodes,
+            {node_id: adjacency[node_id] for node_id in component},
+            baseline_score.width,
+        )
+        component_rows.append((component, span, potential))
+
+    compactable = [
+        row
+        for row in component_rows
+        if row[2] >= UNGROUPED_COMPACT_MIN_POTENTIAL_REDUCTION_RATIO
+    ]
+    largest = max(component_rows, key=lambda row: row[1], default=(set(), 0.0, 0.0))
+    max_potential = max((row[2] for row in component_rows), default=0.0)
+
+    compact = deepcopy(workflow)
+    moved = _compact_pure_ungrouped_components(
+        compact,
+        settings,
+        baseline_score.width,
+    )
+    if not moved:
+        if len(eligible) < UNGROUPED_COMPACT_MIN_COMPONENT_NODES:
+            reason = "too_few_eligible_nodes"
+        elif not candidate_components:
+            reason = "no_linked_component_with_min_nodes"
+        elif not compactable:
+            reason = "no_component_meets_potential_reduction_threshold"
+        else:
+            reason = "no_component_moved"
+        return Phase4Diagnostics(
+            total_ungrouped=len(workflow.ungrouped_nodes),
+            eligible_nodes=len(eligible),
+            linked_components=len(linked_components),
+            candidate_components=len(candidate_components),
+            compactable_components=len(compactable),
+            largest_component_nodes=len(largest[0]),
+            largest_component_span=largest[1],
+            max_potential_reduction=max_potential,
+            attempted=False,
+            accepted=False,
+            rejection_reason=reason,
+            baseline_width=baseline_score.width,
+            baseline_height=baseline_score.height,
+            proposed_width=None,
+            proposed_height=None,
+            baseline_crossings=baseline_score.crossings,
+            proposed_crossings=None,
+            baseline_rtl=baseline_score.right_to_left_links,
+            proposed_rtl=None,
+            **counts,
+        )
+
+    _finalize_refinement(compact, settings)
+    compact_score = _score_engine_v2(compact)
+    accepted = _ungrouped_candidate_is_better(compact_score, baseline_score)
+    return Phase4Diagnostics(
+        total_ungrouped=len(workflow.ungrouped_nodes),
+        eligible_nodes=len(eligible),
+        linked_components=len(linked_components),
+        candidate_components=len(candidate_components),
+        compactable_components=len(compactable),
+        largest_component_nodes=len(largest[0]),
+        largest_component_span=largest[1],
+        max_potential_reduction=max_potential,
+        attempted=True,
+        accepted=accepted,
+        rejection_reason=(
+            "accepted"
+            if accepted
+            else _ungrouped_rejection_reason(compact_score, baseline_score)
+        ),
+        baseline_width=baseline_score.width,
+        baseline_height=baseline_score.height,
+        proposed_width=compact_score.width,
+        proposed_height=compact_score.height,
+        baseline_crossings=baseline_score.crossings,
+        proposed_crossings=compact_score.crossings,
+        baseline_rtl=baseline_score.right_to_left_links,
+        proposed_rtl=compact_score.right_to_left_links,
+        **counts,
+    )
+
+
+def _phase4_exclusion_counts(workflow: Workflow) -> dict[str, int]:
+    group_by_node_id = _group_by_node_id(workflow)
+    counts = {
+        "excluded_pinned": 0,
+        "excluded_decorative": 0,
+        "excluded_virtual_hub": 0,
+        "excluded_control": 0,
+        "excluded_text_preview": 0,
+        "excluded_direct_group": 0,
+    }
+    for node in workflow.ungrouped_nodes:
+        if node.id not in workflow.nodes:
+            continue
+        if _is_pinned_node(workflow, node):
+            counts["excluded_pinned"] += 1
+        elif _is_decorative_node(node):
+            counts["excluded_decorative"] += 1
+        elif _is_virtual_hub_node(node):
+            counts["excluded_virtual_hub"] += 1
+        elif _is_control_source_node(workflow, node):
+            counts["excluded_control"] += 1
+        elif _is_terminal_text_preview_node(node):
+            counts["excluded_text_preview"] += 1
+        elif _has_direct_group_incident_link(workflow, node, group_by_node_id):
+            counts["excluded_direct_group"] += 1
+    return counts
+
+
+def _eligible_graph(
+    workflow: Workflow,
+    eligible_by_id: dict[int, Node],
+) -> tuple[dict[int, list[int]], dict[int, set[int]]]:
+    adjacency: dict[int, list[int]] = {node_id: [] for node_id in eligible_by_id}
+    undirected: dict[int, set[int]] = {node_id: set() for node_id in eligible_by_id}
+    for link in workflow.links.values():
+        if link.source not in eligible_by_id or link.target not in eligible_by_id:
+            continue
+        adjacency[link.source].append(link.target)
+        undirected[link.source].add(link.target)
+        undirected[link.target].add(link.source)
+    return adjacency, undirected
+
+
+def _component_potential_reduction(
+    workflow: Workflow,
+    nodes: list[Node],
+    adjacency: dict[int, list[int]],
+    workflow_width: float,
+) -> float:
+    current_span = _component_span(nodes)
+    if current_span <= 0:
+        return 0.0
+
+    layers = _assign_scc_longest_path_layers({node.id for node in nodes}, adjacency)
+    if len(set(layers.values())) <= 1:
+        return 0.0
+
+    layer_widths: dict[int, float] = {}
+    for node in nodes:
+        layer = layers[node.id]
+        layer_widths[layer] = max(
+            layer_widths.get(layer, 0.0),
+            _node_visual_width(node),
+        )
+
+    max_layer_width = max(layer_widths.values(), default=0.0)
+    target_cap = max(
+        max_layer_width,
+        min(
+            current_span,
+            max(
+                _group_span(workflow),
+                workflow_width * UNGROUPED_COMPACT_TARGET_WORKFLOW_RATIO,
+            ),
+        ),
+    )
+    return max(0.0, 1.0 - target_cap / current_span)
+
+
+def _ungrouped_rejection_reason(
+    candidate: EngineV2Score,
+    baseline: EngineV2Score,
+) -> str:
+    if candidate.movable_overlaps > baseline.movable_overlaps:
+        return "movable_overlap_regression"
+    if candidate.crossings > baseline.crossings:
+        return "crossing_regression"
+    if candidate.right_to_left_links > baseline.right_to_left_links:
+        return "rtl_regression"
+    if (
+        candidate.crossings < baseline.crossings
+        or candidate.right_to_left_links < baseline.right_to_left_links
+    ):
+        return "accepted_quality_gain"
+
+    if baseline.width <= 0:
+        return "invalid_baseline_width"
+    width_reduction = 1.0 - candidate.width / baseline.width
+    if width_reduction < UNGROUPED_COMPACT_MIN_ACCEPTED_WIDTH_REDUCTION_RATIO:
+        return "insufficient_final_width_reduction"
+
+    baseline_area = baseline.width * baseline.height
+    candidate_area = candidate.width * candidate.height
+    if (
+        baseline_area > 0
+        and candidate_area > baseline_area * UNGROUPED_COMPACT_MAX_AREA_RATIO
+    ):
+        return "area_regression"
+    return "accepted"
+
+
 def _compact_pure_ungrouped_components(
     workflow: Workflow,
     settings: LayoutSettings,
@@ -100,15 +355,7 @@ def _compact_pure_ungrouped_components(
         return False
 
     eligible_by_id = {node.id: node for node in eligible}
-    adjacency: dict[int, list[int]] = {node_id: [] for node_id in eligible_by_id}
-    undirected: dict[int, set[int]] = {node_id: set() for node_id in eligible_by_id}
-
-    for link in workflow.links.values():
-        if link.source not in eligible_by_id or link.target not in eligible_by_id:
-            continue
-        adjacency[link.source].append(link.target)
-        undirected[link.source].add(link.target)
-        undirected[link.target].add(link.source)
+    adjacency, undirected = _eligible_graph(workflow, eligible_by_id)
 
     components = _connected_components(undirected)
     components = [
@@ -222,19 +469,23 @@ def _compact_component(
         height += settings.node_v_gap * max(0, len(layer_nodes) - 1)
         layer_sizes[layer] = (width, height)
 
-    group_span = _group_span(workflow)
     max_layer_width = max(width for width, _height in layer_sizes.values())
     target_cap = max(
         max_layer_width,
         min(
             current_span,
             max(
-                group_span,
+                _group_span(workflow),
                 workflow_width * UNGROUPED_COMPACT_TARGET_WORKFLOW_RATIO,
             ),
         ),
     )
-    potential_reduction = 1.0 - target_cap / current_span
+    potential_reduction = _component_potential_reduction(
+        workflow,
+        nodes,
+        adjacency,
+        workflow_width,
+    )
     if potential_reduction < UNGROUPED_COMPACT_MIN_POTENTIAL_REDUCTION_RATIO:
         return False
 
