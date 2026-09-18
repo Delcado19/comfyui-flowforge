@@ -625,7 +625,20 @@ baseline, and Phase 3 remains underneath it. Bridge, external-source, control,
 text-preview, virtual-hub, decorative, and pin-specific contracts are still
 authoritative after mixed placement.
 
-Phase 5 is still experimental. The first full 81-workflow corpus run measured
+For the currently modeled scope, Phase 5 is complete and production-safe on the
+81-workflow corpus: 0 failures, 4,124 center crossings, and 339 center RTL links.
+It accepts exactly one workflow through the unchanged safety gate, using the
+visually validated `weighted-anchoredx-yband15-gap-12` realization. The branch
+and v2 rollout remain experimental overall, so release-facing documentation is
+still deferred.
+
+### Historical Phase 5 development record
+
+The following results document the iterations that led to the current
+production-safe Phase 5 behavior. They are retained as engineering history and
+should not be read as the current runtime state.
+
+The first full 81-workflow corpus run measured
 4,138 center crossings / 331 center RTL links, which missed the Phase 4 crossing
 reference of 4,127 / 339 by 11 crossings while improving RTL by 8. That run
 revealed the port-aware versus center-metric acceptance mismatch described
@@ -685,7 +698,7 @@ cp1252 when workflow or group names contain Unicode symbols or emoji. Long
 local report captures should be written below `logs/`, which is already
 gitignored.
 
-### Final Phase 5 safety validation
+### Historical safe-no-op checkpoint
 
 After the empty-group scope guard, the accepted-only corpus diagnostic reported:
 
@@ -697,16 +710,15 @@ After the empty-group scope guard, the accepted-only corpus diagnostic reported:
 
 The final full 81-workflow Optimize + Layout corpus then measured exactly
 `4,127` center crossings and `339` center RTL links, with 0 failures. This is
-identical to the Phase 4 reference. Phase 5 is therefore currently a safe
-no-op on the corpus: it introduces no structural regression, but it also has no
-accepted corpus improvement after the visually invalid candidate was excluded.
+identical to the Phase 4 reference. At that checkpoint, Phase 5 was therefore a safe no-op on the corpus: it
+introduced no structural regression, but it also had no accepted corpus
+improvement after the visually invalid candidate was excluded.
 
-Further Phase 5 work should therefore focus on expanding what the mixed graph
-can model—most notably authored empty group rectangles—or on improving physical
-realization for the remaining attempted workflows. The diagnostic reporter
-supports `--attempted-only` and prints aggregate attempted-rejection and skipped
-reason counts so the next architecture decision can be based on the dominant
-failure mode rather than another global heuristic.
+At that point, further Phase 5 work focused on improving physical realization
+for the remaining attempted workflows rather than weakening the safety gate.
+The diagnostic reporter's `--attempted-only` summary was used to choose the next
+architecture step from the dominant rejection modes rather than from another
+global heuristic.
 
 The first attempted-only rerun after the empty-group guard produced 14 physical
 candidate workflows:
