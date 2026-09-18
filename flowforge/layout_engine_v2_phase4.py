@@ -57,7 +57,7 @@ class Phase4Diagnostics:
     excluded_virtual_hub: int
     excluded_control: int
     excluded_text_preview: int
-    excluded_direct_group: int
+    direct_group_nodes: int
     linked_components: int
     candidate_components: int
     compactable_components: int
@@ -241,7 +241,7 @@ def _phase4_exclusion_counts(workflow: Workflow) -> dict[str, int]:
         "excluded_virtual_hub": 0,
         "excluded_control": 0,
         "excluded_text_preview": 0,
-        "excluded_direct_group": 0,
+        "direct_group_nodes": 0,
     }
     for node in workflow.ungrouped_nodes:
         if node.id not in workflow.nodes:
@@ -257,7 +257,7 @@ def _phase4_exclusion_counts(workflow: Workflow) -> dict[str, int]:
         elif _is_terminal_text_preview_node(node):
             counts["excluded_text_preview"] += 1
         elif _has_direct_group_incident_link(workflow, node, group_by_node_id):
-            counts["excluded_direct_group"] += 1
+            counts["direct_group_nodes"] += 1
     return counts
 
 
