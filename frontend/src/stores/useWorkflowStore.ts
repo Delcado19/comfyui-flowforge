@@ -55,15 +55,28 @@ export interface ComfyGroup {
   [key: string]: unknown
 }
 
+interface WorkflowHistoryEntry {
+  workflow: ComfyWorkflow
+  label: string
+}
+
+const WORKFLOW_HISTORY_LIMIT = 10
+
 export const useWorkflowStore = defineStore('workflow', {
   state: () => ({
     workflow: null as ComfyWorkflow | null,
     scale: 1,
     offsetX: 0,
-    offsetY: 0
+    offsetY: 0,
+    undoHistory: [] as WorkflowHistoryEntry[],
+    redoHistory: [] as WorkflowHistoryEntry[],
   }),
   getters: {
     nodes: (state): ComfyNode[] => state.workflow?.nodes ?? [],
+    canUndo: (state): boolean => state.undoHistory.length > 0,
+    canRedo: (state): boolean => state.redoHistory.length > 0,
+    undoLabel: (state): string | null => state.undoHistory.at(-1)?.label ?? null,
+    redoLabel: (state): string | null => state.redoHistory.at(-1)?.label ?? null,
     hasPinnedItems: (state): boolean => {
       return Boolean(
         state.workflow?.nodes.some((node) => isPinned(node)) ||
@@ -83,7 +96,56 @@ export const useWorkflowStore = defineStore('workflow', {
   },
   actions: {
     setWorkflow(workflow: ComfyWorkflow) {
-      this.workflow = workflow
+      this.workflow = cloneWorkflow(workflow)
+    },
+    snapshotWorkflow(): ComfyWorkflow | null {
+      return this.workflow ? cloneWorkflow(this.workflow) : null
+    },
+    applyWorkflowTransformation(
+      workflow: ComfyWorkflow,
+      label: string,
+      previousWorkflow?: ComfyWorkflow | null,
+    ) {
+      const previous = previousWorkflow ?? this.workflow
+      if (previous) {
+        this.undoHistory.push({
+          workflow: cloneWorkflow(previous),
+          label,
+        })
+        trimHistory(this.undoHistory)
+      }
+      this.redoHistory = []
+      this.workflow = cloneWorkflow(workflow)
+    },
+    undoWorkflowTransformation(): string | null {
+      if (!this.workflow) return null
+      const previous = this.undoHistory.pop()
+      if (!previous) return null
+
+      this.redoHistory.push({
+        workflow: cloneWorkflow(this.workflow),
+        label: previous.label,
+      })
+      trimHistory(this.redoHistory)
+      this.workflow = cloneWorkflow(previous.workflow)
+      return previous.label
+    },
+    redoWorkflowTransformation(): string | null {
+      if (!this.workflow) return null
+      const next = this.redoHistory.pop()
+      if (!next) return null
+
+      this.undoHistory.push({
+        workflow: cloneWorkflow(this.workflow),
+        label: next.label,
+      })
+      trimHistory(this.undoHistory)
+      this.workflow = cloneWorkflow(next.workflow)
+      return next.label
+    },
+    clearWorkflowHistory() {
+      this.undoHistory = []
+      this.redoHistory = []
     },
     setView(scale: number, offsetX: number, offsetY: number) {
       this.scale = scale
@@ -181,10 +243,20 @@ export const useWorkflowStore = defineStore('workflow', {
       if (!Array.isArray(data.nodes)) {
         throw new Error('ComfyUI workflow is missing a nodes array')
       }
-      this.workflow = data
+      this.workflow = cloneWorkflow(data)
+      this.clearWorkflowHistory()
     }
   }
 })
+
+function cloneWorkflow(workflow: ComfyWorkflow): ComfyWorkflow {
+  return JSON.parse(JSON.stringify(workflow)) as ComfyWorkflow
+}
+
+function trimHistory(history: WorkflowHistoryEntry[]): void {
+  if (history.length <= WORKFLOW_HISTORY_LIMIT) return
+  history.splice(0, history.length - WORKFLOW_HISTORY_LIMIT)
+}
 
 function isPinned(item: { flags?: Record<string, unknown> }): boolean {
   return Boolean(item.flags && item.flags.pinned === true)

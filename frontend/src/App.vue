@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWorkflowStore, type ComfyNode, type ComfyWorkflow, type NodeSize } from './stores/useWorkflowStore'
 import ComfyCanvas from './components/ComfyCanvas.vue'
 
@@ -42,10 +42,10 @@ function onFileSelected(e: Event) {
   reader.onload = () => {
     try {
       const data = JSON.parse(reader.result as string)
+      cancelPendingLayout()
       store.loadWorkflow(data)
       layoutStatus.value = ''
-      comparisonNodes.value = []
-      showComparison.value = false
+      clearComparison()
     } catch (err) {
       alert('Invalid workflow file')
     }
@@ -62,20 +62,21 @@ function scheduleLayout(immediate = false) {
   }
 
   const requestId = ++layoutRequestId
-  const beforeLayout = captureComparisonNodes()
+  const historyLabel = immediate ? 'Layout Only' : 'Spacing Layout'
 
   const run = async () => {
     if (requestId !== layoutRequestId) return
-    const currentWorkflow = store.workflow
-    if (!currentWorkflow) return
+    const beforeWorkflow = store.snapshotWorkflow()
+    if (!beforeWorkflow) return
+    const beforeLayout = captureComparisonNodes(beforeWorkflow.nodes)
 
     try {
-      const { data, stats } = await requestLayout(currentWorkflow)
+      const { data, stats } = await requestLayout(beforeWorkflow)
       if (requestId !== layoutRequestId) return
       layoutStatus.value = stats
         ? `Layout Only: ${stats.selected_candidate}/${stats.candidate_count} candidates, score ${stats.score.total.toFixed(1)}`
         : 'Layout completed'
-      store.loadWorkflow(data)
+      store.applyWorkflowTransformation(data, historyLabel, beforeWorkflow)
       comparisonNodes.value = beforeLayout
       showComparison.value = beforeLayout.length > 0
     } catch (err) {
@@ -91,6 +92,7 @@ function scheduleLayout(immediate = false) {
   }
 
   layoutTimer = window.setTimeout(() => {
+    layoutTimer = undefined
     void run()
   }, 180)
 }
@@ -102,20 +104,18 @@ function layout() {
 async function optimizeAndLayout() {
   if (!store.workflow) return
 
-  if (layoutTimer !== undefined) {
-    clearTimeout(layoutTimer)
-    layoutTimer = undefined
-  }
-  layoutRequestId += 1
-
-  const beforeLayout = captureComparisonNodes()
+  cancelPendingLayout()
+  const requestId = ++layoutRequestId
+  const beforeWorkflow = store.snapshotWorkflow()
+  if (!beforeWorkflow) return
+  const beforeLayout = captureComparisonNodes(beforeWorkflow.nodes)
 
   try {
-    const currentWorkflow = store.workflow
-    if (!currentWorkflow) return
-    const optimized = await requestOptimize(currentWorkflow)
+    const optimized = await requestOptimize(beforeWorkflow)
+    if (requestId !== layoutRequestId) return
     const { data, stats } = await requestLayout(optimized)
-    store.loadWorkflow(data)
+    if (requestId !== layoutRequestId) return
+    store.applyWorkflowTransformation(data, 'Optimize + Layout', beforeWorkflow)
     comparisonNodes.value = beforeLayout
     showComparison.value = beforeLayout.length > 0
     const optimizeSummary = `${countNodesByType(data, 'SetNode')} Set, ${countNodesByType(data, 'GetNode')} Get`
@@ -123,6 +123,7 @@ async function optimizeAndLayout() {
       ? `Optimize + Layout: ${optimizeSummary}, ${stats.selected_candidate}/${stats.candidate_count} candidates`
       : `Optimize + Layout: ${optimizeSummary}`
   } catch (err) {
+    if (requestId !== layoutRequestId) return
     layoutStatus.value = ''
     alert('Optimize + Layout failed: ' + err)
   }
@@ -168,6 +169,71 @@ function toggleComparison() {
   showComparison.value = !showComparison.value
 }
 
+function clearComparison() {
+  comparisonNodes.value = []
+  showComparison.value = false
+}
+
+function cancelPendingLayout() {
+  if (layoutTimer !== undefined) {
+    clearTimeout(layoutTimer)
+    layoutTimer = undefined
+  }
+  layoutRequestId += 1
+}
+
+function undoTransformation() {
+  if (!store.canUndo) return
+  cancelPendingLayout()
+  const label = store.undoWorkflowTransformation()
+  if (!label) return
+  clearComparison()
+  layoutStatus.value = `Undo: ${label}`
+}
+
+function redoTransformation() {
+  if (!store.canRedo) return
+  cancelPendingLayout()
+  const label = store.redoWorkflowTransformation()
+  if (!label) return
+  clearComparison()
+  layoutStatus.value = `Redo: ${label}`
+}
+
+function isEditableShortcutTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return (
+    target.isContentEditable ||
+    target.tagName === 'INPUT' ||
+    target.tagName === 'TEXTAREA' ||
+    target.tagName === 'SELECT'
+  )
+}
+
+function onHistoryShortcut(event: KeyboardEvent) {
+  if (!(event.ctrlKey || event.metaKey) || event.altKey) return
+  if (isEditableShortcutTarget(event.target)) return
+
+  const key = event.key.toLowerCase()
+  if (key === 'z') {
+    if (event.shiftKey) {
+      if (!store.canRedo) return
+      event.preventDefault()
+      redoTransformation()
+      return
+    }
+    if (!store.canUndo) return
+    event.preventDefault()
+    undoTransformation()
+    return
+  }
+
+  if (key === 'y' && store.canRedo) {
+    event.preventDefault()
+    redoTransformation()
+  }
+}
+
 function deleteAllGroups() {
   canvasRef.value?.deleteAllGroups()
 }
@@ -203,8 +269,8 @@ function parseLayoutStats(raw: string | null) {
   return null
 }
 
-function captureComparisonNodes(): ComfyNode[] {
-  return store.nodes.map((node) => ({
+function captureComparisonNodes(nodes: ComfyNode[] = store.nodes): ComfyNode[] {
+  return nodes.map((node) => ({
     ...node,
     pos: [node.pos[0], node.pos[1]],
     size: copyNodeSize(node.size),
@@ -231,6 +297,15 @@ watch([nodeXDistance, nodeYDistance], () => {
     scheduleLayout()
   }
 })
+
+onMounted(() => {
+  window.addEventListener('keydown', onHistoryShortcut)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', onHistoryShortcut)
+  cancelPendingLayout()
+})
 </script>
 
 <template>
@@ -239,6 +314,20 @@ watch([nodeXDistance, nodeYDistance], () => {
       <button @click="openFile">Open</button>
       <button :disabled="!store.workflow" @click="optimizeAndLayout">Optimize + Layout</button>
       <button :disabled="!store.workflow" @click="layout">Layout Only</button>
+      <button
+        :disabled="!store.canUndo"
+        :title="store.undoLabel ? `Undo ${store.undoLabel} (Ctrl/Cmd+Z)` : 'Nothing to undo'"
+        @click="undoTransformation"
+      >
+        Undo
+      </button>
+      <button
+        :disabled="!store.canRedo"
+        :title="store.redoLabel ? `Redo ${store.redoLabel} (Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y)` : 'Nothing to redo'"
+        @click="redoTransformation"
+      >
+        Redo
+      </button>
       <button
         :class="{ active: showComparison }"
         :disabled="comparisonNodes.length === 0"

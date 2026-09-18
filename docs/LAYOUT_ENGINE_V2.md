@@ -905,13 +905,25 @@ and backed by a visually accepted production candidate. Phase 5 can therefore
 be treated as complete for the current modeled scope; future work should expand
 scope or improve currently rejected workflows without weakening these gates.
 
-## Deferred TODOs
+### Frontend transformation history
 
-- Add user-facing Undo/Redo for destructive workflow transformations such as
-  Layout and Optimize. The implementation should restore the complete workflow
-  state from before the action rather than trying to reverse individual geometry
-  mutations. This is intentionally deferred until the v2 layout engine and its
-  frontend integration are stable.
+With Phase 5 stable for the current modeled scope, the previously deferred
+frontend Undo/Redo work is now implemented for destructive backend
+transformations. Successful `Layout Only`, live spacing-layout, and
+`Optimize + Layout` runs record complete ComfyUI workflow JSON snapshots
+instead of attempting to reverse individual geometry mutations.
+
+`Optimize + Layout` is one atomic history step even though it performs two
+backend requests. Undo/Redo invalidates pending/debounced layout work so a late
+response cannot overwrite a restored workflow. Loading a new workflow clears
+history, and a new transformation after Undo clears the Redo stack.
+
+The history is intentionally limited to the 10 most recent full snapshots per
+direction to bound memory usage on large workflows. Manual canvas edits (node
+drag/resize, group edits, pins) are not separate history entries in this first
+implementation. Toolbar buttons and `Ctrl/Cmd+Z`,
+`Ctrl/Cmd+Shift+Z`, and `Ctrl/Cmd+Y` expose the transformation history;
+keyboard shortcuts do not intercept editable form controls.
 
 ## Validation
 
