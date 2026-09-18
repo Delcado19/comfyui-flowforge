@@ -9,7 +9,14 @@ from pathlib import Path
 from typing import Any
 
 from .api import _workflow_to_comfyui_json
-from .layout import LayoutReport, apply as apply_layout
+from .layout import (
+    LayoutReport,
+    _group_flow_layers,
+    _is_decorative_node,
+    _node_visual_width,
+    _ungrouped_flow_layers,
+    apply as apply_layout,
+)
 from .optimizer import optimize as optimize_workflow
 from .parser import parse_comfyui_workflow
 from .workflow_validation import discover_workflow_files
@@ -28,6 +35,24 @@ class GeometryMetrics:
 
 
 @dataclass(frozen=True)
+class LayoutStructureMetrics:
+    """Structural width diagnostics for a laid-out workflow."""
+
+    group_span_width: float
+    ungrouped_span_width: float
+    group_flow_layers: int
+    ungrouped_flow_layers: int
+    group_columns: int
+    ungrouped_columns: int
+    widest_group_name: str | None
+    widest_group_width: float
+    widest_ungrouped_type: str | None
+    widest_ungrouped_width: float
+    left_edge_owner: str | None
+    right_edge_owner: str | None
+
+
+@dataclass(frozen=True)
 class WorkflowQualityReport:
     """Layout quality report for one ComfyUI UI workflow."""
 
@@ -40,6 +65,7 @@ class WorkflowQualityReport:
     original: GeometryMetrics
     laid_out: GeometryMetrics
     moved_nodes: int
+    structure: LayoutStructureMetrics
     laid_out_crossing_categories: dict[str, int] = field(default_factory=dict)
     laid_out_right_to_left_categories: dict[str, int] = field(default_factory=dict)
     layout_candidate_count: int | None = None
@@ -148,6 +174,7 @@ def build_workflow_quality_report(
         original=original_metrics,
         laid_out=laid_out_metrics,
         moved_nodes=_count_moved_nodes(data, laid_out_data),
+        structure=_layout_structure_metrics(laid_out_workflow),
         laid_out_crossing_categories=_count_crossing_categories(category_source, laid_out_data),
         laid_out_right_to_left_categories=_count_right_to_left_categories(category_source, laid_out_data),
         layout_candidate_count=_layout_candidate_count(layout_report),
@@ -156,7 +183,12 @@ def build_workflow_quality_report(
     )
 
 
-def summarize_quality_text(summary: WorkflowQualitySummary, *, top: int = 10) -> str:
+def summarize_quality_text(
+    summary: WorkflowQualitySummary,
+    *,
+    top: int = 10,
+    include_structure: bool = False,
+) -> str:
     """Format a compact text summary for terminal output."""
     lines = [
         f"Root: {summary.root}",
@@ -208,9 +240,116 @@ def summarize_quality_text(summary: WorkflowQualitySummary, *, top: int = 10) ->
                     f"crossings={report.original.link_crossings}->{report.laid_out.link_crossings} "
                     f"rtl={report.original.right_to_left_links}->{report.laid_out.right_to_left_links}"
                 )
+                if include_structure:
+                    structure = report.structure
+                    widest_group = (
+                        f"{structure.widest_group_name} ({structure.widest_group_width:.0f})"
+                        if structure.widest_group_name is not None
+                        else "none"
+                    )
+                    widest_ungrouped = (
+                        f"{structure.widest_ungrouped_type} ({structure.widest_ungrouped_width:.0f})"
+                        if structure.widest_ungrouped_type is not None
+                        else "none"
+                    )
+                    lines.append(
+                        "  structure: "
+                        f"groups span={structure.group_span_width:.0f} "
+                        f"layers={structure.group_flow_layers} cols={structure.group_columns} "
+                        f"widest={widest_group}; "
+                        f"ungrouped span={structure.ungrouped_span_width:.0f} "
+                        f"layers={structure.ungrouped_flow_layers} cols={structure.ungrouped_columns} "
+                        f"widest={widest_ungrouped}; "
+                        f"edges={structure.left_edge_owner} -> {structure.right_edge_owner}"
+                    )
     for failure in summary.failures[:20]:
         lines.append(f"- {failure.path}: {failure.message}")
     return "\n".join(lines)
+
+
+
+def _layout_structure_metrics(workflow) -> LayoutStructureMetrics:
+    """Measure which laid-out structures dominate horizontal workflow span."""
+    groups = [
+        group
+        for group in workflow.groups
+        if group.nodes and len(group.bounding) >= 4 and group.bounding[2] > 0
+    ]
+    ungrouped = [
+        node
+        for node in workflow.ungrouped_nodes
+        if node.id in workflow.nodes and not _is_decorative_node(node)
+    ]
+
+    group_span_width = _span_width(
+        (group.bounding[0], group.bounding[0] + group.bounding[2])
+        for group in groups
+    )
+    ungrouped_span_width = _span_width(
+        (node.x, node.x + _node_visual_width(node))
+        for node in ungrouped
+    )
+
+    group_layers = _group_flow_layers(workflow) if groups else {}
+    ungrouped_layers = _ungrouped_flow_layers(workflow, ungrouped) if ungrouped else {}
+
+    widest_group = max(groups, key=lambda group: group.bounding[2], default=None)
+    widest_ungrouped = max(
+        ungrouped,
+        key=_node_visual_width,
+        default=None,
+    )
+
+    edge_items: list[tuple[float, float, str]] = []
+    for group in groups:
+        label = f"group:{group.name or group.id}"
+        edge_items.append(
+            (group.bounding[0], group.bounding[0] + group.bounding[2], label)
+        )
+    for node in ungrouped:
+        label = f"node:{node.type}#{node.id}"
+        edge_items.append((node.x, node.x + _node_visual_width(node), label))
+
+    left_owner = min(edge_items, key=lambda item: item[0])[2] if edge_items else None
+    right_owner = max(edge_items, key=lambda item: item[1])[2] if edge_items else None
+
+    return LayoutStructureMetrics(
+        group_span_width=group_span_width,
+        ungrouped_span_width=ungrouped_span_width,
+        group_flow_layers=_layer_count(group_layers),
+        ungrouped_flow_layers=_layer_count(ungrouped_layers),
+        group_columns=len({round(group.bounding[0], 3) for group in groups}),
+        ungrouped_columns=len({round(node.x, 3) for node in ungrouped}),
+        widest_group_name=(
+            widest_group.name or f"group-{widest_group.id}"
+            if widest_group is not None
+            else None
+        ),
+        widest_group_width=(
+            float(widest_group.bounding[2]) if widest_group is not None else 0.0
+        ),
+        widest_ungrouped_type=(
+            widest_ungrouped.type if widest_ungrouped is not None else None
+        ),
+        widest_ungrouped_width=(
+            _node_visual_width(widest_ungrouped)
+            if widest_ungrouped is not None
+            else 0.0
+        ),
+        left_edge_owner=left_owner,
+        right_edge_owner=right_owner,
+    )
+
+
+def _span_width(spans) -> float:
+    spans = list(spans)
+    if not spans:
+        return 0.0
+    return max(right for _left, right in spans) - min(left for left, _right in spans)
+
+
+def _layer_count(layers: dict[int, int]) -> int:
+    return max(layers.values(), default=-1) + 1
 
 
 def _geometry_metrics(data: dict[str, Any]) -> GeometryMetrics:
