@@ -123,12 +123,14 @@ def apply_best_layout(
 
         refined = deepcopy(baseline)
         changed = _refine_movable_group_internals(refined, variant)
+        candidate_source = "baseline"
         if changed:
             _finalize_refinement(refined, variant)
             refined_score = _score_engine_v2(refined)
             if _candidate_is_better(refined_score, baseline_score):
                 candidate = refined
                 candidate_score = refined_score
+                candidate_source = "refined"
             else:
                 candidate = baseline
                 candidate_score = baseline_score
@@ -136,10 +138,12 @@ def apply_best_layout(
             candidate = baseline
             candidate_score = baseline_score
 
-        logger.debug(
-            "v2 candidate %s/%s score=%.2f crossings=%s rtl=%s overlaps=%s link=%.2f size=%.0fx%.0f",
+        logger.info(
+            "v2 candidate %s/%s source=%s score=%.2f crossings=%s rtl=%s overlaps=%s "
+            "link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
             index,
             len(variants),
+            candidate_source,
             candidate_score.total,
             candidate_score.crossings,
             candidate_score.right_to_left_links,
@@ -147,6 +151,7 @@ def apply_best_layout(
             candidate_score.link_length,
             candidate_score.width,
             candidate_score.height,
+            _aspect_cost(candidate_score.width, candidate_score.height),
         )
 
         if best_score is None or _candidate_is_better(candidate_score, best_score):
@@ -164,13 +169,18 @@ def apply_best_layout(
         score=legacy_score,
     )
     logger.info(
-        "Layout engine v2 selected candidate %s/%s: score=%.2f crossings=%s rtl=%s overlaps=%s",
+        "Layout engine v2 selected candidate %s/%s: score=%.2f crossings=%s rtl=%s "
+        "overlaps=%s link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
         best_index,
         len(variants),
         best_score.total,
         best_score.crossings,
         best_score.right_to_left_links,
         best_score.movable_overlaps,
+        best_score.link_length,
+        best_score.width,
+        best_score.height,
+        _aspect_cost(best_score.width, best_score.height),
     )
     return best_workflow
 
