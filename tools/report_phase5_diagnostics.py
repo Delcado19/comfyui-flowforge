@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from flowforge.layout import LayoutSettings, _node_visual_height, _node_visual_width
-from flowforge.layout_engine_v2 import _score_engine_v2
+from flowforge.layout_engine_v2 import _port_segments, _score_engine_v2
 from flowforge.layout_engine_v2_phase4 import apply_best_layout as apply_phase4_layout
 from flowforge.layout_engine_v2_phase5 import (
     _best_diagnostic_candidate,
@@ -212,13 +212,18 @@ def _print_geometry_diagnostics(baseline: Workflow) -> None:
 
     before = _node_geometry_summary(baseline)
     after = _node_geometry_summary(proposal.workflow)
+    before_max_link = _max_port_link_length(baseline)
+    after_max_link = _max_port_link_length(proposal.workflow)
     print(
         "  geometry: "
         f"node-bounds={before['width']:.0f}x{before['height']:.0f}"
         f"->{after['width']:.0f}x{after['height']:.0f}; "
         f"density={before['density']:.3f}->{after['density']:.3f}; "
         f"max-x-gap={before['max_x_gap']:.0f}->{after['max_x_gap']:.0f}; "
-        f"max-y-gap={before['max_y_gap']:.0f}->{after['max_y_gap']:.0f}"
+        f"max-y-gap={before['max_y_gap']:.0f}->{after['max_y_gap']:.0f}; "
+        f"link-length={baseline_score.link_length:.0f}"
+        f"->{proposal.score.link_length:.0f}; "
+        f"max-link={before_max_link:.0f}->{after_max_link:.0f}"
     )
 
     empty_groups = [
@@ -279,6 +284,17 @@ def _print_geometry_diagnostics(baseline: Workflow) -> None:
             print(f"    - ... {len(moved_nodes) - 16} more")
     else:
         print("  moved-ungrouped: none")
+
+
+def _max_port_link_length(workflow: Workflow) -> float:
+    """Return the longest Manhattan port-to-port link in the workflow."""
+    return max(
+        (
+            abs(end[0] - start[0]) + abs(end[1] - start[1])
+            for _source, _target, start, end in _port_segments(workflow)
+        ),
+        default=0.0,
+    )
 
 
 def _node_geometry_summary(workflow: Workflow) -> dict[str, float]:

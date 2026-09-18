@@ -703,6 +703,23 @@ dependency layer. Direct forward dependencies remain left-to-right, and the
 complete existing Phase 5 acceptance gate remains authoritative. The original
 shared-layer X realization is retained unchanged as a baseline variant.
 
+The first `compactx` corpus rerun produced one numerically accepted candidate:
+`Flux.2 klein 9B Reference Identity 1MP + 2x` with
+`weighted-compactx-gap-40`. It improved width from 5,810 to 4,850 px, port
+crossings from 82 to 78, center crossings from 93 to 92, port RTL from 12 to 10,
+and center RTL from 6 to 4 while keeping total workflow area slightly smaller.
+Visual inspection still rejected the result because the workflow became
+vertically dispersed: FAST MODE, QUALITY MODE, and output regions formed distant
+islands connected by long cross-canvas wires. This is a second, distinct false
+positive: all represented geometry is valid, but the current gate does not yet
+protect visual cohesion or link-span growth.
+
+The optional `--geometry` diagnostic now also reports total Manhattan
+port-to-port link length and the longest individual port link before/after the
+proposal. These measurements are diagnostic only; no new acceptance threshold
+is introduced until the corpus shows how strongly they separate visually valid
+and invalid candidates.
+
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.
 
