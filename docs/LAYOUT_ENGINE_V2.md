@@ -316,6 +316,70 @@ The structure reporter also prints decorative-node count/span and the widest
 decorative node so corpus measurements can confirm how much width comes from
 annotations versus actual flow geometry.
 
+## Phase 3 final compactness result
+
+After separating structural candidate selection from decorative compaction, the
+Optimize + Layout corpus returned to the structurally better result:
+
+- crossings: `4,127`;
+- RTL links: `339`.
+
+Decorative compaction then reduced large workflow dimensions without changing
+crossings, RTL, or physical link length. Representative results:
+
+- Flux Edit Ultra: `18,288 x 13,211` -> `10,549 x 14,833`;
+- Z-Image Base Ultra: `18,934 x 12,228` -> `10,364 x 14,076`;
+- Luneva: `13,200 x 16,536` -> `11,108 x 10,610`;
+- Qwen Edit: `13,024 x 7,967` -> `7,985 x 9,527`.
+
+The remaining wide workflows are now dominated by actual ungrouped flow rather
+than decorative margins:
+
+- Amazing Z-Image: ungrouped span `12,220` px across 20 flow layers / 43 columns;
+- Jibs: ungrouped span `5,977` px while grouped span is only `3,090` px;
+- several Flux2 VTON workflows also have ungrouped spans larger than their
+  grouped spans.
+
+## Phase 4 conservative ungrouped-flow compaction
+
+Phase 4 is an isolated post-process on top of the complete Phase 3 result.
+
+The first implementation deliberately targets only linked ungrouped components
+that are safe to move independently. It excludes:
+
+- pinned nodes;
+- decorative nodes;
+- virtual Set/Get hubs;
+- local primitive/control sources;
+- terminal text previews;
+- nodes with a direct physical link to a group.
+
+Remaining pure ungrouped components are SCC-layered, wrapped into a bounded
+horizontal band, and moved vertically only when needed to clear existing group
+and node geometry.
+
+The width target for a component is constrained by:
+
+- its widest layer;
+- the current grouped horizontal span;
+- 62% of the current workflow width.
+
+Components are skipped unless this predicts at least a 10% horizontal
+reduction.
+
+The Phase 4 acceptance gate is intentionally stricter than earlier compactness
+passes:
+
+- movable overlaps may not increase;
+- crossings may not increase;
+- RTL links may not increase;
+- if graph quality is unchanged, workflow width must fall by at least 8%;
+- workflow area may not increase.
+
+This preserves Phase 3 as a safe fallback and lets the corpus show whether
+pure-ungrouped band compaction is useful before attempting a more invasive mixed
+group/ungrouped global layer model.
+
 ## Current Scope Boundary
 
 The active engine now refines movable group internals and top-level group order,
