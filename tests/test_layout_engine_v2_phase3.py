@@ -4,6 +4,7 @@ from flowforge.layout import LayoutSettings
 from flowforge.layout_engine_v2 import EngineV2Score
 from flowforge.layout_engine_v2_phase3 import (
     _compact_candidate_is_better,
+    _compact_decorative_nodes_above,
     _compact_global_flow,
 )
 from flowforge.model import Group, Link, Node, Workflow
@@ -101,3 +102,23 @@ def test_compact_global_flow_wraps_long_group_chain():
     )
 
     assert compact_width < original_width * 0.75
+
+
+def test_compact_decorative_nodes_move_above_graph_without_moving_graph():
+    workflow = Workflow()
+    note = Node(id=1, type="MarkdownNote", x=20, y=50, size=[8_000, 300])
+    source = Node(id=2, type="Source", x=9_000, y=200, size=[220, 100])
+    target = Node(id=3, type="Target", x=9_500, y=200, size=[220, 100])
+    workflow.nodes = {1: note, 2: source, 3: target}
+    workflow.ungrouped_nodes = [note, source, target]
+
+    source_before = (source.x, source.y)
+    target_before = (target.x, target.y)
+
+    changed = _compact_decorative_nodes_above(workflow, LayoutSettings())
+
+    assert changed
+    assert (source.x, source.y) == source_before
+    assert (target.x, target.y) == target_before
+    assert note.x == source.x
+    assert note.y + note.size[1] < min(source.y, target.y)
