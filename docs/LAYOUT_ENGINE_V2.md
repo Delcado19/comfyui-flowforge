@@ -519,6 +519,24 @@ With default spacing this yields 100, 80, and 40 px gap variants. The strict
 acceptance gate is unchanged; no candidate can trade crossings, RTL, overlaps,
 width, or area outside the existing limits.
 
+The targeted multi-variant rerun produced the first accepted Phase 5 result:
+
+- Jibs: the best diagnostic proposal was `stable-gap-100`,
+  `5,977 x 12,448 -> 8,747 x 8,895`, crossings `756 -> 493`, RTL
+  `41 -> 29`. It was correctly rejected because width increased instead of
+  falling by at least 8%.
+- Flux2 VTON 6.0.2: the best diagnostic proposal was `stable-gap-40`,
+  `6,723 x 4,861 -> 6,107 x 4,869`, crossings `31 -> 40`, RTL
+  `6 -> 4`. It was correctly rejected for crossing regression.
+- Flux2 VTON 6.0.2.7: `weighted-gap-40` was accepted,
+  `9,162 x 3,510 -> 7,746 x 4,032`, crossings `44 -> 43`, RTL
+  `11 -> 8`. Width fell by about 15.5%, workflow area also fell, and all
+  strict graph-quality constraints were preserved.
+
+This is the first evidence that shared mixed-flow placement can improve a real
+wide corpus workflow without relaxing the safety gate. No further placement
+heuristics should be added before measuring the complete corpus.
+
 A group always moves as one rectangle with every member node, preserving its
 internal geometry. The established finalizer then re-applies control, text
 preview, virtual Set/Get, group-overlap, and pinned-geometry contracts.
@@ -553,13 +571,12 @@ baseline, and Phase 3 remains underneath it. Bridge, external-source, control,
 text-preview, virtual-hub, decorative, and pin-specific contracts are still
 authoritative after mixed placement.
 
-Phase 5 is still experimental. Its next gate is a targeted rerun of the
-Jibs/Flux2 diagnostics using the multi-variant monotonic placement search. The
-reporter now prints the number of evaluated candidates and the selected proposal
-variant. Only if at least one targeted workflow satisfies the full strict gate
-should the full 81-workflow Optimize + Layout corpus be run. The aggregate
-structural reference remains 4,127 crossings / 339 RTL until corpus evidence
-justifies updating it.
+Phase 5 is still experimental. The targeted gate has now passed because
+Flux2 VTON 6.0.2.7 satisfies the complete strict acceptance contract with the
+`weighted-gap-40` variant. The next gate is the full 81-workflow Optimize +
+Layout corpus. The aggregate structural reference remains 4,127 crossings /
+339 RTL until that corpus measurement is reviewed. No additional Phase 5
+heuristics should be introduced before the corpus result is known.
 
 ## Deferred TODOs
 
