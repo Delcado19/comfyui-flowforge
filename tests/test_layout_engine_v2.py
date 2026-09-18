@@ -2,10 +2,13 @@
 
 from flowforge.layout import LayoutSettings
 from flowforge.layout_engine_v2 import (
+    EngineV2Score,
     _assign_scc_longest_path_layers,
     _boundary_crossings,
+    _candidate_is_better,
     _group_can_be_refined,
     _minimize_crossings_with_dummies,
+    _refine_group,
     _score_engine_v2,
     apply_best_layout,
 )
@@ -125,3 +128,90 @@ def test_apply_best_layout_preserves_graph_and_reports_selected_candidate():
     assert result.layout_report is not None
     assert result.layout_report.candidate_count >= 1
     assert result.layout_report.selected_candidate >= 1
+
+
+def _score(
+    *,
+    total: float,
+    crossings: int,
+    rtl: int,
+    width: float,
+    height: float = 1000.0,
+    overlaps: int = 0,
+) -> EngineV2Score:
+    return EngineV2Score(
+        total=total,
+        crossings=crossings,
+        right_to_left_links=rtl,
+        movable_overlaps=overlaps,
+        link_length=10_000.0,
+        width=width,
+        height=height,
+    )
+
+
+def test_candidate_guard_rejects_large_width_growth_for_minor_quality_gain():
+    incumbent = _score(total=1000.0, crossings=100, rtl=20, width=1000.0)
+    wider = _score(total=900.0, crossings=99, rtl=20, width=1500.0)
+
+    assert not _candidate_is_better(wider, incumbent)
+
+
+def test_candidate_guard_allows_large_width_growth_for_significant_crossing_gain():
+    incumbent = _score(total=1000.0, crossings=100, rtl=20, width=1000.0)
+    wider = _score(total=900.0, crossings=90, rtl=20, width=1500.0)
+
+    assert _candidate_is_better(wider, incumbent)
+
+
+def test_candidate_guard_prefers_major_compaction_with_small_quality_cost():
+    incumbent = _score(total=900.0, crossings=100, rtl=20, width=2000.0)
+    compact = _score(total=950.0, crossings=102, rtl=21, width=1400.0)
+
+    assert _candidate_is_better(compact, incumbent)
+
+
+def test_group_refinement_reuses_compact_internal_layer_wrapping():
+    workflow = Workflow()
+    nodes = {
+        node_id: Node(
+            id=node_id,
+            type=f"Node{node_id}",
+            x=(node_id - 1) * 300,
+            y=0,
+            size=[200, 80],
+            input_count=1 if node_id > 1 else 0,
+            output_count=1 if node_id < 6 else 0,
+        )
+        for node_id in range(1, 7)
+    }
+    workflow.nodes = nodes
+    for link_id, source_id in enumerate(range(1, 6), start=1):
+        _attach_link(
+            workflow,
+            Link(
+                id=link_id,
+                source=source_id,
+                source_port=0,
+                target=source_id + 1,
+                target_port=0,
+                type="DATA",
+            ),
+        )
+    group = Group(
+        id=1,
+        name="Long chain",
+        nodes=list(nodes.values()),
+        bounding=[0, 0, 2000, 400],
+    )
+    workflow.groups = [group]
+
+    changed = _refine_group(
+        workflow,
+        group,
+        LayoutSettings(node_x_distance=80, node_y_distance=80),
+    )
+
+    assert changed
+    assert group.bounding[2] < 1200
+    assert max(node.y for node in nodes.values()) > min(node.y for node in nodes.values())
