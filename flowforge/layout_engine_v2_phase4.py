@@ -390,7 +390,6 @@ def _compact_pure_ungrouped_components(
 
 def _eligible_ungrouped_nodes(workflow: Workflow) -> list[Node]:
     """Return movable ungrouped nodes safe for candidate band compaction."""
-    group_by_node_id = _group_by_node_id(workflow)
     result: list[Node] = []
     for node in workflow.ungrouped_nodes:
         if node.id not in workflow.nodes:
