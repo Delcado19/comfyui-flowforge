@@ -101,7 +101,7 @@ def test_compact_pure_ungrouped_chain_reuses_group_horizontal_band():
         node = Node(
             id=node_id,
             type=f"Node{node_id}",
-            x=3_500 + index * 700,
+            x=3_500 + index * 1_000,
             y=100,
             size=[300, 120],
             input_count=1 if index else 0,
