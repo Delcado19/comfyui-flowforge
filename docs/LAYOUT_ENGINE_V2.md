@@ -814,10 +814,18 @@ crossings 91, and weighted mixed-edge growth +2.4%. Its only rejection is area,
 which is just about +2.7% above the Phase 4 baseline. The 50% and 75% variants
 increase area by about +5.9% and +9.1% respectively.
 
-Before considering any area-gate relaxation, diagnostics now also evaluate the
-same 25/50/75% anchor strengths at the existing hard minimum Phase 5 vertical
-gap of 12 px. This tests whether the remaining area excess can be recovered by
-tighter within-layer spacing while preserving the Y-band locality signal.
+At the existing hard minimum Phase 5 vertical gap of 12 px,
+`weighted-anchoredx-yband25-gap-12` comes even closer: 4,850 x 3,351,
+port crossings 81, center crossings 91, and weighted mixed-edge growth +1.1%.
+Its only rejection is area, now just about +0.84% above the Phase 4 baseline.
+At the same width, no-area-growth would require a height of roughly 3,323 px,
+so the candidate misses the gate by only about 28 px.
+
+Before considering any area-gate relaxation or spacing below the established
+12 px floor, diagnostics now refine the minimum-gap sweep with 10%, 15%, and
+20% Y-band anchor strengths in addition to 25/50/75%. These finer points target
+the narrow interval where the visual locality signal may survive while the
+strict area gate still passes.
 
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.

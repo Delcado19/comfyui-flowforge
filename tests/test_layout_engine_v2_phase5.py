@@ -498,11 +498,15 @@ def test_compressed_yband_variants_include_minimum_gap():
     )
     names = {candidate.name for candidate in candidates}
 
-    assert len(candidates) == 12
+    assert len(candidates) == 18
     assert "weighted-anchoredx-yband25-gap-40" in names
+    assert "weighted-anchoredx-yband10-gap-12" in names
+    assert "weighted-anchoredx-yband15-gap-12" in names
+    assert "weighted-anchoredx-yband20-gap-12" in names
     assert "weighted-anchoredx-yband25-gap-12" in names
     assert "stable-anchoredx-yband75-gap-40" in names
     assert "stable-anchoredx-yband75-gap-12" in names
+    assert "weighted-anchoredx-yband10-gap-40" not in names
 
 
 def test_phase5_vertical_gap_profiles_use_existing_spacing_controls():

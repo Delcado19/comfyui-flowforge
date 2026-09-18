@@ -434,7 +434,10 @@ def _phase5_compressed_yband_candidate_variants(
 
     for order_mode in ("weighted", "stable"):
         for vertical_gap in vertical_gaps:
-            for anchor_strength in (0.25, 0.5, 0.75):
+            anchor_strengths = [0.25, 0.5, 0.75]
+            if math.isclose(vertical_gap, MIXED_GLOBAL_MIN_VERTICAL_GAP):
+                anchor_strengths = [0.10, 0.15, 0.20, *anchor_strengths]
+            for anchor_strength in anchor_strengths:
                 candidate = deepcopy(baseline)
                 if not _place_mixed_global_flow(
                     candidate,
