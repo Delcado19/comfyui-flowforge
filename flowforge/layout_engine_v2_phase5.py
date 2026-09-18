@@ -669,11 +669,11 @@ def _stable_mixed_order(
     workflow: Workflow,
     spec_by_vertex: dict[int, MixedSpec],
     layers: dict[int, int],
-) -> dict[int, list[MixedOrderVertex]]:
+) -> dict[int, list[int]]:
     """Preserve baseline vertical order inside each mixed dependency layer."""
     groups_by_id = {group.id: group for group in workflow.groups}
     nodes_by_id = {node.id: node for node in workflow.nodes.values()}
-    layer_to_vertices: dict[int, list[MixedOrderVertex]] = {}
+    layer_to_vertices: dict[int, list[int]] = {}
     for vertex, layer in layers.items():
         layer_to_vertices.setdefault(layer, []).append(vertex)
 
