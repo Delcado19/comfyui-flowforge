@@ -324,7 +324,7 @@ def _phase5_candidate_variants(
     """Build scored physical variants without changing the mixed dependency graph."""
     candidates: list[_Phase5Candidate] = []
     for order_mode in ("weighted", "stable"):
-        for horizontal_mode in ("layer", "compact"):
+        for horizontal_mode in ("layer", "compact", "anchored"):
             for vertical_gap in _phase5_vertical_gaps(settings):
                 candidate = deepcopy(baseline)
                 if not _place_mixed_global_flow(
@@ -337,11 +337,12 @@ def _phase5_candidate_variants(
                 ):
                     continue
                 _finalize_refinement(candidate, settings)
-                variant_name = (
-                    f"{order_mode}-gap-{vertical_gap:g}"
-                    if horizontal_mode == "layer"
-                    else f"{order_mode}-compactx-gap-{vertical_gap:g}"
-                )
+                if horizontal_mode == "layer":
+                    variant_name = f"{order_mode}-gap-{vertical_gap:g}"
+                elif horizontal_mode == "compact":
+                    variant_name = f"{order_mode}-compactx-gap-{vertical_gap:g}"
+                else:
+                    variant_name = f"{order_mode}-anchoredx-gap-{vertical_gap:g}"
                 candidates.append(
                     _Phase5Candidate(
                         name=variant_name,
@@ -745,6 +746,18 @@ def _place_mixed_global_flow(
             base_x,
             horizontal_gap,
         )
+    elif horizontal_mode == "anchored":
+        vertex_x = _anchored_compact_mixed_vertex_x_positions(
+            layer_to_real,
+            layers,
+            edge_weights,
+            spec_by_vertex,
+            groups_by_id,
+            nodes_by_id,
+            vertex_y,
+            base_x,
+            horizontal_gap,
+        )
     else:
         raise ValueError(f"Unknown Phase 5 horizontal mode: {horizontal_mode}")
 
@@ -853,6 +866,118 @@ def _compact_mixed_vertex_x_positions(
 
             positions[vertex] = x
             placed_rects.append((x, y, x + width, y + height))
+
+    return positions
+
+
+def _anchored_compact_mixed_vertex_x_positions(
+    layer_to_real: dict[int, list[int]],
+    layers: dict[int, int],
+    edge_weights: dict[tuple[int, int], int],
+    spec_by_vertex: dict[int, MixedSpec],
+    groups_by_id: dict[int, Group],
+    nodes_by_id: dict[int, Node],
+    vertex_y: dict[int, float],
+    base_x: float,
+    horizontal_gap: float,
+) -> dict[int, float]:
+    """Use compact width while retaining as much baseline X placement as possible.
+
+    The normal compact realization is an earliest-feasible schedule: every real
+    vertex is pushed as far left as dependency and overlap constraints allow.
+    That can over-compact weakly constrained branches into distant islands.
+
+    Anchored compaction starts from the exact compact schedule, keeps its right
+    boundary, direct forward-edge constraints, and horizontal ordering for
+    vertically overlapping rectangles, then shifts vertices right within their
+    available slack toward their Phase 4 X positions. It can therefore preserve
+    authored/top-level locality without giving back the compact width envelope.
+    """
+    earliest = _compact_mixed_vertex_x_positions(
+        layer_to_real,
+        layers,
+        edge_weights,
+        spec_by_vertex,
+        groups_by_id,
+        nodes_by_id,
+        vertex_y,
+        base_x,
+        horizontal_gap,
+    )
+    if not earliest:
+        return {}
+
+    widths: dict[int, float] = {}
+    heights: dict[int, float] = {}
+    baseline_x: dict[int, float] = {}
+    for vertex in earliest:
+        spec = spec_by_vertex[vertex]
+        width, height = _mixed_vertex_size(spec, groups_by_id, nodes_by_id)
+        widths[vertex] = width
+        heights[vertex] = height
+        baseline_x[vertex] = _mixed_vertex_xy(
+            spec,
+            groups_by_id,
+            nodes_by_id,
+        )[0]
+
+    right_boundary = max(
+        earliest[vertex] + widths[vertex]
+        for vertex in earliest
+    )
+
+    successors: dict[int, list[int]] = {}
+    for source, target in edge_weights:
+        if (
+            source in earliest
+            and target in earliest
+            and layers.get(source, 0) < layers.get(target, 0)
+        ):
+            successors.setdefault(source, []).append(target)
+
+    right_neighbours: dict[int, list[int]] = {}
+    vertices = list(earliest)
+    for index, first in enumerate(vertices):
+        first_top = vertex_y[first]
+        first_bottom = first_top + heights[first]
+        for second in vertices[index + 1 :]:
+            second_top = vertex_y[second]
+            second_bottom = second_top + heights[second]
+            if first_top >= second_bottom or second_top >= first_bottom:
+                continue
+
+            first_right = earliest[first] + widths[first]
+            second_right = earliest[second] + widths[second]
+            if first_right + horizontal_gap <= earliest[second] + 1e-9:
+                right_neighbours.setdefault(first, []).append(second)
+            elif second_right + horizontal_gap <= earliest[first] + 1e-9:
+                right_neighbours.setdefault(second, []).append(first)
+
+    positions = dict(earliest)
+    for vertex in sorted(
+        positions,
+        key=lambda value: (earliest[value], layers.get(value, 0), value),
+        reverse=True,
+    ):
+        width = widths[vertex]
+        upper_bound = right_boundary - width
+
+        for target in successors.get(vertex, []):
+            upper_bound = min(
+                upper_bound,
+                positions[target] - width - horizontal_gap,
+            )
+        for neighbour in right_neighbours.get(vertex, []):
+            upper_bound = min(
+                upper_bound,
+                positions[neighbour] - width - horizontal_gap,
+            )
+
+        desired = baseline_x[vertex]
+        positions[vertex] = max(
+            earliest[vertex],
+            min(desired, upper_bound),
+        )
 
     return positions
 

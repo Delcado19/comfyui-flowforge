@@ -739,6 +739,24 @@ selection from a missing safety gate: if another already-generated variant
 passes the current gate with materially better cohesion, candidate ranking
 should be fixed before adding a new rejection rule.
 
+For the visually rejected Flux 9B candidate, the 12-way comparison ruled out a
+simple ranking bug. Every shared-layer X variant kept weighted mixed-edge length
+roughly flat or slightly lower (`-2.9% .. -0.1%`) but failed the crossing/RTL
+safety gate. Every compact-X variant reduced width/RTL more aggressively but
+increased weighted mixed-edge length by about `+10% .. +13%`; only
+`weighted-compactx-gap-40` passed the current gate. The problem is therefore
+the physical X realization itself, not selection among equivalent accepted
+candidates.
+
+Phase 5 now evaluates an additional `anchoredx` realization. It starts from
+the exact earliest-feasible Compact-X schedule, keeps the same compact right
+boundary, direct forward-edge constraints, and horizontal ordering of vertically
+overlapping rectangles, then uses available horizontal slack to move vertices
+back toward their Phase 4 X positions. This targets weakly constrained branches
+that Compact-X otherwise drags all the way to the left while preserving the
+compact width envelope. The existing `layer` and `compactx` realizations remain
+unchanged for comparison.
+
 The existing safety gates should remain unchanged until a candidate produces
 both measurable and visually acceptable improvement.
 

@@ -232,6 +232,57 @@ def test_compact_horizontal_mode_does_not_inherit_widest_parallel_layer():
         assert source.x + source.size[0] < target.x
 
 
+def test_anchored_horizontal_mode_uses_compact_width_with_baseline_slack():
+    compact_workflow = _parallel_mixed_workflow()
+    anchored_workflow = _parallel_mixed_workflow()
+    settings = LayoutSettings(node_x_distance=100, node_y_distance=80)
+
+    assert _place_mixed_global_flow(
+        compact_workflow,
+        settings,
+        workflow_width=7_000,
+        order_mode="stable",
+        horizontal_mode="compact",
+        vertical_gap=40,
+    )
+    assert _place_mixed_global_flow(
+        anchored_workflow,
+        settings,
+        workflow_width=7_000,
+        order_mode="stable",
+        horizontal_mode="anchored",
+        vertical_gap=40,
+    )
+
+    assert anchored_workflow.nodes[11].x > compact_workflow.nodes[11].x
+    assert anchored_workflow.nodes[12].x >= compact_workflow.nodes[12].x
+
+    compact_right = max(
+        [
+            *(group.bounding[0] + group.bounding[2] for group in compact_workflow.groups),
+            *(
+                node.x + node.size[0]
+                for node in compact_workflow.ungrouped_nodes
+            ),
+        ]
+    )
+    anchored_right = max(
+        [
+            *(group.bounding[0] + group.bounding[2] for group in anchored_workflow.groups),
+            *(
+                node.x + node.size[0]
+                for node in anchored_workflow.ungrouped_nodes
+            ),
+        ]
+    )
+    assert anchored_right <= compact_right + 1e-9
+
+    for link in anchored_workflow.links.values():
+        source = anchored_workflow.nodes[link.source]
+        target = anchored_workflow.nodes[link.target]
+        assert source.x + source.size[0] < target.x
+
+
 def test_phase5_skips_pinned_group_geometry():
     workflow = _mixed_chain_workflow()
     extra = Node(id=12, type="Extra", x=6_500, y=450, size=[200, 100])
