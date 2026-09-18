@@ -489,6 +489,7 @@ def _place_mixed_global_flow(
     if len(set(layers.values())) <= 1:
         return False
 
+    order: dict[int, list[MixedOrderVertex]]
     if order_mode == "weighted":
         order = _weighted_mixed_order(
             workflow,
@@ -497,7 +498,10 @@ def _place_mixed_global_flow(
             edge_weights,
         )
     elif order_mode == "stable":
-        order = _stable_mixed_order(workflow, spec_by_vertex, layers)
+        stable_order = _stable_mixed_order(workflow, spec_by_vertex, layers)
+        order = {layer: [] for layer in stable_order}
+        for layer, vertices in stable_order.items():
+            order[layer].extend(vertices)
     else:
         raise ValueError(f"Unknown Phase 5 order mode: {order_mode}")
     layer_to_real = {
