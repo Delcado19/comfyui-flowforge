@@ -3,6 +3,7 @@
 from flowforge.layout import LayoutSettings
 from flowforge.layout_engine_v2 import (
     EngineV2Score,
+    _aspect_cost,
     _assign_scc_longest_path_layers,
     _boundary_crossings,
     _candidate_is_better,
@@ -63,6 +64,33 @@ def test_dummy_vertices_make_long_edges_participate_in_crossing_order():
     assert crossings == 0
     assert any(not isinstance(vertex, int) for vertex in ordered[1])
 
+
+
+def test_aspect_cost_penalizes_tall_and_wide_shapes_symmetrically():
+    balanced_width = 1350.0
+    balanced_height = 1000.0
+    tall_width = 400.0
+    tall_height = 3000.0
+    wide_width = 4000.0
+    wide_height = 1000.0
+
+    assert _aspect_cost(balanced_width, balanced_height) == 0.0
+    assert _aspect_cost(tall_width, tall_height) > 0.0
+    assert _aspect_cost(wide_width, wide_height) > 0.0
+
+
+def test_port_aware_score_does_not_prefer_extreme_tower_just_for_reduced_width():
+    balanced = Workflow()
+    balanced.nodes = {
+        1: Node(id=1, type="Balanced", x=0, y=0, size=[1350, 1000]),
+    }
+
+    tower = Workflow()
+    tower.nodes = {
+        1: Node(id=1, type="Tower", x=0, y=0, size=[400, 3000]),
+    }
+
+    assert _score_engine_v2(balanced).total < _score_engine_v2(tower).total
 
 def test_port_aware_score_counts_right_to_left_links_from_socket_geometry():
     workflow = Workflow()

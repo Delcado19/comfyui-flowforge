@@ -69,7 +69,7 @@ V2_OVERLAP_WEIGHT = 100_000.0
 V2_WIDTH_WEIGHT = 2.5
 V2_HEIGHT_WEIGHT = 1.0
 V2_LINK_WEIGHT = 0.02
-V2_ASPECT_WEIGHT = 160.0
+V2_ASPECT_WEIGHT = 1.0
 V2_TARGET_ASPECT_RATIO = 1.35
 V2_MAX_WIDTH_GROWTH_RATIO = 1.35
 V2_SIGNIFICANT_CROSSING_GAIN_RATIO = 0.05
@@ -589,6 +589,22 @@ def _finalize_refinement(workflow: Workflow, settings: LayoutSettings) -> None:
     _separate_unpinned_nodes_from_pinned_geometry(workflow, settings)
 
 
+def _aspect_cost(width: float, height: float) -> float:
+    """Penalize both overly wide and overly tall workflow shapes.
+
+    The previous ratio-only penalty was one-sided: layouts narrower than the
+    target aspect ratio paid no aspect cost at all. Because width is weighted
+    more heavily than height in the main score, that made very tall "tower"
+    layouts artificially attractive. Scale the symmetric deviation in pixels
+    so the penalty grows with the size of the canvas.
+    """
+    if width <= 0.0 or height <= 0.0:
+        return 0.0
+
+    target_width = height * V2_TARGET_ASPECT_RATIO
+    return abs(width - target_width) * V2_ASPECT_WEIGHT
+
+
 def _score_engine_v2(workflow: Workflow) -> EngineV2Score:
     segments = _port_segments(workflow)
     crossings = _segment_crossing_count(segments)
@@ -601,8 +617,7 @@ def _score_engine_v2(workflow: Workflow) -> EngineV2Score:
     left, top, right, bottom = _workflow_bounds(workflow)
     width = max(0.0, right - left)
     height = max(0.0, bottom - top)
-    aspect_ratio = width / max(1.0, height)
-    aspect_cost = max(0.0, aspect_ratio - V2_TARGET_ASPECT_RATIO) * V2_ASPECT_WEIGHT
+    aspect_cost = _aspect_cost(width, height)
 
     total = (
         crossings * V2_CROSSING_WEIGHT
