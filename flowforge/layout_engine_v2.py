@@ -151,7 +151,7 @@ def apply_best_layout(
     if balanced is not None:
         balanced_score = _score_engine_v2(balanced)
         logger.info(
-            "v2 candidate 2/%s source=balanced-flow score=%.2f crossings=%s rtl=%s "
+            "v2 candidate 2/%s source=balanced-compact score=%.2f crossings=%s rtl=%s "
             "overlaps=%s link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
             total_candidates,
             balanced_score.total,
@@ -243,116 +243,119 @@ def _balanced_group_flow_candidate(
     workflow: Workflow,
     settings: LayoutSettings,
 ) -> Workflow | None:
-    """Build a real top-level relayout without flattening nested ComfyUI groups.
+    """Compact authored geometry horizontally without destroying its structure.
 
-    The legacy global pass puts every group in one vertical stack per flow
-    layer. Cyclic workflows can therefore collapse into a very tall tower.
-    This candidate condenses cycles into SCCs, assigns left-to-right SCC
-    layers, keeps each group's authored vertical anchor when possible, and
-    moves nested group trees as indivisible blocks.
+    Real ComfyUI workflows can contain feedback edges between functional areas.
+    Treating every strongly-connected group component as one graph layer stacks
+    otherwise well-arranged groups vertically and creates a tower.  This
+    candidate instead keeps the author's vertical bands and left-to-right item
+    order, then removes avoidable horizontal whitespace.
+
+    Top-level groups move as complete subtrees, so nested groups keep their
+    exact relative geometry. Ungrouped bridge/dataflow nodes participate in
+    the same packing pass instead of becoming obstacles afterwards.
     """
     candidate = deepcopy(workflow)
     _shrink_nodes_to_minimum_size(candidate)
     _assign_groups(candidate)
-    decorative_right_edge = _position_decorative_nodes_left(candidate, settings)
-    group_start_x = max(
-        50.0,
-        decorative_right_edge + settings.group_h_gap,
-    )
 
     top_groups = [
         group
         for group in _top_level_groups(candidate)
         if _group_has_layout_content(candidate, group)
     ]
-    if len(top_groups) < 2:
+    if not top_groups:
         return None
 
-    # Keep hard pin contracts out of this candidate until hierarchical pinned
-    # placement has a dedicated solver.
     if any(group.pinned for group in top_groups) or any(
         _is_pinned_node(candidate, node) for node in candidate.nodes.values()
     ):
         return None
 
-    adjacency_sets, _reverse = _group_flow_adjacency(candidate)
-    group_ids = {group.id for group in top_groups}
-    adjacency = {
-        group_id: sorted(
-            target_id
-            for target_id in adjacency_sets.get(group_id, set())
-            if target_id in group_ids
-        )
-        for group_id in group_ids
-    }
-    if not any(adjacency.values()):
-        return None
+    decorative_right_edge = _position_decorative_nodes_left(candidate, settings)
+    start_x = max(50.0, decorative_right_edge + settings.group_h_gap)
 
-    # Compact/refine only ordinary groups. Nested parents and children are
-    # intentionally skipped by _refine_movable_group_internals.
-    _refine_movable_group_internals(candidate, settings)
-
-    layers = _assign_scc_longest_path_layers(group_ids, adjacency)
-    if not layers:
-        return None
-
-    groups_by_layer: dict[int, list[Group]] = {}
+    # Items are packed in authored X order.  Only items whose vertical spans
+    # overlap need horizontal separation; items in different authored rows may
+    # share the same X band.
+    items: list[tuple[str, int, float, float, float, float]] = []
     for group in top_groups:
-        groups_by_layer.setdefault(layers.get(group.id, 0), []).append(group)
-
-    def group_size(group: Group) -> tuple[float, float]:
         if (
             len(group.bounding) >= 4
             and group.bounding[2] > 0
             and group.bounding[3] > 0
         ):
-            return group.bounding[2], group.bounding[3]
-        return _group_layout_size(candidate, group, settings)
+            x, y, width, height = group.bounding
+        else:
+            width, height = _group_layout_size(candidate, group, settings)
+            member_nodes = [
+                node
+                for item in candidate.groups
+                if item.id == group.id
+                for node in item.nodes
+            ]
+            if not member_nodes:
+                continue
+            x = min(node.x for node in member_nodes)
+            y = min(node.y for node in member_nodes)
+        items.append(("group", group.id, x, y, width, height))
 
-    layer_widths = {
-        layer: max(group_size(group)[0] for group in groups_in_layer)
-        for layer, groups_in_layer in groups_by_layer.items()
-    }
-    layer_x: dict[int, float] = {}
-    current_x = group_start_x
-    horizontal_gap = max(settings.group_h_gap, settings.node_h_gap)
-    for layer in sorted(groups_by_layer):
-        layer_x[layer] = current_x
-        current_x += layer_widths[layer] + horizontal_gap
+    for node in candidate.ungrouped_nodes:
+        if _is_decorative_node(node) or _is_virtual_hub_node(node):
+            continue
+        items.append(
+            (
+                "node",
+                node.id,
+                node.x,
+                node.y,
+                _node_visual_width(node),
+                _node_visual_height(node),
+            )
+        )
 
-    # Preserve the authored vertical ordering. Groups sharing one SCC/layer
-    # only move downward when their rectangles would overlap after snapping to
-    # the common layer x coordinate.
-    for layer in sorted(groups_by_layer):
-        cursor_bottom: float | None = None
-        for group in sorted(
-            groups_by_layer[layer],
-            key=lambda item: (item.bounding[1], item.bounding[0], item.id),
-        ):
-            _width, height = group_size(group)
-            target_y = group.bounding[1]
-            if cursor_bottom is not None:
-                target_y = max(target_y, cursor_bottom + settings.group_v_gap)
+    if len(items) < 2:
+        return None
+
+    items.sort(key=lambda item: (item[2], item[3], item[0], item[1]))
+    groups_by_id = {group.id: group for group in candidate.groups}
+    placed: list[tuple[str, int, float, float, float, float]] = []
+
+    for kind, item_id, _old_x, y, width, height in items:
+        target_x = start_x
+        for other_kind, _other_id, other_x, other_y, other_width, other_height in placed:
+            vertical_gap = (
+                settings.group_v_gap
+                if "group" in {kind, other_kind}
+                else settings.node_v_gap
+            )
+            vertically_overlaps = (
+                y < other_y + other_height + vertical_gap
+                and other_y < y + height + vertical_gap
+            )
+            if not vertically_overlaps:
+                continue
+
+            horizontal_gap = (
+                settings.group_h_gap
+                if "group" in {kind, other_kind}
+                else settings.node_h_gap
+            )
+            target_x = max(target_x, other_x + other_width + horizontal_gap)
+
+        if kind == "group":
+            group = groups_by_id[item_id]
             _move_group_subtree(
                 candidate,
                 group,
-                layer_x[layer] - group.bounding[0],
-                target_y - group.bounding[1],
+                target_x - group.bounding[0],
+                0.0,
             )
-            cursor_bottom = target_y + height
+        else:
+            candidate.nodes[item_id].x = target_x
 
-    # Reposition ungrouped bridge/dataflow nodes against the new group
-    # geometry before the overlap resolver runs. Leaving them at authored
-    # coordinates makes them look like fixed obstacles and can push whole
-    # groups thousands of pixels downward.
-    _position_ungrouped_nodes(
-        candidate,
-        settings,
-        start_x_floor=decorative_right_edge + settings.group_h_gap,
-    )
+        placed.append((kind, item_id, target_x, y, width, height))
 
-    # Re-run the normal geometry contracts; unlike the legacy global pass this
-    # does not rebuild the nested hierarchy or stack flow layers vertically.
     _finalize_refinement(candidate, settings)
     return candidate
 

@@ -67,19 +67,19 @@ def test_dummy_vertices_make_long_edges_participate_in_crossing_order():
 
 
 
-def test_balanced_group_flow_rearranges_top_level_groups_and_preserves_nested_offsets():
+def test_balanced_group_flow_compacts_top_level_groups_and_preserves_nested_offsets():
     workflow = Workflow()
     workflow.nodes = {
         1: Node(id=1, type="Inner", x=120, y=120, size=[100, 80]),
         2: Node(id=2, type="Outer", x=420, y=120, size=[100, 80]),
-        3: Node(id=3, type="Source", x=1020, y=120, size=[100, 80]),
-        4: Node(id=4, type="Target", x=2020, y=120, size=[100, 80]),
+        3: Node(id=3, type="Source", x=1520, y=120, size=[100, 80]),
+        4: Node(id=4, type="Target", x=3020, y=120, size=[100, 80]),
     }
     workflow.groups = [
         Group(id=10, name="Outer", bounding=[0, 0, 700, 500]),
         Group(id=11, name="Inner", bounding=[80, 80, 220, 220]),
-        Group(id=20, name="Source", bounding=[980, 80, 300, 220]),
-        Group(id=30, name="Target", bounding=[1980, 80, 300, 220]),
+        Group(id=20, name="Source", bounding=[1480, 80, 300, 220]),
+        Group(id=30, name="Target", bounding=[2980, 80, 300, 220]),
     ]
     _attach_link(
         workflow,
@@ -90,7 +90,7 @@ def test_balanced_group_flow_rearranges_top_level_groups_and_preserves_nested_of
         Link(id=101, source=2, source_port=0, target=4, target_port=0, type="DATA"),
     )
 
-    original_outer_x = workflow.groups[0].bounding[0]
+    original_width = _score_engine_v2(workflow).width
     original_child_offset = (
         workflow.groups[1].bounding[0] - workflow.groups[0].bounding[0],
         workflow.groups[1].bounding[1] - workflow.groups[0].bounding[1],
@@ -107,8 +107,8 @@ def test_balanced_group_flow_rearranges_top_level_groups_and_preserves_nested_of
 
     assert candidate is not None
     outer, inner, source, target = candidate.groups
-    assert outer.bounding[0] != original_outer_x
-    assert source.bounding[0] < outer.bounding[0] < target.bounding[0]
+    assert _score_engine_v2(candidate).width < original_width
+    assert outer.bounding[0] < source.bounding[0] < target.bounding[0]
     assert (
         inner.bounding[0] - outer.bounding[0],
         inner.bounding[1] - outer.bounding[1],
@@ -119,17 +119,16 @@ def test_balanced_group_flow_rearranges_top_level_groups_and_preserves_nested_of
     ) == original_inner_node_offset
 
 
-def test_balanced_group_flow_repositions_ungrouped_nodes_before_group_clearance():
+def test_balanced_group_flow_compacts_ungrouped_bridge_without_tower_growth():
     workflow = Workflow()
     workflow.nodes = {
         1: Node(id=1, type="Source", x=100, y=100, size=[100, 80]),
-        2: Node(id=2, type="Bridge", x=900, y=2400, size=[100, 80]),
-        3: Node(id=3, type="Target", x=1800, y=100, size=[100, 80]),
-        4: Node(id=4, type="MarkdownNote", x=0, y=600, size=[500, 300]),
+        2: Node(id=2, type="Bridge", x=1200, y=120, size=[100, 80]),
+        3: Node(id=3, type="Target", x=2400, y=100, size=[100, 80]),
     }
     workflow.groups = [
         Group(id=10, name="Source", bounding=[50, 50, 300, 220]),
-        Group(id=20, name="Target", bounding=[1750, 50, 300, 220]),
+        Group(id=20, name="Target", bounding=[2350, 50, 300, 220]),
     ]
     _attach_link(
         workflow,
@@ -140,6 +139,7 @@ def test_balanced_group_flow_repositions_ungrouped_nodes_before_group_clearance(
         Link(id=101, source=2, source_port=0, target=3, target_port=0, type="DATA"),
     )
 
+    original_score = _score_engine_v2(workflow)
     candidate = _balanced_group_flow_candidate(
         workflow,
         LayoutSettings(node_x_distance=40, node_y_distance=40),
@@ -147,8 +147,9 @@ def test_balanced_group_flow_repositions_ungrouped_nodes_before_group_clearance(
 
     assert candidate is not None
     score = _score_engine_v2(candidate)
-    assert score.height < 1800
-    assert candidate.nodes[2].y < 1800
+    assert score.width < original_score.width
+    assert score.height <= original_score.height + 100
+    assert candidate.nodes[2].y == workflow.nodes[2].y
 
 
 def test_aspect_cost_penalizes_tall_and_wide_shapes_symmetrically():
