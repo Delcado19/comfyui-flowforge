@@ -43,6 +43,10 @@ class Group:
     # Bounding box: [x, y, width, height]
     bounding: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0, 0.0])
     pinned: bool = False
+    # ComfyUI does not store parent ids explicitly. FlowForge derives this
+    # from authored group rectangles so nested groups can be handled as one
+    # hierarchy without changing the serialized workflow schema.
+    parent_id: Optional[int] = None
 
 
 @dataclass

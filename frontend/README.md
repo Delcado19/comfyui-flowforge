@@ -33,6 +33,7 @@ Python package builds can stage the built frontend into `flowforge/frontend_dist
 - **Pin Controls** - Node and group title bars include pin buttons, and the canvas toolbar can clear all pinned nodes and groups
 - **Toolbar Group Actions** - Button to clear all groups in the workflow; drag-based group creation starts from the canvas overlay controls
 - **Before/After Layout Comparison** - After a layout run, the canvas can show the previous node positions as ghost outlines behind the current layout
+- **Transformation Undo/Redo** - Successful `Layout Only`, live spacing-layout, and `Optimize + Layout` runs store bounded full-workflow snapshots. Undo/Redo restores the exact ComfyUI JSON state before/after the transformation; loading a new file resets history and starting a new transformation after Undo clears Redo.
 
 ## Usage
 
@@ -40,6 +41,7 @@ Python package builds can stage the built frontend into `flowforge/frontend_dist
 - **Optimize + Layout** - POST the full workflow JSON to `/optimize`, then `/layout`; this is the normal cleanup flow for high-fanout workflows
 - **Layout Only** - POST the full workflow JSON to `/layout` without adding Set/Get nodes
 - **Before/After** - Toggle the previous node positions after a layout run
+- **Undo / Redo** - Restore the previous/next successful transformation snapshot. Keyboard shortcuts: `Ctrl/Cmd+Z` for Undo, `Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` for Redo.
 - **Save** - Download the current full workflow JSON
 
 Canvas navigation:
@@ -60,6 +62,8 @@ Canvas navigation:
 - Image load/save nodes, notes, Markdown notes, and labels keep their saved ComfyUI rectangle instead of being compacted to the generic node minimum.
 - Optimize + Layout does not insert Set/Get hubs into pinned node or group geometry.
 - Set/Get hub nodes follow their physical endpoint during layout and do not expose pin controls in the canvas.
+- Transformation history is intentionally scoped to Layout/Optimize actions. Manual node/group edits are not individual history entries; Undo restores the complete workflow snapshot from before the most recent recorded transformation.
+- The history keeps at most 10 full workflow snapshots in each direction to bound memory use for large ComfyUI JSON files.
 
 The frontend derives display connections from the workflow `links` array. It does not maintain a separate custom connection format.
 

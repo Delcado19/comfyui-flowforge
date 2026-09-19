@@ -142,6 +142,7 @@ def test_run_frontend_dev_passes_selected_ports(monkeypatch):
     try:
         (tmp_dir / "node_modules").mkdir()
         monkeypatch.setattr(gui, "FRONTEND_DIR", tmp_dir)
+        monkeypatch.setattr(gui, "_resolve_npm_command", lambda: ["npm"])
 
         captured = {}
 
@@ -168,3 +169,22 @@ def test_run_frontend_dev_passes_selected_ports(monkeypatch):
         assert captured["env"]["FLOWFORGE_API_PORT"] == "8123"
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_resolve_npm_command_uses_windows_command_processor(monkeypatch):
+    monkeypatch.setattr(gui.os, "name", "nt")
+    monkeypatch.setenv("COMSPEC", r"C:\Windows\System32\cmd.exe")
+
+    def fake_which(command):
+        if command == "npm.cmd":
+            return r"C:\Program Files\nodejs\npm.cmd"
+        return None
+
+    monkeypatch.setattr(gui.shutil, "which", fake_which)
+
+    assert gui._resolve_npm_command() == [
+        r"C:\Windows\System32\cmd.exe",
+        "/d",
+        "/c",
+        r"C:\Program Files\nodejs\npm.cmd",
+    ]

@@ -87,6 +87,29 @@ def test_parse_workflow_with_groups():
     logger.info("Workflow with groups test passed")
 
 
+def test_nested_groups_use_innermost_membership():
+    wf_data = {
+        "nodes": [
+            {"id": 1, "type": "OuterNode", "pos": [700, 100], "size": [100, 80], "inputs": [], "outputs": []},
+            {"id": 2, "type": "InnerNode", "pos": [150, 150], "size": [100, 80], "inputs": [], "outputs": []},
+        ],
+        "links": [],
+        "groups": [
+            {"id": 10, "title": "Outer", "bounding": [0, 0, 1000, 600]},
+            {"id": 11, "title": "Inner", "bounding": [100, 100, 300, 300]},
+        ],
+    }
+
+    workflow = parse_comfyui_workflow(wf_data)
+    outer, inner = workflow.groups
+
+    assert outer.parent_id is None
+    assert inner.parent_id == outer.id
+    assert [node.id for node in outer.nodes] == [1]
+    assert [node.id for node in inner.nodes] == [2]
+    assert workflow.ungrouped_nodes == []
+
+
 def test_size_dict_handling():
     logger.info("Testing size dict handling")
     # Some ComfyUI workflows use dict format for size

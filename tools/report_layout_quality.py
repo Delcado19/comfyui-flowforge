@@ -14,7 +14,16 @@ from flowforge.layout_quality import build_quality_summary, summarize_quality_te
 DEFAULT_WORKFLOW_ROOT = Path("example-workflows")
 
 
+def _configure_utf8_output() -> None:
+    """Keep redirected Windows output UTF-8 safe for workflow names and labels."""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
+
+
 def main() -> int:
+    _configure_utf8_output()
     parser = argparse.ArgumentParser(
         description="Report read-only FlowForge layout quality metrics for ComfyUI UI workflows.",
     )
@@ -38,6 +47,11 @@ def main() -> int:
     parser.add_argument("--limit", type=int, help="Report only the first N discovered JSON files.")
     parser.add_argument("--top", type=int, default=10, help="Number of largest workflows to print.")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON output.")
+    parser.add_argument(
+        "--structure",
+        action="store_true",
+        help="Print structural width diagnostics for the largest laid-out workflows.",
+    )
     args = parser.parse_args()
 
     logging.disable(logging.INFO)
@@ -46,12 +60,19 @@ def main() -> int:
         include_layouted=args.include_layouted,
         optimize_first=args.optimize,
         limit=args.limit,
+        structure_top=max(0, args.top) if args.structure else 0,
     )
 
     if args.json:
         print(json.dumps(summary.to_json_dict(), indent=2))
     else:
-        print(summarize_quality_text(summary, top=max(0, args.top)))
+        print(
+            summarize_quality_text(
+                summary,
+                top=max(0, args.top),
+                include_structure=args.structure,
+            )
+        )
 
     return 0 if summary.ok else 1
 

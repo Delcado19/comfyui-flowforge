@@ -140,21 +140,61 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
         workflow.groups.append(group)
         logger.debug(f"Parsed group {group_id}: {name} at bounding {group.bounding}")
     
-    # After parsing, assign nodes to groups based on bounding box.
-    logger.debug("Assigning nodes to groups based on bounding box")
+    # ComfyUI groups can be nested even though the JSON has no explicit
+    # parent field. Derive the hierarchy from authored rectangles first, then
+    # assign each node to the most specific (smallest) containing group.
+    logger.debug("Assigning nested group hierarchy and node membership")
+    _assign_group_hierarchy(workflow.groups)
     for node in workflow.nodes.values():
-        assigned = False
-        for group in workflow.groups:
-            if _node_in_group_bounding(node, group):
-                group.nodes.append(node)
-                assigned = True
-                break
-        if not assigned:
-            # Node is not in any group; add to ungrouped set (implicit)
+        matched_group = _innermost_group_for_node(node, workflow.groups)
+        if matched_group is None:
             workflow.ungrouped_nodes.append(node)
+        else:
+            matched_group.nodes.append(node)
     
     logger.info(f"Parsed workflow with {len(workflow.nodes)} nodes, {len(workflow.links)} links, {len(workflow.groups)} groups, {len(workflow.ungrouped_nodes)} ungrouped nodes")
     return workflow
+
+
+def _group_area(group: Group) -> float:
+    if len(group.bounding) < 4:
+        return float("inf")
+    return max(0.0, group.bounding[2]) * max(0.0, group.bounding[3])
+
+
+def _group_contains_group(parent: Group, child: Group) -> bool:
+    if parent is child or len(parent.bounding) < 4 or len(child.bounding) < 4:
+        return False
+    px, py, pw, ph = parent.bounding
+    cx, cy, cw, ch = child.bounding
+    if pw <= 0 or ph <= 0 or cw <= 0 or ch <= 0:
+        return False
+    if _group_area(parent) <= _group_area(child):
+        return False
+    return (
+        px <= cx
+        and py <= cy
+        and px + pw >= cx + cw
+        and py + ph >= cy + ch
+    )
+
+
+def _assign_group_hierarchy(groups: list[Group]) -> None:
+    """Derive each group's nearest enclosing parent from authored geometry."""
+    for child in groups:
+        parents = [parent for parent in groups if _group_contains_group(parent, child)]
+        child.parent_id = (
+            min(parents, key=lambda group: (_group_area(group), group.id)).id
+            if parents
+            else None
+        )
+
+
+def _innermost_group_for_node(node: Node, groups: list[Group]) -> Group | None:
+    matches = [group for group in groups if _node_in_group_bounding(node, group)]
+    if not matches:
+        return None
+    return min(matches, key=lambda group: (_group_area(group), group.id))
 
 
 def _node_in_group_bounding(node: Node, group: Group) -> bool:

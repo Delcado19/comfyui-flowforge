@@ -580,9 +580,10 @@ def _segments_intersect(
 
 def _assign_groups(workflow: Workflow) -> None:
     """
-    Assign each node to the group whose bounding box contains it.
-    Nodes outside every group are stored in workflow.ungrouped_nodes (implicit ungrouped set).
-    When groups overlap, the first matching group in workflow order wins.
+    Assign each node to the most specific group whose bounding box contains it.
+    Nodes outside every group are stored in workflow.ungrouped_nodes. Nested
+    ComfyUI groups are derived from rectangle containment and retain exclusive
+    direct membership instead of letting the first outer group swallow children.
     """
     logger.debug("Assigning nodes to groups")
     
@@ -591,20 +592,18 @@ def _assign_groups(workflow: Workflow) -> None:
     workflow.ungrouped_nodes.clear()
     for group in workflow.groups:
         group.nodes.clear()
-    
+    _refresh_group_hierarchy(workflow)
+
     # Virtual Set/Get hubs are endpoint anchors, not regular graph content.
     # Assign them only after their physical endpoint has its final position.
     for node in workflow.nodes.values():
         if _is_decorative_node(node) or _is_virtual_hub_node(node):
             continue
-        assigned = False
-        for group in workflow.groups:
-            if _node_in_group(node, group):
-                group.nodes.append(node)
-                assigned = True
-                break
-        if not assigned:
+        matched_group = _innermost_group_for_node(node, workflow.groups)
+        if matched_group is None:
             workflow.ungrouped_nodes.append(node)
+        else:
+            matched_group.nodes.append(node)
     
     logger.debug(f"Assigned {len(workflow.nodes) - len(workflow.ungrouped_nodes)} nodes to {len(workflow.groups)} groups; {len(workflow.ungrouped_nodes)} ungrouped")
 
@@ -621,6 +620,176 @@ def _node_in_group(node: Node, group: Group) -> bool:
     
     gx, gy, gw, gh = group.bounding
     return (gx <= node.x <= gx + gw) and (gy <= node.y <= gy + gh)
+
+
+def _group_area(group: Group) -> float:
+    if len(group.bounding) < 4:
+        return float("inf")
+    return max(0.0, group.bounding[2]) * max(0.0, group.bounding[3])
+
+
+def _group_contains_group(parent: Group, child: Group) -> bool:
+    if parent is child or len(parent.bounding) < 4 or len(child.bounding) < 4:
+        return False
+    px, py, pw, ph = parent.bounding
+    cx, cy, cw, ch = child.bounding
+    if pw <= 0 or ph <= 0 or cw <= 0 or ch <= 0:
+        return False
+    if _group_area(parent) <= _group_area(child):
+        return False
+    return (
+        px <= cx
+        and py <= cy
+        and px + pw >= cx + cw
+        and py + ph >= cy + ch
+    )
+
+
+def _refresh_group_hierarchy(workflow: Workflow) -> None:
+    for child in workflow.groups:
+        parents = [
+            parent
+            for parent in workflow.groups
+            if _group_contains_group(parent, child)
+        ]
+        child.parent_id = (
+            min(parents, key=lambda group: (_group_area(group), group.id)).id
+            if parents
+            else None
+        )
+
+
+def _innermost_group_for_node(node: Node, groups: list[Group]) -> Group | None:
+    matches = [group for group in groups if _node_in_group(node, group)]
+    if not matches:
+        return None
+    return min(matches, key=lambda group: (_group_area(group), group.id))
+
+
+def _group_children(workflow: Workflow, group: Group) -> list[Group]:
+    return [child for child in workflow.groups if child.parent_id == group.id]
+
+
+def _top_level_groups(workflow: Workflow) -> list[Group]:
+    return [group for group in workflow.groups if group.parent_id is None]
+
+
+def _nested_hierarchy_group_ids(workflow: Workflow) -> set[int]:
+    parent_ids = {group.parent_id for group in workflow.groups if group.parent_id is not None}
+    return {
+        group.id
+        for group in workflow.groups
+        if group.parent_id is not None or group.id in parent_ids
+    }
+
+
+def _has_nested_groups(workflow: Workflow) -> bool:
+    return any(group.parent_id is not None for group in workflow.groups)
+
+
+def _top_level_group(workflow: Workflow, group: Group) -> Group:
+    groups_by_id = {item.id: item for item in workflow.groups}
+    current = group
+    seen: set[int] = set()
+    while current.parent_id is not None and current.parent_id not in seen:
+        seen.add(current.id)
+        parent = groups_by_id.get(current.parent_id)
+        if parent is None:
+            break
+        current = parent
+    return current
+
+
+def _group_subtree_nodes(workflow: Workflow, group: Group) -> list[Node]:
+    group_ids = {group.id}
+    changed = True
+    while changed:
+        changed = False
+        for item in workflow.groups:
+            if item.parent_id in group_ids and item.id not in group_ids:
+                group_ids.add(item.id)
+                changed = True
+
+    nodes_by_id: dict[int, Node] = {}
+    for item in workflow.groups:
+        if item.id in group_ids:
+            for node in item.nodes:
+                nodes_by_id[node.id] = node
+    return list(nodes_by_id.values())
+
+
+def _group_has_layout_content(workflow: Workflow, group: Group) -> bool:
+    return bool(group.nodes or _group_children(workflow, group))
+
+
+def _group_layout_size(
+    workflow: Workflow,
+    group: Group,
+    settings: LayoutSettings,
+) -> tuple[float, float]:
+    if _group_children(workflow, group) and _has_positive_bounding(group):
+        return group.bounding[2], group.bounding[3]
+    return _required_group_size(group, settings)
+
+
+def _move_group_subtree(
+    workflow: Workflow,
+    group: Group,
+    delta_x: float,
+    delta_y: float,
+) -> None:
+    """Move a top-level group, all descendant groups, and their nodes as one unit."""
+    group_ids = {group.id}
+    changed = True
+    while changed:
+        changed = False
+        for item in workflow.groups:
+            if item.parent_id in group_ids and item.id not in group_ids:
+                group_ids.add(item.id)
+                changed = True
+
+    moved_nodes: set[int] = set()
+    for item in workflow.groups:
+        if item.id not in group_ids:
+            continue
+        item.bounding[0] += delta_x
+        item.bounding[1] += delta_y
+        for node in item.nodes:
+            if node.id in moved_nodes:
+                continue
+            node.x += delta_x
+            node.y += delta_y
+            moved_nodes.add(node.id)
+
+
+def _place_group_geometry(
+    workflow: Workflow,
+    group: Group,
+    new_x: float,
+    new_y: float,
+    width: float,
+    height: float,
+    settings: LayoutSettings,
+) -> None:
+    """Place one top-level group, preserving authored nested interiors."""
+    if _group_children(workflow, group):
+        _move_group_subtree(
+            workflow,
+            group,
+            new_x - group.bounding[0],
+            new_y - group.bounding[1],
+        )
+        return
+
+    min_x, min_y, _max_x, _max_y = _group_content_bounds(group)
+    offset_x = (new_x + settings.group_padding) - min_x
+    offset_y = (new_y + _group_top_padding(settings)) - min_y
+    for node in group.nodes:
+        if _is_pinned_node(workflow, node):
+            continue
+        node.x += offset_x
+        node.y += offset_y
+    group.bounding = [new_x, new_y, width, height]
 
 
 def _shrink_nodes_to_minimum_size(workflow: Workflow) -> None:
@@ -814,8 +983,9 @@ def _layout_groups_internal(workflow: Workflow, settings: LayoutSettings) -> Non
     """
     logger.debug("Laying out nodes within groups (Sugiyama)")
     
+    nested_group_ids = _nested_hierarchy_group_ids(workflow)
     for group in workflow.groups:
-        if group.pinned or len(group.nodes) < 2:
+        if group.id in nested_group_ids or group.pinned or len(group.nodes) < 2:
             continue
         
         # Build adjacency within this group only
@@ -1131,15 +1301,15 @@ def _position_groups_globally(
     current_x = start_x
     current_y = start_y
     row_height = 0.0
-    movable_groups = [group for group in workflow.groups if group.nodes and not group.pinned]
-    target_row_width = _estimate_group_row_width(movable_groups, settings)
+    movable_groups = [
+        group
+        for group in _top_level_groups(workflow)
+        if _group_has_layout_content(workflow, group) and not group.pinned
+    ]
+    target_row_width = _estimate_group_row_width(workflow, movable_groups, settings)
 
-    for group in workflow.groups:
-        if not group.nodes or group.pinned:
-            continue
-
-        min_x, min_y, _max_x, _max_y = _group_content_bounds(group)
-        g_width, g_height = _required_group_size(group, settings)
+    for group in movable_groups:
+        g_width, g_height = _group_layout_size(workflow, group, settings)
 
         row_has_content = current_x > start_x
         starts_next_row = (
@@ -1151,16 +1321,15 @@ def _position_groups_globally(
             current_y += row_height + settings.group_v_gap
             row_height = 0.0
         
-        offset_x = (current_x + settings.group_padding) - min_x
-        offset_y = (current_y + _group_top_padding(settings)) - min_y
-
-        for node in group.nodes:
-            if _is_pinned_node(workflow, node):
-                continue
-            node.x += offset_x
-            node.y += offset_y
-        
-        group.bounding = [current_x, current_y, g_width, g_height]
+        _place_group_geometry(
+            workflow,
+            group,
+            current_x,
+            current_y,
+            g_width,
+            g_height,
+            settings,
+        )
         
         current_x += g_width + settings.group_h_gap
         row_height = max(row_height, g_height)
@@ -1176,16 +1345,16 @@ def _position_groups_by_flow_layers(
 ) -> None:
     """Place connected groups in dataflow columns to shorten cross-group wires."""
     group_sizes = {
-        group.id: _required_group_size(group, settings)
-        for group in workflow.groups
-        if group.nodes and not group.pinned
+        group.id: _group_layout_size(workflow, group, settings)
+        for group in _top_level_groups(workflow)
+        if _group_has_layout_content(workflow, group) and not group.pinned
     }
     if not group_sizes:
         return
 
     layers = _group_flow_layers(workflow)
     layer_to_groups: dict[int, list[Group]] = {}
-    for group in workflow.groups:
+    for group in _top_level_groups(workflow):
         if group.id in group_sizes:
             layer_to_groups.setdefault(layers.get(group.id, 0), []).append(group)
 
@@ -1212,19 +1381,17 @@ def _position_groups_by_flow_layers(
             key=lambda item: (_group_flow_order_key(workflow, item, layers), item.bounding[1], item.bounding[0], item.id),
         ):
             g_width, g_height = group_sizes[group.id]
-            min_x, min_y, _max_x, _max_y = _group_content_bounds(group)
             new_x = row_x
             new_y = current_y
-            offset_x = (new_x + settings.group_padding) - min_x
-            offset_y = (new_y + _group_top_padding(settings)) - min_y
-
-            for node in group.nodes:
-                if _is_pinned_node(workflow, node):
-                    continue
-                node.x += offset_x
-                node.y += offset_y
-
-            group.bounding = [new_x, new_y, g_width, g_height]
+            _place_group_geometry(
+                workflow,
+                group,
+                new_x,
+                new_y,
+                g_width,
+                g_height,
+                settings,
+            )
             current_y += g_height + settings.group_v_gap
 
 
@@ -1270,11 +1437,11 @@ def _flow_group_h_gap(workflow: Workflow, settings: LayoutSettings) -> float:
 
 def _has_movable_group_bridge_flow_edges(workflow: Workflow) -> bool:
     group_by_node_id = _group_by_node_id(workflow)
-    group_by_id = {group.id: group for group in workflow.groups}
-    for group in workflow.groups:
-        if not group.nodes or _group_has_fixed_geometry(group):
+    group_by_id = {group.id: group for group in _top_level_groups(workflow)}
+    for group in _top_level_groups(workflow):
+        if not _group_has_layout_content(workflow, group) or _group_has_fixed_geometry(group):
             continue
-        for node in group.nodes:
+        for node in _group_subtree_nodes(workflow, group):
             reachable = _reachable_target_groups_from_node(
                 workflow,
                 node.id,
@@ -1312,7 +1479,11 @@ def _has_direct_group_incident_link(
 
 def _group_flow_layers(workflow: Workflow) -> dict[int, int]:
     """Assign group columns by longest inter-group dependency path."""
-    group_ids = {group.id for group in workflow.groups if group.nodes}
+    group_ids = {
+        group.id
+        for group in _top_level_groups(workflow)
+        if _group_has_layout_content(workflow, group)
+    }
     adj, rev_adj = _group_flow_adjacency(workflow)
 
     layers: dict[int, int] = {
@@ -1349,15 +1520,19 @@ def _group_flow_layers(workflow: Workflow) -> dict[int, int]:
 def _group_flow_adjacency(workflow: Workflow) -> tuple[dict[int, set[int]], dict[int, set[int]]]:
     """Build group dependencies, following ungrouped bridge nodes when needed."""
     group_by_node_id = _group_by_node_id(workflow)
-    group_by_id = {group.id: group for group in workflow.groups}
-    group_ids = {group.id for group in workflow.groups if group.nodes}
+    group_by_id = {group.id: group for group in _top_level_groups(workflow)}
+    group_ids = {
+        group.id
+        for group in _top_level_groups(workflow)
+        if _group_has_layout_content(workflow, group)
+    }
     adj: dict[int, set[int]] = {group_id: set() for group_id in group_ids}
     rev_adj: dict[int, set[int]] = {group_id: set() for group_id in group_ids}
 
-    for group in workflow.groups:
+    for group in _top_level_groups(workflow):
         if group.id not in group_ids:
             continue
-        for node in group.nodes:
+        for node in _group_subtree_nodes(workflow, group):
             for target_group_id, via_bridge in _reachable_target_groups_from_node(
                 workflow,
                 node.id,
@@ -1553,8 +1728,9 @@ def _position_group_bridge_nodes(
         return 0.0, set()
     movable_group_ids = {
         group.id
-        for group in workflow.groups
-        if group.nodes and not _group_has_fixed_geometry(group)
+        for group in _top_level_groups(workflow)
+        if _group_has_layout_content(workflow, group)
+        and not _group_has_fixed_geometry(group)
     }
 
     candidates = [
@@ -2998,8 +3174,9 @@ def _update_bounding_boxes(workflow: Workflow, settings: LayoutSettings) -> None
     """
     logger.debug("Updating group bounding boxes")
     
+    nested_group_ids = _nested_hierarchy_group_ids(workflow)
     for group in workflow.groups:
-        if not group.nodes or group.pinned:
+        if group.id in nested_group_ids or not group.nodes or group.pinned:
             continue
         
         min_x, min_y, max_x, max_y = _group_content_bounds(group)
@@ -3020,12 +3197,16 @@ def _update_bounding_boxes(workflow: Workflow, settings: LayoutSettings) -> None
 
 def _resolve_group_geometry_overlaps(workflow: Workflow, settings: LayoutSettings) -> None:
     """Move whole movable groups until group surfaces no longer overlap."""
-    groups = [group for group in workflow.groups if _has_positive_bounding(group)]
+    groups = [
+        group
+        for group in _top_level_groups(workflow)
+        if _has_positive_bounding(group)
+    ]
     groups.sort(key=lambda group: (group.bounding[1], group.bounding[0], group.id))
     fixed_group_obstacles = [
         group for group in groups if _group_has_fixed_geometry(group)
     ]
-    grouped_node_ids = {node.id for group in workflow.groups for node in group.nodes}
+    grouped_node_ids = set(_group_by_node_id(workflow))
     fixed_node_obstacles = [
         _node_rect(node)
         for node in workflow.nodes.values()
@@ -3038,7 +3219,7 @@ def _resolve_group_geometry_overlaps(workflow: Workflow, settings: LayoutSetting
             placed_groups.append(group)
             continue
 
-        member_ids = {node.id for node in group.nodes}
+        member_ids = {node.id for node in _group_subtree_nodes(workflow, group)}
         for _ in range(len(workflow.groups) + len(workflow.nodes) + 1):
             group_rect = _group_rect(group)
             obstacles = [
@@ -3060,7 +3241,12 @@ def _resolve_group_geometry_overlaps(workflow: Workflow, settings: LayoutSetting
 
             lowest_obstacle_bottom = max(rect[3] for rect in obstacles)
             delta_y = (lowest_obstacle_bottom + settings.group_v_gap) - group.bounding[1]
-            _move_group_geometry(group, 0.0, max(delta_y, settings.group_v_gap))
+            _move_group_subtree(
+                workflow,
+                group,
+                0.0,
+                max(delta_y, settings.group_v_gap),
+            )
 
         placed_groups.append(group)
 
@@ -3071,7 +3257,12 @@ def _group_has_fixed_geometry(group: Group) -> bool:
 
 
 def _group_by_node_id(workflow: Workflow) -> dict[int, Group]:
-    return {node.id: group for group in workflow.groups for node in group.nodes}
+    result: dict[int, Group] = {}
+    for group in workflow.groups:
+        top_level = _top_level_group(workflow, group)
+        for node in group.nodes:
+            result[node.id] = top_level
+    return result
 
 
 def _move_group_geometry(group: Group, delta_x: float, delta_y: float) -> None:
@@ -3242,20 +3433,16 @@ def _estimate_vertical_packing_budget(items, height_fn, gap: float) -> float:
     return max(tallest, total_height / target_columns)
 
 
-def _estimate_group_row_width(groups: list[Group], settings: LayoutSettings) -> float:
+def _estimate_group_row_width(
+    workflow: Workflow,
+    groups: list[Group],
+    settings: LayoutSettings,
+) -> float:
     """Return a soft row width so group layout can wrap downward."""
     if not groups:
         return 0.0
 
-    sizes: list[tuple[float, float]] = []
-    for group in groups:
-        min_x, _min_y, max_x, max_y = _group_content_bounds(group)
-        sizes.append(
-            (
-                (max_x - min_x) + 2 * settings.group_padding,
-                (max_y - _min_y) + _group_top_padding(settings) + _group_bottom_padding(settings),
-            )
-        )
+    sizes = [_group_layout_size(workflow, group, settings) for group in groups]
 
     total_area = sum(width * height for width, height in sizes)
     max_width = max(width for width, _ in sizes)

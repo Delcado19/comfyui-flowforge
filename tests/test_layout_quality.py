@@ -46,6 +46,10 @@ def test_build_workflow_quality_report_counts_geometry_and_layout_metrics():
     assert sum(report.laid_out_right_to_left_categories.values()) == report.laid_out.right_to_left_links
     assert report.layout_candidate_count is not None
     assert report.layout_score is not None
+    assert report.structure.group_span_width > 0
+    assert report.structure.group_columns >= 1
+    assert report.structure.left_edge_owner is not None
+    assert report.structure.right_edge_owner is not None
 
 
 def test_build_workflow_quality_report_can_optimize_before_layout():
@@ -125,3 +129,30 @@ def test_summarize_quality_text_includes_category_breakdowns(tmp_path):
     assert "- within_group x group->group: 2" in text
     assert "Top laid-out right-to-left categories:" in text
     assert "- within_group: 1" in text
+
+
+def test_summarize_quality_text_can_include_structure_diagnostics(tmp_path):
+    (tmp_path / "workflow.json").write_text(json.dumps(WORKFLOW), encoding="utf-8")
+    summary = build_quality_summary(tmp_path, structure_top=1)
+
+    text = summarize_quality_text(summary, include_structure=True)
+
+    assert "structure: groups span=" in text
+    assert "ungrouped span=" in text
+    assert "edges=" in text
+
+
+def test_build_quality_summary_defers_structure_for_non_top_reports(tmp_path):
+    first = dict(WORKFLOW)
+    second = json.loads(json.dumps(WORKFLOW))
+    second["nodes"][2]["pos"] = [1200, 0]
+    second["nodes"][3]["pos"] = [1200, 200]
+    second["groups"][0]["bounding"] = [-20, -20, 1360, 340]
+
+    (tmp_path / "small.json").write_text(json.dumps(first), encoding="utf-8")
+    (tmp_path / "large.json").write_text(json.dumps(second), encoding="utf-8")
+
+    summary = build_quality_summary(tmp_path, structure_top=1)
+    structured = [report for report in summary.reports if report.structure is not None]
+
+    assert len(structured) == 1
