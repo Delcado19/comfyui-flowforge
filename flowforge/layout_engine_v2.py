@@ -136,14 +136,14 @@ def apply_best_layout(
     best_index = 1
 
     balanced = _balanced_group_flow_candidate(workflow, settings)
-    balanced_refined = _balanced_group_flow_candidate(
+    balanced_2d = _balanced_group_flow_candidate(
         workflow,
         settings,
-        refine_internals=True,
+        compact_vertical=True,
     )
     structural_candidates = [
         candidate
-        for candidate in (balanced, balanced_refined)
+        for candidate in (balanced, balanced_2d)
         if candidate is not None
     ]
     total_candidates = len(variants) + 1 + len(structural_candidates)
@@ -165,7 +165,7 @@ def apply_best_layout(
     variant_start = 2
     structural_specs = [
         ("balanced-compact", balanced),
-        ("balanced-refined", balanced_refined),
+        ("balanced-2d", balanced_2d),
     ]
     for source_name, structural_candidate in structural_specs:
         if structural_candidate is None:
@@ -291,7 +291,7 @@ def _balanced_group_flow_candidate(
     workflow: Workflow,
     settings: LayoutSettings,
     *,
-    refine_internals: bool = False,
+    compact_vertical: bool = False,
 ) -> Workflow | None:
     """Compact authored geometry horizontally without destroying its structure.
 
@@ -308,8 +308,6 @@ def _balanced_group_flow_candidate(
     candidate = deepcopy(workflow)
     _shrink_nodes_to_minimum_size(candidate)
     _assign_groups(candidate)
-    if refine_internals:
-        _refine_movable_group_internals(candidate, settings)
 
     top_groups = [
         group
@@ -407,6 +405,62 @@ def _balanced_group_flow_candidate(
             candidate.nodes[item_id].x = target_x
 
         placed.append((kind, item_id, target_x, y, width, height))
+
+    if compact_vertical:
+        # Second sweep: close avoidable vertical whitespace while preserving
+        # authored top-to-bottom ordering. Only horizontally overlapping items
+        # constrain one another, so independent workflow bands can rise into
+        # the same row instead of creating a tall sparse canvas.
+        vertically_placed: list[tuple[str, int, float, float, float, float]] = []
+        for kind, item_id, x, old_y, width, height in sorted(
+            placed,
+            key=lambda item: (item[3], item[2], item[0], item[1]),
+        ):
+            target_y = 50.0
+            for (
+                other_kind,
+                _other_id,
+                other_x,
+                other_y,
+                other_width,
+                other_height,
+            ) in vertically_placed:
+                horizontal_gap = (
+                    settings.group_h_gap
+                    if "group" in {kind, other_kind}
+                    else settings.node_h_gap
+                )
+                horizontally_overlaps = (
+                    x < other_x + other_width + horizontal_gap
+                    and other_x < x + width + horizontal_gap
+                )
+                if not horizontally_overlaps:
+                    continue
+
+                vertical_gap = (
+                    settings.group_v_gap
+                    if "group" in {kind, other_kind}
+                    else settings.node_v_gap
+                )
+                target_y = max(
+                    target_y,
+                    other_y + other_height + vertical_gap,
+                )
+
+            if kind == "group":
+                group = groups_by_id[item_id]
+                _move_group_subtree(
+                    candidate,
+                    group,
+                    0.0,
+                    target_y - group.bounding[1],
+                )
+            else:
+                candidate.nodes[item_id].y = target_y
+
+            vertically_placed.append(
+                (kind, item_id, x, target_y, width, height)
+            )
 
     _finalize_refinement(candidate, settings)
     return candidate

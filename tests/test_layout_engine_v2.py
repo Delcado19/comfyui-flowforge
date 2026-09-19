@@ -120,44 +120,35 @@ def test_balanced_group_flow_compacts_top_level_groups_and_preserves_nested_offs
     ) == original_inner_node_offset
 
 
-def test_balanced_refined_compacts_ordinary_group_but_preserves_nested_subtree():
+def test_balanced_2d_closes_vertical_gap_and_preserves_nested_subtree():
     workflow = Workflow()
     workflow.nodes = {
         1: Node(id=1, type="Inner", x=120, y=120, size=[100, 80]),
         2: Node(id=2, type="Outer", x=420, y=120, size=[100, 80]),
-        3: Node(id=3, type="A", x=1520, y=120, size=[100, 80]),
-        4: Node(id=4, type="B", x=2120, y=120, size=[100, 80]),
-        5: Node(id=5, type="C", x=2720, y=120, size=[100, 80]),
+        3: Node(id=3, type="Lower", x=120, y=2120, size=[100, 80]),
     }
     workflow.groups = [
         Group(id=10, name="Outer", bounding=[0, 0, 700, 500]),
         Group(id=11, name="Inner", bounding=[80, 80, 220, 220]),
-        Group(id=20, name="Ordinary", bounding=[1480, 80, 1500, 420]),
+        Group(id=20, name="Lower", bounding=[0, 2000, 700, 500]),
     ]
-    _attach_link(
-        workflow,
-        Link(id=100, source=3, source_port=0, target=4, target_port=0, type="DATA"),
-    )
-    _attach_link(
-        workflow,
-        Link(id=101, source=4, source_port=0, target=5, target_port=0, type="DATA"),
-    )
 
     original_child_offset = (
         workflow.groups[1].bounding[0] - workflow.groups[0].bounding[0],
         workflow.groups[1].bounding[1] - workflow.groups[0].bounding[1],
     )
-    original_ordinary_width = workflow.groups[2].bounding[2]
+    original_height = _score_engine_v2(workflow).height
 
     candidate = _balanced_group_flow_candidate(
         workflow,
         LayoutSettings(node_x_distance=40, node_y_distance=40),
-        refine_internals=True,
+        compact_vertical=True,
     )
 
     assert candidate is not None
-    outer, inner, ordinary = candidate.groups
-    assert ordinary.bounding[2] < original_ordinary_width
+    outer, inner, lower = candidate.groups
+    assert _score_engine_v2(candidate).height < original_height
+    assert lower.bounding[1] < 1000
     assert (
         inner.bounding[0] - outer.bounding[0],
         inner.bounding[1] - outer.bounding[1],
