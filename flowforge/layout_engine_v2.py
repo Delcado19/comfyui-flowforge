@@ -43,6 +43,7 @@ from .layout import (
     _is_decorative_node,
     _is_pinned_node,
     _is_virtual_hub_node,
+    _nested_hierarchy_group_ids,
     _node_input_port_y,
     _node_output_port_y,
     _node_visual_height,
@@ -223,8 +224,9 @@ def _candidate_is_better(candidate: EngineV2Score, incumbent: EngineV2Score) -> 
 def _refine_movable_group_internals(workflow: Workflow, settings: LayoutSettings) -> bool:
     """Re-layout fully movable groups with SCC-aware, dummy-edge ordering."""
     changed = False
+    nested_group_ids = _nested_hierarchy_group_ids(workflow)
     for group in workflow.groups:
-        if not _group_can_be_refined(workflow, group):
+        if group.id in nested_group_ids or not _group_can_be_refined(workflow, group):
             continue
         if _refine_group(workflow, group, settings):
             changed = True

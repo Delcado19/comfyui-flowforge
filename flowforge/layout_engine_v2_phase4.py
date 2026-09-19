@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from .layout import (
     LayoutSettings,
     _group_by_node_id,
+    _has_nested_groups,
     _has_positive_bounding,
     _is_control_source_node,
     _is_decorative_node,
@@ -95,6 +96,9 @@ def apply_best_layout(
     """Run Phase 3, then try conservative pure-ungrouped compaction."""
     settings = settings or LayoutSettings()
     baseline = _apply_phase3_best_layout(workflow, settings, candidate_count)
+    if _has_nested_groups(baseline):
+        logger.info("Skipping Phase 4 compaction for nested group hierarchy")
+        return baseline
     baseline_score = _score_engine_v2(baseline)
 
     compact = deepcopy(baseline)

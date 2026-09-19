@@ -18,7 +18,7 @@ from copy import deepcopy
 import math
 from typing import TypeAlias
 
-from .layout import LayoutSettings, _group_flow_adjacency, _is_pinned_node
+from .layout import LayoutSettings, _group_flow_adjacency, _has_nested_groups, _is_pinned_node
 from .layout_engine_v2 import (
     EngineV2Score,
     _assign_scc_longest_path_layers,
@@ -47,6 +47,9 @@ def apply_best_layout(
     """Run the core v2 engine, then try weighted group-level refinement."""
     settings = settings or LayoutSettings()
     baseline = _apply_core_best_layout(workflow, settings, candidate_count)
+    if _has_nested_groups(baseline):
+        logger.info("Skipping Phase 2 refinement for nested group hierarchy")
+        return baseline
     baseline_score = _score_engine_v2(baseline)
 
     refined = deepcopy(baseline)

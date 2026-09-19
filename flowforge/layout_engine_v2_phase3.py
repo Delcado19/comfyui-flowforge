@@ -17,6 +17,7 @@ import math
 
 from .layout import (
     LayoutSettings,
+    _has_nested_groups,
     _is_decorative_node,
     _is_pinned_node,
     _node_visual_height,
@@ -52,6 +53,9 @@ def apply_best_layout(
     """Run Phase 2, then try one width-aware compact global-flow candidate."""
     settings = settings or LayoutSettings()
     baseline = _apply_phase2_best_layout(workflow, settings, candidate_count)
+    if _has_nested_groups(baseline):
+        logger.info("Skipping Phase 3 compaction for nested group hierarchy")
+        return baseline
     baseline_score = _score_engine_v2(baseline)
 
     if baseline_score.width < COMPACT_GLOBAL_MIN_WIDTH:

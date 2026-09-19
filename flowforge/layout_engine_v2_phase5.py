@@ -37,6 +37,7 @@ from .layout import (
     _group_by_node_id,
     _group_flow_adjacency,
     _group_has_fixed_geometry,
+    _has_nested_groups,
     _has_positive_bounding,
     _is_pinned_node,
     _move_group_geometry,
@@ -128,6 +129,9 @@ def apply_best_layout(
     """Run Phase 4, then evaluate conservative mixed-flow placement variants."""
     settings = settings or LayoutSettings()
     baseline = _apply_phase4_best_layout(workflow, settings, candidate_count)
+    if _has_nested_groups(baseline):
+        logger.info("Skipping Phase 5 mixed refinement for nested group hierarchy")
+        return baseline
     baseline_score = _score_engine_v2(baseline)
     baseline_center = _center_flow_metrics(baseline)
     if baseline_score.width < MIXED_GLOBAL_MIN_WIDTH:

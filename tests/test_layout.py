@@ -75,6 +75,47 @@ def test_apply_basic_layout():
     logger.info("Basic layout test passed")
 
 
+def test_nested_group_subtree_moves_as_one_authored_unit():
+    wf = Workflow()
+    outer_node = Node(id=1, type="OuterNode", x=700, y=100, size=[100, 80])
+    inner_node = Node(id=2, type="InnerNode", x=150, y=150, size=[100, 80])
+    wf.nodes = {1: outer_node, 2: inner_node}
+    outer = Group(id=10, name="Outer", bounding=[0, 0, 1000, 600])
+    inner = Group(id=11, name="Inner", bounding=[100, 100, 300, 300])
+    wf.groups = [outer, inner]
+
+    _assign_groups(wf)
+    original_inner_offset = (
+        inner.bounding[0] - outer.bounding[0],
+        inner.bounding[1] - outer.bounding[1],
+    )
+    original_inner_node_offset = (
+        inner_node.x - inner.bounding[0],
+        inner_node.y - inner.bounding[1],
+    )
+    original_sizes = (tuple(outer.bounding[2:]), tuple(inner.bounding[2:]))
+
+    _position_groups_globally(
+        wf,
+        LayoutSettings(node_x_distance=80, node_y_distance=80),
+        start_x=2000,
+    )
+
+    assert inner.parent_id == outer.id
+    assert [node.id for node in outer.nodes] == [1]
+    assert [node.id for node in inner.nodes] == [2]
+    assert (
+        inner.bounding[0] - outer.bounding[0],
+        inner.bounding[1] - outer.bounding[1],
+    ) == original_inner_offset
+    assert (
+        inner_node.x - inner.bounding[0],
+        inner_node.y - inner.bounding[1],
+    ) == original_inner_node_offset
+    assert (tuple(outer.bounding[2:]), tuple(inner.bounding[2:])) == original_sizes
+    assert outer.bounding[0] == 2000
+
+
 def test_group_assignment():
     logger.info("Testing group assignment")
     wf = Workflow()
