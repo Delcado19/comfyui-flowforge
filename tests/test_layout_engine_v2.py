@@ -178,6 +178,30 @@ def _score(
     )
 
 
+def test_realistic_balanced_canvas_scores_better_than_tower_regression():
+    # Regression values are rounded from the real 57-node VTO workflow that
+    # exposed the tower-layout failure. The tower saves crossings but adds RTL
+    # links and severely degrades the canvas aspect ratio.
+    balanced_total = (
+        171 * 2_000.0
+        + 15 * 3_000.0
+        + 153_350.0 * 0.02
+        + 6_782.0 * 2.5
+        + 4_687.0
+        + _aspect_cost(6_782.0, 4_687.0)
+    )
+    tower_total = (
+        160 * 2_000.0
+        + 20 * 3_000.0
+        + 146_496.0 * 0.02
+        + 5_601.0 * 2.5
+        + 7_255.0
+        + _aspect_cost(5_601.0, 7_255.0)
+    )
+
+    assert balanced_total < tower_total
+
+
 def test_candidate_guard_rejects_large_width_growth_for_minor_quality_gain():
     incumbent = _score(total=1000.0, crossings=100, rtl=20, width=1000.0)
     wider = _score(total=900.0, crossings=99, rtl=20, width=1500.0)

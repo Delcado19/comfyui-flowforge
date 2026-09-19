@@ -70,7 +70,7 @@ V2_OVERLAP_WEIGHT = 100_000.0
 V2_WIDTH_WEIGHT = 2.5
 V2_HEIGHT_WEIGHT = 1.0
 V2_LINK_WEIGHT = 0.02
-V2_ASPECT_WEIGHT = 1.0
+V2_ASPECT_WEIGHT = 2.5
 V2_TARGET_ASPECT_RATIO = 1.35
 V2_MAX_WIDTH_GROWTH_RATIO = 1.35
 V2_SIGNIFICANT_CROSSING_GAIN_RATIO = 0.05
@@ -113,11 +113,30 @@ def apply_best_layout(
     )
     variants = _build_layout_candidates(workflow, settings, resolved_candidate_count)
 
-    best_workflow: Workflow | None = None
-    best_score: EngineV2Score | None = None
-    best_index = 0
+    # Keep the authored geometry in the candidate pool as a safety baseline.
+    # This is especially important for cyclic top-level group graphs, where a
+    # forced DAG-style relayout can reduce a few crossings while destroying an
+    # already balanced user-authored canvas shape.
+    authored = deepcopy(workflow)
+    best_workflow: Workflow | None = authored
+    best_score: EngineV2Score | None = _score_engine_v2(authored)
+    best_index = 1
+    total_candidates = len(variants) + 1
+    logger.info(
+        "v2 candidate 1/%s source=authored score=%.2f crossings=%s rtl=%s overlaps=%s "
+        "link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
+        total_candidates,
+        best_score.total,
+        best_score.crossings,
+        best_score.right_to_left_links,
+        best_score.movable_overlaps,
+        best_score.link_length,
+        best_score.width,
+        best_score.height,
+        _aspect_cost(best_score.width, best_score.height),
+    )
 
-    for index, variant in enumerate(variants, start=1):
+    for index, variant in enumerate(variants, start=2):
         baseline = deepcopy(workflow)
         _apply_layout_pass(baseline, variant, log=False)
         baseline_score = _score_engine_v2(baseline)
@@ -143,7 +162,7 @@ def apply_best_layout(
             "v2 candidate %s/%s source=%s score=%.2f crossings=%s rtl=%s overlaps=%s "
             "link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
             index,
-            len(variants),
+            total_candidates,
             candidate_source,
             candidate_score.total,
             candidate_score.crossings,
@@ -165,7 +184,7 @@ def apply_best_layout(
 
     legacy_score: LayoutScore = _score_layout_candidate(best_workflow)
     best_workflow.layout_report = LayoutReport(
-        candidate_count=len(variants),
+        candidate_count=total_candidates,
         selected_candidate=best_index,
         score=legacy_score,
     )
@@ -173,7 +192,7 @@ def apply_best_layout(
         "Layout engine v2 selected candidate %s/%s: score=%.2f crossings=%s rtl=%s "
         "overlaps=%s link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
         best_index,
-        len(variants),
+        total_candidates,
         best_score.total,
         best_score.crossings,
         best_score.right_to_left_links,
