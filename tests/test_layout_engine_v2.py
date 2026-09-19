@@ -8,6 +8,7 @@ from flowforge.layout_engine_v2 import (
     _balanced_group_flow_candidate,
     _boundary_crossings,
     _candidate_is_better,
+    _compact_candidate_beats_authored,
     _group_can_be_refined,
     _minimize_crossings_with_dummies,
     _refine_group,
@@ -262,6 +263,63 @@ def _score(
         width=width,
         height=height,
     )
+
+
+def test_compact_candidate_can_trade_two_crossings_for_material_geometry_gain():
+    authored = EngineV2Score(
+        total=412847.11,
+        crossings=171,
+        right_to_left_links=15,
+        movable_overlaps=0,
+        link_length=153350.0,
+        width=6782.0,
+        height=4687.0,
+    )
+    compact = EngineV2Score(
+        total=414561.00,
+        crossings=173,
+        right_to_left_links=15,
+        movable_overlaps=0,
+        link_length=139728.0,
+        width=6191.0,
+        height=4290.0,
+    )
+
+    assert compact.total > authored.total
+    assert _compact_candidate_beats_authored(compact, authored)
+
+
+def test_compact_candidate_rejects_crossing_or_rtl_regression_beyond_guard():
+    authored = EngineV2Score(
+        total=1000.0,
+        crossings=100,
+        right_to_left_links=10,
+        movable_overlaps=0,
+        link_length=10000.0,
+        width=5000.0,
+        height=3500.0,
+    )
+    too_many_crossings = EngineV2Score(
+        total=900.0,
+        crossings=103,
+        right_to_left_links=10,
+        movable_overlaps=0,
+        link_length=8000.0,
+        width=4300.0,
+        height=3000.0,
+    )
+    worse_rtl = EngineV2Score(
+        total=900.0,
+        crossings=102,
+        right_to_left_links=11,
+        movable_overlaps=0,
+        link_length=8000.0,
+        width=4300.0,
+        height=3000.0,
+    )
+
+    assert not _compact_candidate_beats_authored(too_many_crossings, authored)
+    assert not _compact_candidate_beats_authored(worse_rtl, authored)
 
 
 def test_realistic_balanced_canvas_scores_better_than_tower_regression():

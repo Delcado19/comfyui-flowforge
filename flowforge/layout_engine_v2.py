@@ -86,6 +86,10 @@ V2_SIGNIFICANT_CROSSING_GAIN_RATIO = 0.05
 V2_SIGNIFICANT_CROSSING_GAIN_MIN = 8
 V2_SIGNIFICANT_RTL_GAIN_RATIO = 0.10
 V2_SIGNIFICANT_RTL_GAIN_MIN = 3
+V2_COMPACT_MAX_CROSSING_REGRESSION = 2
+V2_COMPACT_MIN_WIDTH_REDUCTION_RATIO = 0.05
+V2_COMPACT_MIN_AREA_REDUCTION_RATIO = 0.10
+V2_COMPACT_MIN_LINK_REDUCTION_RATIO = 0.05
 
 Vertex = Hashable
 
@@ -163,7 +167,23 @@ def apply_best_layout(
             balanced_score.height,
             _aspect_cost(balanced_score.width, balanced_score.height),
         )
-        if _candidate_is_better(balanced_score, best_score):
+        if (
+            _candidate_is_better(balanced_score, best_score)
+            or _compact_candidate_beats_authored(balanced_score, best_score)
+        ):
+            if not _candidate_is_better(balanced_score, best_score):
+                logger.info(
+                    "balanced-compact accepted over authored: crossings %+d, width %.1f%%, "
+                    "area %.1f%%, link %.1f%%",
+                    balanced_score.crossings - best_score.crossings,
+                    100.0 * (1.0 - balanced_score.width / best_score.width),
+                    100.0 * (
+                        1.0
+                        - (balanced_score.width * balanced_score.height)
+                        / (best_score.width * best_score.height)
+                    ),
+                    100.0 * (1.0 - balanced_score.link_length / best_score.link_length),
+                )
             best_workflow = balanced
             best_score = balanced_score
             best_index = 2
@@ -358,6 +378,44 @@ def _balanced_group_flow_candidate(
 
     _finalize_refinement(candidate, settings)
     return candidate
+
+
+def _compact_candidate_beats_authored(
+    candidate: EngineV2Score,
+    authored: EngineV2Score,
+) -> bool:
+    """Allow a visibly better compact layout to trade at most two crossings.
+
+    Crossing count remains the strongest normal objective, but the authored
+    workflow is a safety baseline rather than a mandatory no-op result.  A
+    compact candidate may replace it when it materially reduces canvas area
+    and cable length, keeps RTL/overlap quality intact, improves aspect shape,
+    and introduces only a tiny crossing regression.
+    """
+    if candidate.movable_overlaps > authored.movable_overlaps:
+        return False
+    if candidate.right_to_left_links > authored.right_to_left_links:
+        return False
+
+    crossing_regression = candidate.crossings - authored.crossings
+    if crossing_regression < 0 or crossing_regression > V2_COMPACT_MAX_CROSSING_REGRESSION:
+        return False
+    if authored.width <= 0.0 or authored.height <= 0.0 or authored.link_length <= 0.0:
+        return False
+
+    width_reduction = 1.0 - candidate.width / authored.width
+    authored_area = authored.width * authored.height
+    candidate_area = candidate.width * candidate.height
+    area_reduction = 1.0 - candidate_area / authored_area
+    link_reduction = 1.0 - candidate.link_length / authored.link_length
+
+    return (
+        width_reduction >= V2_COMPACT_MIN_WIDTH_REDUCTION_RATIO
+        and area_reduction >= V2_COMPACT_MIN_AREA_REDUCTION_RATIO
+        and link_reduction >= V2_COMPACT_MIN_LINK_REDUCTION_RATIO
+        and _aspect_cost(candidate.width, candidate.height)
+        <= _aspect_cost(authored.width, authored.height)
+    )
 
 
 def _candidate_is_better(candidate: EngineV2Score, incumbent: EngineV2Score) -> bool:
