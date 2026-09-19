@@ -136,7 +136,17 @@ def apply_best_layout(
     best_index = 1
 
     balanced = _balanced_group_flow_candidate(workflow, settings)
-    total_candidates = len(variants) + 1 + (1 if balanced is not None else 0)
+    balanced_refined = _balanced_group_flow_candidate(
+        workflow,
+        settings,
+        refine_internals=True,
+    )
+    structural_candidates = [
+        candidate
+        for candidate in (balanced, balanced_refined)
+        if candidate is not None
+    ]
+    total_candidates = len(variants) + 1 + len(structural_candidates)
     logger.info(
         "v2 candidate 1/%s source=authored score=%.2f crossings=%s rtl=%s overlaps=%s "
         "link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
@@ -151,43 +161,61 @@ def apply_best_layout(
         _aspect_cost(best_score.width, best_score.height),
     )
 
+    authored_score = best_score
     variant_start = 2
-    if balanced is not None:
-        balanced_score = _score_engine_v2(balanced)
+    structural_specs = [
+        ("balanced-compact", balanced),
+        ("balanced-refined", balanced_refined),
+    ]
+    for source_name, structural_candidate in structural_specs:
+        if structural_candidate is None:
+            continue
+
+        candidate_index = variant_start
+        variant_start += 1
+        structural_score = _score_engine_v2(structural_candidate)
         logger.info(
-            "v2 candidate 2/%s source=balanced-compact score=%.2f crossings=%s rtl=%s "
+            "v2 candidate %s/%s source=%s score=%.2f crossings=%s rtl=%s "
             "overlaps=%s link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
+            candidate_index,
             total_candidates,
-            balanced_score.total,
-            balanced_score.crossings,
-            balanced_score.right_to_left_links,
-            balanced_score.movable_overlaps,
-            balanced_score.link_length,
-            balanced_score.width,
-            balanced_score.height,
-            _aspect_cost(balanced_score.width, balanced_score.height),
+            source_name,
+            structural_score.total,
+            structural_score.crossings,
+            structural_score.right_to_left_links,
+            structural_score.movable_overlaps,
+            structural_score.link_length,
+            structural_score.width,
+            structural_score.height,
+            _aspect_cost(structural_score.width, structural_score.height),
         )
-        if (
-            _candidate_is_better(balanced_score, best_score)
-            or _compact_candidate_beats_authored(balanced_score, best_score)
-        ):
-            if not _candidate_is_better(balanced_score, best_score):
-                logger.info(
-                    "balanced-compact accepted over authored: crossings %+d, width %.1f%%, "
-                    "area %.1f%%, link %.1f%%",
-                    balanced_score.crossings - best_score.crossings,
-                    100.0 * (1.0 - balanced_score.width / best_score.width),
-                    100.0 * (
-                        1.0
-                        - (balanced_score.width * balanced_score.height)
-                        / (best_score.width * best_score.height)
-                    ),
-                    100.0 * (1.0 - balanced_score.link_length / best_score.link_length),
-                )
-            best_workflow = balanced
-            best_score = balanced_score
-            best_index = 2
-        variant_start = 3
+
+        beats_current = _candidate_is_better(structural_score, best_score)
+        compact_guard = _compact_candidate_beats_authored(
+            structural_score,
+            authored_score,
+        )
+        if compact_guard:
+            logger.info(
+                "%s qualifies over authored: crossings %+d, width %.1f%%, "
+                "area %.1f%%, link %.1f%%",
+                source_name,
+                structural_score.crossings - authored_score.crossings,
+                100.0 * (1.0 - structural_score.width / authored_score.width),
+                100.0 * (
+                    1.0
+                    - (structural_score.width * structural_score.height)
+                    / (authored_score.width * authored_score.height)
+                ),
+                100.0 * (
+                    1.0 - structural_score.link_length / authored_score.link_length
+                ),
+            )
+
+        if beats_current or (compact_guard and best_index == 1):
+            best_workflow = structural_candidate
+            best_score = structural_score
+            best_index = candidate_index
 
     for index, variant in enumerate(variants, start=variant_start):
         baseline = deepcopy(workflow)
@@ -262,6 +290,8 @@ def apply_best_layout(
 def _balanced_group_flow_candidate(
     workflow: Workflow,
     settings: LayoutSettings,
+    *,
+    refine_internals: bool = False,
 ) -> Workflow | None:
     """Compact authored geometry horizontally without destroying its structure.
 
@@ -278,6 +308,8 @@ def _balanced_group_flow_candidate(
     candidate = deepcopy(workflow)
     _shrink_nodes_to_minimum_size(candidate)
     _assign_groups(candidate)
+    if refine_internals:
+        _refine_movable_group_internals(candidate, settings)
 
     top_groups = [
         group
