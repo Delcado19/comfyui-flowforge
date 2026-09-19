@@ -34,15 +34,20 @@ from .layout import (
     LayoutScore,
     LayoutSettings,
     _apply_layout_pass,
+    _assign_groups,
     _assign_virtual_hub_groups_to_endpoints,
     _build_layout_candidates,
     _compress_debug_sidecar_layers,
     _group_bottom_padding,
+    _group_flow_adjacency,
+    _group_has_layout_content,
+    _group_layout_size,
     _group_top_padding,
     _internal_layer_positions,
     _is_decorative_node,
     _is_pinned_node,
     _is_virtual_hub_node,
+    _move_group_subtree,
     _nested_hierarchy_group_ids,
     _node_input_port_y,
     _node_output_port_y,
@@ -55,6 +60,8 @@ from .layout import (
     _resolve_layout_candidate_count,
     _score_layout_candidate,
     _separate_unpinned_nodes_from_pinned_geometry,
+    _shrink_nodes_to_minimum_size,
+    _top_level_groups,
     _update_bounding_boxes,
 )
 from .logger import setup_logger
@@ -113,15 +120,17 @@ def apply_best_layout(
     )
     variants = _build_layout_candidates(workflow, settings, resolved_candidate_count)
 
-    # Keep the authored geometry in the candidate pool as a safety baseline.
-    # This is especially important for cyclic top-level group graphs, where a
-    # forced DAG-style relayout can reduce a few crossings while destroying an
-    # already balanced user-authored canvas shape.
+    # Keep the authored geometry in the candidate pool as a safety baseline,
+    # but also build a structural candidate that actually rearranges top-level
+    # groups.  It uses SCC-aware flow layers while preserving nested group
+    # subtrees as authored units.
     authored = deepcopy(workflow)
     best_workflow: Workflow | None = authored
     best_score: EngineV2Score | None = _score_engine_v2(authored)
     best_index = 1
-    total_candidates = len(variants) + 1
+
+    balanced = _balanced_group_flow_candidate(workflow, settings)
+    total_candidates = len(variants) + 1 + (1 if balanced is not None else 0)
     logger.info(
         "v2 candidate 1/%s source=authored score=%.2f crossings=%s rtl=%s overlaps=%s "
         "link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
@@ -136,7 +145,29 @@ def apply_best_layout(
         _aspect_cost(best_score.width, best_score.height),
     )
 
-    for index, variant in enumerate(variants, start=2):
+    variant_start = 2
+    if balanced is not None:
+        balanced_score = _score_engine_v2(balanced)
+        logger.info(
+            "v2 candidate 2/%s source=balanced-flow score=%.2f crossings=%s rtl=%s "
+            "overlaps=%s link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
+            total_candidates,
+            balanced_score.total,
+            balanced_score.crossings,
+            balanced_score.right_to_left_links,
+            balanced_score.movable_overlaps,
+            balanced_score.link_length,
+            balanced_score.width,
+            balanced_score.height,
+            _aspect_cost(balanced_score.width, balanced_score.height),
+        )
+        if _candidate_is_better(balanced_score, best_score):
+            best_workflow = balanced
+            best_score = balanced_score
+            best_index = 2
+        variant_start = 3
+
+    for index, variant in enumerate(variants, start=variant_start):
         baseline = deepcopy(workflow)
         _apply_layout_pass(baseline, variant, log=False)
         baseline_score = _score_engine_v2(baseline)
@@ -204,6 +235,111 @@ def apply_best_layout(
     )
     return best_workflow
 
+
+
+def _balanced_group_flow_candidate(
+    workflow: Workflow,
+    settings: LayoutSettings,
+) -> Workflow | None:
+    """Build a real top-level relayout without flattening nested ComfyUI groups.
+
+    The legacy global pass puts every group in one vertical stack per flow
+    layer. Cyclic workflows can therefore collapse into a very tall tower.
+    This candidate condenses cycles into SCCs, assigns left-to-right SCC
+    layers, keeps each group's authored vertical anchor when possible, and
+    moves nested group trees as indivisible blocks.
+    """
+    candidate = deepcopy(workflow)
+    _shrink_nodes_to_minimum_size(candidate)
+    _assign_groups(candidate)
+
+    top_groups = [
+        group
+        for group in _top_level_groups(candidate)
+        if _group_has_layout_content(candidate, group)
+    ]
+    if len(top_groups) < 2:
+        return None
+
+    # Keep hard pin contracts out of this candidate until hierarchical pinned
+    # placement has a dedicated solver.
+    if any(group.pinned for group in top_groups) or any(
+        _is_pinned_node(candidate, node) for node in candidate.nodes.values()
+    ):
+        return None
+
+    adjacency_sets, _reverse = _group_flow_adjacency(candidate)
+    group_ids = {group.id for group in top_groups}
+    adjacency = {
+        group_id: sorted(
+            target_id
+            for target_id in adjacency_sets.get(group_id, set())
+            if target_id in group_ids
+        )
+        for group_id in group_ids
+    }
+    if not any(adjacency.values()):
+        return None
+
+    # Compact/refine only ordinary groups. Nested parents and children are
+    # intentionally skipped by _refine_movable_group_internals.
+    _refine_movable_group_internals(candidate, settings)
+
+    layers = _assign_scc_longest_path_layers(group_ids, adjacency)
+    if not layers:
+        return None
+
+    groups_by_layer: dict[int, list[Group]] = {}
+    for group in top_groups:
+        groups_by_layer.setdefault(layers.get(group.id, 0), []).append(group)
+
+    def group_size(group: Group) -> tuple[float, float]:
+        if (
+            len(group.bounding) >= 4
+            and group.bounding[2] > 0
+            and group.bounding[3] > 0
+        ):
+            return group.bounding[2], group.bounding[3]
+        return _group_layout_size(candidate, group, settings)
+
+    layer_widths = {
+        layer: max(group_size(group)[0] for group in groups_in_layer)
+        for layer, groups_in_layer in groups_by_layer.items()
+    }
+    base_x = min(group.bounding[0] for group in top_groups)
+    layer_x: dict[int, float] = {}
+    current_x = base_x
+    horizontal_gap = max(settings.group_h_gap, settings.node_h_gap)
+    for layer in sorted(groups_by_layer):
+        layer_x[layer] = current_x
+        current_x += layer_widths[layer] + horizontal_gap
+
+    # Preserve the authored vertical ordering. Groups sharing one SCC/layer
+    # only move downward when their rectangles would overlap after snapping to
+    # the common layer x coordinate.
+    for layer in sorted(groups_by_layer):
+        cursor_bottom: float | None = None
+        for group in sorted(
+            groups_by_layer[layer],
+            key=lambda item: (item.bounding[1], item.bounding[0], item.id),
+        ):
+            _width, height = group_size(group)
+            target_y = group.bounding[1]
+            if cursor_bottom is not None:
+                target_y = max(target_y, cursor_bottom + settings.group_v_gap)
+            _move_group_subtree(
+                candidate,
+                group,
+                layer_x[layer] - group.bounding[0],
+                target_y - group.bounding[1],
+            )
+            cursor_bottom = target_y + height
+
+    # Group movement can expose collisions with authored ungrouped nodes.
+    # Re-run the normal geometry contracts; unlike the legacy global pass this
+    # does not rebuild the nested hierarchy or stack flow layers vertically.
+    _finalize_refinement(candidate, settings)
+    return candidate
 
 
 def _candidate_is_better(candidate: EngineV2Score, incumbent: EngineV2Score) -> bool:

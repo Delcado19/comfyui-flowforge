@@ -5,6 +5,7 @@ from flowforge.layout_engine_v2 import (
     EngineV2Score,
     _aspect_cost,
     _assign_scc_longest_path_layers,
+    _balanced_group_flow_candidate,
     _boundary_crossings,
     _candidate_is_better,
     _group_can_be_refined,
@@ -64,6 +65,58 @@ def test_dummy_vertices_make_long_edges_participate_in_crossing_order():
     assert crossings == 0
     assert any(not isinstance(vertex, int) for vertex in ordered[1])
 
+
+
+def test_balanced_group_flow_rearranges_top_level_groups_and_preserves_nested_offsets():
+    workflow = Workflow()
+    workflow.nodes = {
+        1: Node(id=1, type="Inner", x=120, y=120, size=[100, 80]),
+        2: Node(id=2, type="Outer", x=420, y=120, size=[100, 80]),
+        3: Node(id=3, type="Source", x=1020, y=120, size=[100, 80]),
+        4: Node(id=4, type="Target", x=2020, y=120, size=[100, 80]),
+    }
+    workflow.groups = [
+        Group(id=10, name="Outer", bounding=[0, 0, 700, 500]),
+        Group(id=11, name="Inner", bounding=[80, 80, 220, 220]),
+        Group(id=20, name="Source", bounding=[980, 80, 300, 220]),
+        Group(id=30, name="Target", bounding=[1980, 80, 300, 220]),
+    ]
+    _attach_link(
+        workflow,
+        Link(id=100, source=3, source_port=0, target=2, target_port=0, type="DATA"),
+    )
+    _attach_link(
+        workflow,
+        Link(id=101, source=2, source_port=0, target=4, target_port=0, type="DATA"),
+    )
+
+    original_outer_x = workflow.groups[0].bounding[0]
+    original_child_offset = (
+        workflow.groups[1].bounding[0] - workflow.groups[0].bounding[0],
+        workflow.groups[1].bounding[1] - workflow.groups[0].bounding[1],
+    )
+    original_inner_node_offset = (
+        workflow.nodes[1].x - workflow.groups[1].bounding[0],
+        workflow.nodes[1].y - workflow.groups[1].bounding[1],
+    )
+
+    candidate = _balanced_group_flow_candidate(
+        workflow,
+        LayoutSettings(node_x_distance=40, node_y_distance=40),
+    )
+
+    assert candidate is not None
+    outer, inner, source, target = candidate.groups
+    assert outer.bounding[0] != original_outer_x
+    assert source.bounding[0] < outer.bounding[0] < target.bounding[0]
+    assert (
+        inner.bounding[0] - outer.bounding[0],
+        inner.bounding[1] - outer.bounding[1],
+    ) == original_child_offset
+    assert (
+        candidate.nodes[1].x - inner.bounding[0],
+        candidate.nodes[1].y - inner.bounding[1],
+    ) == original_inner_node_offset
 
 
 def test_aspect_cost_penalizes_tall_and_wide_shapes_symmetrically():
