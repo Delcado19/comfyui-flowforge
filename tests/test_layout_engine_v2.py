@@ -119,6 +119,38 @@ def test_balanced_group_flow_rearranges_top_level_groups_and_preserves_nested_of
     ) == original_inner_node_offset
 
 
+def test_balanced_group_flow_repositions_ungrouped_nodes_before_group_clearance():
+    workflow = Workflow()
+    workflow.nodes = {
+        1: Node(id=1, type="Source", x=100, y=100, size=[100, 80]),
+        2: Node(id=2, type="Bridge", x=900, y=2400, size=[100, 80]),
+        3: Node(id=3, type="Target", x=1800, y=100, size=[100, 80]),
+        4: Node(id=4, type="MarkdownNote", x=0, y=600, size=[500, 300]),
+    }
+    workflow.groups = [
+        Group(id=10, name="Source", bounding=[50, 50, 300, 220]),
+        Group(id=20, name="Target", bounding=[1750, 50, 300, 220]),
+    ]
+    _attach_link(
+        workflow,
+        Link(id=100, source=1, source_port=0, target=2, target_port=0, type="DATA"),
+    )
+    _attach_link(
+        workflow,
+        Link(id=101, source=2, source_port=0, target=3, target_port=0, type="DATA"),
+    )
+
+    candidate = _balanced_group_flow_candidate(
+        workflow,
+        LayoutSettings(node_x_distance=40, node_y_distance=40),
+    )
+
+    assert candidate is not None
+    score = _score_engine_v2(candidate)
+    assert score.height < 1800
+    assert candidate.nodes[2].y < 1800
+
+
 def test_aspect_cost_penalizes_tall_and_wide_shapes_symmetrically():
     balanced_width = 1350.0
     balanced_height = 1000.0

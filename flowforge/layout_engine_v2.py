@@ -54,7 +54,9 @@ from .layout import (
     _node_visual_height,
     _node_visual_width,
     _position_control_nodes_near_targets,
+    _position_decorative_nodes_left,
     _position_text_previews_near_sources,
+    _position_ungrouped_nodes,
     _position_virtual_set_get_nodes,
     _resolve_group_geometry_overlaps,
     _resolve_layout_candidate_count,
@@ -252,6 +254,11 @@ def _balanced_group_flow_candidate(
     candidate = deepcopy(workflow)
     _shrink_nodes_to_minimum_size(candidate)
     _assign_groups(candidate)
+    decorative_right_edge = _position_decorative_nodes_left(candidate, settings)
+    group_start_x = max(
+        50.0,
+        decorative_right_edge + settings.group_h_gap,
+    )
 
     top_groups = [
         group
@@ -306,9 +313,8 @@ def _balanced_group_flow_candidate(
         layer: max(group_size(group)[0] for group in groups_in_layer)
         for layer, groups_in_layer in groups_by_layer.items()
     }
-    base_x = min(group.bounding[0] for group in top_groups)
     layer_x: dict[int, float] = {}
-    current_x = base_x
+    current_x = group_start_x
     horizontal_gap = max(settings.group_h_gap, settings.node_h_gap)
     for layer in sorted(groups_by_layer):
         layer_x[layer] = current_x
@@ -335,7 +341,16 @@ def _balanced_group_flow_candidate(
             )
             cursor_bottom = target_y + height
 
-    # Group movement can expose collisions with authored ungrouped nodes.
+    # Reposition ungrouped bridge/dataflow nodes against the new group
+    # geometry before the overlap resolver runs. Leaving them at authored
+    # coordinates makes them look like fixed obstacles and can push whole
+    # groups thousands of pixels downward.
+    _position_ungrouped_nodes(
+        candidate,
+        settings,
+        start_x_floor=decorative_right_edge + settings.group_h_gap,
+    )
+
     # Re-run the normal geometry contracts; unlike the legacy global pass this
     # does not rebuild the nested hierarchy or stack flow layers vertically.
     _finalize_refinement(candidate, settings)
