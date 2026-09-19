@@ -146,11 +146,11 @@ def parse_comfyui_workflow(json_data: dict) -> Workflow:
     logger.debug("Assigning nested group hierarchy and node membership")
     _assign_group_hierarchy(workflow.groups)
     for node in workflow.nodes.values():
-        group = _innermost_group_for_node(node, workflow.groups)
-        if group is None:
+        matched_group = _innermost_group_for_node(node, workflow.groups)
+        if matched_group is None:
             workflow.ungrouped_nodes.append(node)
         else:
-            group.nodes.append(node)
+            matched_group.nodes.append(node)
     
     logger.info(f"Parsed workflow with {len(workflow.nodes)} nodes, {len(workflow.links)} links, {len(workflow.groups)} groups, {len(workflow.ungrouped_nodes)} ungrouped nodes")
     return workflow

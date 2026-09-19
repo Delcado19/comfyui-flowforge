@@ -43,6 +43,7 @@ from .layout import (
     _group_has_layout_content,
     _group_layout_size,
     _group_top_padding,
+    _has_nested_groups,
     _internal_layer_positions,
     _is_decorative_node,
     _is_pinned_node,
@@ -126,14 +127,17 @@ def apply_best_layout(
     )
     variants = _build_layout_candidates(workflow, settings, resolved_candidate_count)
 
-    # Keep the authored geometry in the candidate pool as a safety baseline,
-    # but also build a structural candidate that actually rearranges top-level
-    # groups.  It uses SCC-aware flow layers while preserving nested group
-    # subtrees as authored units.
-    authored = deepcopy(workflow)
+    # The authored geometry is a safety baseline only for nested workflows.
+    # Returning it unchanged for ordinary workflows breaks the contract of
+    # Layout Only (positions, virtual hubs, and metadata geometry must actually
+    # be processed).
+    authored_enabled = _has_nested_groups(workflow)
+    authored = deepcopy(workflow) if authored_enabled else None
     best_workflow: Workflow | None = authored
-    best_score: EngineV2Score | None = _score_engine_v2(authored)
-    best_index = 1
+    best_score: EngineV2Score | None = (
+        _score_engine_v2(authored) if authored is not None else None
+    )
+    best_index = 1 if authored is not None else 0
 
     balanced = _balanced_group_flow_candidate(workflow, settings)
     balanced_2d = _balanced_group_flow_candidate(
@@ -146,23 +150,30 @@ def apply_best_layout(
         for candidate in (balanced, balanced_2d)
         if candidate is not None
     ]
-    total_candidates = len(variants) + 1 + len(structural_candidates)
-    logger.info(
-        "v2 candidate 1/%s source=authored score=%.2f crossings=%s rtl=%s overlaps=%s "
-        "link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
-        total_candidates,
-        best_score.total,
-        best_score.crossings,
-        best_score.right_to_left_links,
-        best_score.movable_overlaps,
-        best_score.link_length,
-        best_score.width,
-        best_score.height,
-        _aspect_cost(best_score.width, best_score.height),
+    total_candidates = (
+        len(variants)
+        + len(structural_candidates)
+        + (1 if authored is not None else 0)
     )
 
-    authored_score = best_score
-    variant_start = 2
+    variant_start = 1
+    authored_score: EngineV2Score | None = None
+    if authored is not None and best_score is not None:
+        logger.info(
+            "v2 candidate 1/%s source=authored score=%.2f crossings=%s rtl=%s overlaps=%s "
+            "link=%.0f size=%.0fx%.0f aspect_cost=%.0f",
+            total_candidates,
+            best_score.total,
+            best_score.crossings,
+            best_score.right_to_left_links,
+            best_score.movable_overlaps,
+            best_score.link_length,
+            best_score.width,
+            best_score.height,
+            _aspect_cost(best_score.width, best_score.height),
+        )
+        authored_score = best_score
+        variant_start = 2
     structural_specs = [
         ("balanced-compact", balanced),
         ("balanced-2d", balanced_2d),
@@ -190,12 +201,18 @@ def apply_best_layout(
             _aspect_cost(structural_score.width, structural_score.height),
         )
 
-        beats_current = _candidate_is_better(structural_score, best_score)
-        compact_guard = _compact_candidate_beats_authored(
-            structural_score,
-            authored_score,
+        beats_current = (
+            best_score is None
+            or _candidate_is_better(structural_score, best_score)
         )
-        if compact_guard:
+        compact_guard = (
+            authored_score is not None
+            and _compact_candidate_beats_authored(
+                structural_score,
+                authored_score,
+            )
+        )
+        if compact_guard and authored_score is not None:
             logger.info(
                 "%s qualifies over authored: crossings %+d, width %.1f%%, "
                 "area %.1f%%, link %.1f%%",

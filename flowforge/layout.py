@@ -599,11 +599,11 @@ def _assign_groups(workflow: Workflow) -> None:
     for node in workflow.nodes.values():
         if _is_decorative_node(node) or _is_virtual_hub_node(node):
             continue
-        group = _innermost_group_for_node(node, workflow.groups)
-        if group is None:
+        matched_group = _innermost_group_for_node(node, workflow.groups)
+        if matched_group is None:
             workflow.ungrouped_nodes.append(node)
         else:
-            group.nodes.append(node)
+            matched_group.nodes.append(node)
     
     logger.debug(f"Assigned {len(workflow.nodes) - len(workflow.ungrouped_nodes)} nodes to {len(workflow.groups)} groups; {len(workflow.ungrouped_nodes)} ungrouped")
 
